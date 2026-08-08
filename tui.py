@@ -173,26 +173,38 @@ class OrganismApp(App):
 
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
-        self.org.sense()
-        self.org.mind.rebuild()
-        self.org.meter.tick(
-            sleeping=(self.org.lifecycle.state == "sleep"), dt=1.0)
-        new_state = self.org.lifecycle.advance()
-        if new_state == "sleep":
-            promoted = self.org._sleep()
-            if promoted:
-                self._append_log(
-                    "DREAM: " + ", ".join(p["combo"] for p in promoted))
-            else:
-                self._append_log("DREAMS: (none promoted)")
-        elif new_state == "wake":
-            self.org._wake()
-        elif new_state == "dead":
-            self._append_log("the organism has faded.")
-            self._narration = "…fading, gently, into the quiet."
-            self._maybe_narrate()
+        for event in self.org.tick(1.0):
+            self._render_event(event)
         self.refresh_status()
         self.refresh_mind()
+
+    def _render_event(self, event):
+        """Render one engine event into the chat/dream log."""
+        kind = event["kind"]
+        if kind == "state":
+            to = event["to"]
+            if to == "dead":
+                self._append_log("the organism has faded.")
+                self._narration = "…fading, gently, into the quiet."
+                self._maybe_narrate()
+            else:
+                self._append_log(f"— the organism drifts to {to} —")
+        elif kind == "dream":
+            combos = event["combos"]
+            if combos:
+                self._append_log("DREAM: " + ", ".join(combos))
+            else:
+                self._append_log("DREAMS: (none promoted)")
+        elif kind == "beliefs":
+            learned = ", ".join(
+                f"{o}:{a}={v}" for (o, a, v) in event["new"])
+            self._append_log(f"new beliefs: {learned}")
+        elif kind == "sense":
+            self._append_log(
+                f"the host strains (distress +{event['distress']:.2f})")
+        elif kind == "stress":
+            level = "high" if event["band"] == 1 else "critical"
+            self._append_log(f"stress rising: {level}")
 
     def refresh_status(self):
         m = self.org.metrics()
@@ -276,17 +288,13 @@ class OrganismApp(App):
         elif name == "/focus":
             self.org.window.focus(None)
         elif name == "/sleep":
-            if self.org.lifecycle.state == "wake":
-                self.org.lifecycle._transition("sleep")
-                self.org._sleep()
+            for event in self.org.force_state("sleep"):
+                self._render_event(event)
         elif name == "/wake":
-            if self.org.lifecycle.state == "sleep":
-                self.org.lifecycle._transition("wake")
-                self.org._wake()
+            for event in self.org.force_state("wake"):
+                self._render_event(event)
         elif name == "/revive":
-            if self.org.lifecycle.state == "dead":
-                self.org.lifecycle.revive()
-                self.org.store.save()
+            if self.org.revive():
                 self._append_log(
                     "revived: the organism stirs back into existence.")
                 self._maybe_narrate()

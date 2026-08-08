@@ -39,6 +39,8 @@ class BeliefStore:
         self.attention = set()   # (attr, val) pairs in the window
         self.chat_log = []       # list of [role, text], capped by CHAT_LOG_LIMIT
         self.on_adverse = None   # callback(amount) fired on contradiction
+        self.dirty = False        # any state changed since last save()
+        self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
 
     # -- belief operations -------------------------------------------------
     def add(self, belief, conf):
@@ -58,11 +60,18 @@ class BeliefStore:
                     del self.beliefs_map[(o, a, v)]
                     break
                 self.archived_map[key] = conf
+                self.dirty = True
+                self.genome_dirty = True
                 return
         if key in self.beliefs_map:
-            self.beliefs_map[key] = max(self.beliefs_map[key], conf)
+            if conf > self.beliefs_map[key]:
+                self.beliefs_map[key] = conf
+                self.dirty = True
+                self.genome_dirty = True
         else:
             self.beliefs_map[key] = conf
+            self.dirty = True
+            self.genome_dirty = True
 
     def conf(self, belief):
         return self.beliefs_map.get(belief)
@@ -78,9 +87,13 @@ class BeliefStore:
         conf = float(conf)
         key = (obj, attr, val)
         for (o, a, v) in list(self.beliefs_map):
-            if (o, a) == (obj, attr) and v != val:
+            if (o, a) == (obj, attr):
+                if v == val and self.beliefs_map[(o, a, v)] == conf:
+                    return  # unchanged reading: nothing to persist
                 del self.beliefs_map[(o, a, v)]
         self.beliefs_map[key] = conf
+        self.dirty = True
+        self.genome_dirty = True
 
     def beliefs(self):
         return dict(self.beliefs_map)
@@ -99,6 +112,14 @@ class BeliefStore:
         self.chat_log.append([role, text])
         if len(self.chat_log) > CHAT_LOG_LIMIT:
             del self.chat_log[:len(self.chat_log) - CHAT_LOG_LIMIT]
+        self.dirty = True
+
+    # -- rules -------------------------------------------------------------
+    def commit_rule(self, text, depth):
+        """Commit a derived rule to the genome (marks it for rewriting)."""
+        self.rules.append((text, depth))
+        self.dirty = True
+        self.genome_dirty = True
 
     # -- rendering + persistence -------------------------------------------
     def render_scl(self):
@@ -111,7 +132,9 @@ class BeliefStore:
 
     def save(self):
         self.dir_path.mkdir(parents=True, exist_ok=True)
-        self.scl_path.write_text(self.render_scl())
+        if self.genome_dirty or not self.scl_path.exists():
+            self.scl_path.write_text(self.render_scl())
+            self.genome_dirty = False
         state = {
             "chaos": self.chaos,
             "stress": self.stress,
@@ -125,6 +148,7 @@ class BeliefStore:
             "chat": self.chat_log,
         }
         self.state_path.write_text(json.dumps(state, indent=2))
+        self.dirty = False
 
     def load(self):
         if not self.state_path.exists():
@@ -307,7 +331,7 @@ class SelfQuestioner:
         # chaos-weighted generalization: commit the rule itself
         if self.store.chaos > 0.0 and random.random() < self.store.chaos * 0.25:
             depth = self._rule_depth(attr_a, attr_b)
-            self.store.rules.append((rule, depth))
+            self.store.commit_rule(rule, depth)
         return new_beliefs
 
     def _rule_depth(self, attr_a, attr_b):
@@ -358,7 +382,7 @@ class DreamEngine:
                     self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
             self.store.rule_counter += 1
-            self.store.rules.append((dream["rule"], 1))
+            self.store.commit_rule(dream["rule"], 1)
             for (tag, (obj,)) in derived:
                 self.store.add((obj, dream["combo"], "true"), tag)
             promoted.append(dream)
@@ -478,7 +502,15 @@ class Metrics:
 
 class Organism:
     """Facade wiring the parts into a living cycle: wake self-questioning,
-    sleep dreams + consolidation, persistence at every transition."""
+    sleep dreams + consolidation, persistence at every transition.
+
+    The front-end drives it through `tick(dt)` (throttled sense, debounced
+    persistence, typed events) and the public commands `force_state()` and
+    `revive()` — no private-method reach-through."""
+
+    SENSE_INTERVAL = 10.0   # seconds between host probes
+    SAVE_INTERVAL = 30.0    # seconds between state flushes while alive
+    STRESS_BANDS = (0.5, 0.9)  # crossing one upward emits a stress event
 
     def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5,
                  probe=None):
@@ -495,6 +527,9 @@ class Organism:
         self.store.on_adverse = self.meter.bump
         self.questioner.stress = self.meter
         self.dreamer.stress = self.meter
+        self._since_sense = self.SENSE_INTERVAL  # sense on the first tick
+        self._since_save = 0.0
+        self._last_stress_band = 0
 
     def load(self):
         # First boot = no state.json yet: the .scl genome is the source of
@@ -522,14 +557,106 @@ class Organism:
 
     def sense(self):
         """Perceive the host machine: fold a fresh metric snapshot into the
-        belief store and let adverse conditions raise stress."""
+        belief store and let adverse conditions raise stress. Returns the
+        distress amount applied (0 when the host is fine). Persistence is
+        the caller's job (`flush()`), so sensing stays cheap to schedule."""
         snap = self.probe.snapshot()
         for belief, conf in self.probe.beliefs(snap).items():
             self.store.observe(belief, conf)
         distress = self.probe.distress(snap)
         if distress:
             self.meter.bump(distress)
+        return distress
+
+    def flush(self, force=False):
+        """Persist state and refresh the reasoner when anything changed. The
+        genome (.scl) is rewritten — and the mind rebuilt — only when
+        beliefs/rules changed, so a quiet organism costs no I/O."""
+        if not (force or self.store.dirty):
+            return False
+        genome = self.store.genome_dirty
         self.store.save()
+        if genome:
+            self.mind.rebuild()
+        return True
+
+    # -- real-time engine ---------------------------------------------------
+    def tick(self, dt=1.0):
+        """Advance the organism by dt seconds of lived time (TUI scheduler
+        entry). Senses the host every SENSE_INTERVAL, advances the lifecycle
+        (running wake/sleep work at transitions), and persists every
+        SAVE_INTERVAL or on change. Returns a list of event dicts for the
+        front-end to render: {"kind": "state"|"dream"|"beliefs"|"sense"|
+        "stress", ...}."""
+        events = []
+        if self.lifecycle.state == "dead":
+            return events
+        self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)
+        self._since_sense += dt
+        if self._since_sense >= self.SENSE_INTERVAL:
+            self._since_sense = 0.0
+            distress = self.sense()
+            if distress:
+                events.append({"kind": "sense", "distress": distress})
+        new_state = self.lifecycle.advance()
+        if new_state == "sleep":
+            events.append({"kind": "state", "to": "sleep"})
+            promoted = self._sleep()
+            events.append({"kind": "dream",
+                           "combos": [p["combo"] for p in promoted]})
+        elif new_state == "wake":
+            events.append({"kind": "state", "to": "wake"})
+            new_beliefs = self._wake()
+            if new_beliefs:
+                events.append({"kind": "beliefs", "new": new_beliefs})
+        elif new_state == "dead":
+            events.append({"kind": "state", "to": "dead"})
+        band = self._stress_band()
+        if band != self._last_stress_band:
+            if band > self._last_stress_band and band > 0:
+                events.append({"kind": "stress", "band": band})
+            self._last_stress_band = band
+        self._since_save += dt
+        if self._since_save >= self.SAVE_INTERVAL:
+            self._since_save = 0.0
+            self.flush()
+        return events
+
+    def _stress_band(self):
+        band = 0
+        for i, threshold in enumerate(self.STRESS_BANDS, start=1):
+            if self.store.stress >= threshold:
+                band = i
+        return band
+
+    # -- front-end commands --------------------------------------------------
+    def force_state(self, target):
+        """Force a wake/sleep transition, running the target state's work.
+        Returns tick-style events. No-op when dead or already in `target`."""
+        if target not in ("wake", "sleep"):
+            raise ValueError(f"cannot force state {target!r}")
+        if self.lifecycle.state == "dead" or self.lifecycle.state == target:
+            return []
+        self.lifecycle._transition(target)
+        if target == "sleep":
+            promoted = self._sleep()
+            return [{"kind": "state", "to": "sleep"},
+                    {"kind": "dream",
+                     "combos": [p["combo"] for p in promoted]}]
+        new_beliefs = self._wake()
+        events = [{"kind": "state", "to": "wake"}]
+        if new_beliefs:
+            events.append({"kind": "beliefs", "new": new_beliefs})
+        return events
+
+    def revive(self):
+        """Bring a faded organism back and persist the return. Returns False
+        when it was not dead."""
+        if self.lifecycle.state != "dead":
+            return False
+        self.lifecycle.revive()
+        self.flush(force=True)
+        return True
 
     def metrics(self):
         return Metrics(self.store)
@@ -551,17 +678,19 @@ class Organism:
         pairs = sorted(self.window.pairs)
         rng = random.Random()
         questions = 2 + (1 if self.chaos_effective() > 0.5 else 0)
+        new_beliefs = []
         for _ in range(questions):
             if len(pairs) >= 2:
                 a, b = rng.sample(pairs, 2)
-                self.questioner.ask(a, b)
+                new_beliefs.extend(self.questioner.ask(a, b))
         self.store.cycle += 1
-        self.store.save()
+        self.flush(force=True)
+        return new_beliefs
 
     def _sleep(self):
         self.dreamer.rng = random.Random()
         dreams = self.dreamer.dream(count=3)
         promoted = self.dreamer.validate(dreams)
         self.store.attention = self.window.pairs
-        self.store.save()
+        self.flush(force=True)
         return promoted
