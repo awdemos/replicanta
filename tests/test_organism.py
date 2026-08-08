@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from organism import Mind
@@ -22,8 +23,9 @@ def test_mind_beliefs_returns_float_confidences():
         assert isinstance(conf, float)
         assert 0.0 <= conf <= 1.0
 
-from organism import CHAT_LOG_LIMIT, VALID_VALUE_RE, BeliefStore  # noqa: F401
 import pytest
+from organism import CHAT_LOG_LIMIT, VALID_VALUE_RE, BeliefStore  # noqa: F401
+
 
 @pytest.fixture
 def store(tmp_path):
@@ -97,7 +99,8 @@ def test_chat_log_roundtrips_via_save_load(store):
     loaded.load()
     assert loaded.chat_log == [["user", "hello"], ["org", "hi back"]]
 
-from organism import ChaosKnob, AttentionWindow
+from organism import AttentionWindow, ChaosKnob
+
 
 def test_chaos_knob_clamps():
     knob = ChaosKnob()
@@ -139,7 +142,8 @@ def test_focus_clears():
     win.refresh()
     assert ("color", "red") in win.pairs
 
-from organism import SelfQuestioner, Mind
+from organism import SelfQuestioner
+
 
 def _make_questioner(tmp_path):
     scl = tmp_path / "organism.scl"
@@ -190,8 +194,10 @@ def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
     assert depth == 2
     assert rule.startswith("q1(x)")
 
-from organism import DreamEngine, Mind
 import random
+
+from organism import DreamEngine
+
 
 def _make_dreamer(tmp_path):
     scl = tmp_path / "organism.scl"
@@ -238,7 +244,8 @@ def test_dream_discards_unsupported(tmp_path):
     promoted = engine.validate(unsupported)
     assert promoted == []
 
-from organism import Lifecycle, Metrics, BeliefStore
+from organism import Lifecycle, Metrics
+
 
 def test_lifecycle_advances_cycle(monkeypatch, tmp_path):
     store = BeliefStore(tmp_path)
@@ -246,6 +253,58 @@ def test_lifecycle_advances_cycle(monkeypatch, tmp_path):
     lc.tick()  # forces wake -> sleep transition
     assert store.cycle == 1
     assert lc.state in ("sleep", "wake")
+
+
+def _critical_store(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.stress = 0.96  # above Lifecycle.FADE_STRESS
+    return store
+
+
+def test_lifecycle_fades_under_sustained_critical_stress(tmp_path):
+    store = _critical_store(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0)
+    for _ in range(Lifecycle.FADE_LIMIT):
+        lc.tick()
+    assert lc.state == "dead"
+    assert store.fade_streak == Lifecycle.FADE_LIMIT
+
+
+def test_lifecycle_fade_streak_resets_on_recovery(tmp_path):
+    store = _critical_store(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0)
+    lc.tick()  # streak 1
+    lc.tick()  # streak 2
+    assert store.fade_streak == 2
+    store.stress = 0.1  # below FADE_STRESS: streak resets
+    lc.tick()
+    assert store.fade_streak == 0
+    assert lc.state != "dead"
+
+
+def test_lifecycle_dead_is_terminal(tmp_path):
+    store = _critical_store(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0)
+    for _ in range(Lifecycle.FADE_LIMIT):
+        lc.tick()
+    assert lc.state == "dead"
+    cycle_before = store.cycle
+    assert lc.tick() == "dead"      # no further transitions
+    assert lc.advance() is None     # scheduler no-op
+    assert not lc.due()
+    assert store.cycle == cycle_before
+
+
+def test_revive_restores_wake_baseline(tmp_path):
+    store = _critical_store(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0)
+    for _ in range(Lifecycle.FADE_LIMIT):
+        lc.tick()
+    assert lc.state == "dead"
+    lc.revive()
+    assert lc.state == "wake"
+    assert store.fade_streak == 0
+    assert store.stress == 0.05  # StressMeter.BASELINE
 
 def test_metrics_score_components(tmp_path):
     store = BeliefStore(tmp_path)
@@ -266,6 +325,7 @@ def test_metrics_score_monotonic_under_prune_archive(tmp_path):
     assert m2 >= m1
 
 from organism import Organism
+
 
 def _seeded_organism(tmp_path):
     scl = tmp_path / "organism.scl"
@@ -303,7 +363,21 @@ def test_organism_self_play_grows_over_cycles(tmp_path):
     assert scores[-1] >= scores[0]
 
 
+def test_organism_death_persists_across_reload(tmp_path):
+    org = _seeded_organism(tmp_path)
+    org.load()
+    org.store.stress = 0.96
+    for _ in range(Lifecycle.FADE_LIMIT):
+        org.lifecycle.tick()
+    assert org.lifecycle.state == "dead"
+    org.store.save()
+    org2 = _seeded_organism(tmp_path)
+    org2.load()
+    assert org2.lifecycle.state == "dead"
+
+
 from tui import OrganismApp
+
 
 def test_tui_app_constructs(tmp_path):
     from organism import Organism
@@ -327,3 +401,25 @@ def test_tui_command_focus(tmp_path):
     app = OrganismApp(org)
     app.handle_command("/focus color")
     assert org.window.focus_attr == "color"
+
+
+def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    org.store.stress = 0.96
+    for _ in range(Lifecycle.FADE_LIMIT):
+        org.lifecycle.tick()
+    assert org.lifecycle.state == "dead"
+    app = OrganismApp(org)
+
+    class FakeStatic:
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: FakeStatic())
+    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
+    app.handle_command("/revive")
+    assert org.lifecycle.state == "wake"
+    assert org.store.fade_streak == 0
+    assert org.store.stress == 0.05

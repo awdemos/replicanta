@@ -32,6 +32,7 @@ class BeliefStore:
         self.archived_map = {}
         self.chaos = 0.5
         self.stress = 0.05
+        self.fade_streak = 0   # consecutive transitions at critical stress
         self.cycle = 0
         self.rule_counter = 0
         self.rules = []          # list of (text, depth)
@@ -114,6 +115,7 @@ class BeliefStore:
         state = {
             "chaos": self.chaos,
             "stress": self.stress,
+            "fade_streak": self.fade_streak,
             "cycle": self.cycle,
             "rule_counter": self.rule_counter,
             "rules": self.rules,
@@ -130,6 +132,7 @@ class BeliefStore:
         state = json.loads(self.state_path.read_text())
         self.chaos = state.get("chaos", 0.5)
         self.stress = state.get("stress", 0.05)
+        self.fade_streak = state.get("fade_streak", 0)
         self.cycle = state.get("cycle", 0)
         self.rule_counter = state.get("rule_counter", 0)
         self.rules = [tuple(r) for r in state.get("rules", [])]
@@ -365,7 +368,13 @@ class DreamEngine:
 class Lifecycle:
     """Wake/sleep clock. Wake: self-questioning loop runs at chaos-governed
     rate; window narrows with fatigue. Sleep: dreams fire, then beliefs
-    consolidate, window resets wide, state auto-saves."""
+    consolidate, window resets wide, state auto-saves. Sustained critical
+    stress fades the organism: FADE_LIMIT consecutive transitions taken at
+    stress >= FADE_STRESS end it. Death persists across restarts until
+    `revive()` is called."""
+
+    FADE_STRESS = 0.95    # at/above this, a transition counts toward fading
+    FADE_LIMIT = 3        # consecutive critical transitions before death
 
     def __init__(self, store, wake_seconds=180, sleep_seconds=60):
         self.store = store
@@ -380,6 +389,11 @@ class Lifecycle:
     def tick(self):
         """Advance lifecycle by one forced transition (used by the scheduler
         and tests). Returns the new state."""
+        if self.state == "dead":
+            return self.state
+        self._track_fade()
+        if self.state == "dead":
+            return self.state
         self.store.cycle += 1
         if self.state == "wake":
             self._transition("sleep")
@@ -387,11 +401,44 @@ class Lifecycle:
             self._transition("wake")
         return self.state
 
+    def advance(self):
+        """Scheduler entry for the TUI: transition only when due, tracking
+        fade/death. Returns the new state, or None when nothing happened."""
+        if self.state == "dead" or not self.due():
+            return None
+        self._track_fade()
+        if self.state == "dead":
+            self.store.save()
+            return "dead"
+        new_state = "sleep" if self.state == "wake" else "wake"
+        self._transition(new_state)
+        return new_state
+
+    def _track_fade(self):
+        """Sustained critical stress fades the organism. Each transition
+        taken at stress >= FADE_STRESS counts toward FADE_LIMIT; a
+        transition below it resets the streak."""
+        if self.store.stress >= self.FADE_STRESS:
+            self.store.fade_streak += 1
+            if self.store.fade_streak >= self.FADE_LIMIT:
+                self._transition("dead")
+        else:
+            self.store.fade_streak = 0
+
+    def revive(self):
+        """Bring the organism back: wake state, baseline stress, streak
+        cleared. `store.save()` still needs to be called by the caller."""
+        self.store.fade_streak = 0
+        self.store.stress = StressMeter.BASELINE
+        self._transition("wake")
+
     def _transition(self, new_state):
         self.state = new_state
         self.state_started = time.time()
 
     def due(self):
+        if self.state == "dead":
+            return False
         limit = self.wake_seconds if self.state == "wake" else self.sleep_seconds
         return self.elapsed() >= limit
 
@@ -457,6 +504,8 @@ class Organism:
         self.store.dir_path = self.dir_path
         self.store.scl_path = self.dir_path / "organism.scl"
         self.store.state_path = self.dir_path / "state.json"
+        if self.store.fade_streak >= Lifecycle.FADE_LIMIT:
+            self.lifecycle._transition("dead")
         for obj in LEGACY_OBJECTS:
             self.store.beliefs_map = {(o, a, v): c for (o, a, v), c
                                       in self.store.beliefs_map.items()

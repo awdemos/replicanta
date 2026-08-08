@@ -38,6 +38,11 @@ def test_complete_partial_preserves_args():
     assert value == "/chaos 0.3"
 
 
+def test_complete_revive_prefix():
+    value, _index = complete_command("/rev", 0)
+    assert value == "/revive"
+
+
 def test_complete_plain_text_unchanged():
     value, index = complete_command("hello world", 3)
     assert value == "hello world"

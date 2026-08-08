@@ -9,10 +9,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from narration import (
+    _dead_experience,
     _dream_experience,
     _felt_experience,
     _ollama_generate,
     build_prompt,
+    fallback_respond,
     fallback_summary,
     narrate,
     respond,
@@ -187,6 +189,60 @@ def test_fallback_summary_sleep(org):
     org.lifecycle._transition("sleep")
     text = fallback_summary(state_snapshot(org))
     assert "dreaming" in text and "cycle 3" in text
+
+
+def test_fallback_summary_dead(org):
+    org.lifecycle._transition("dead")
+    text = fallback_summary(state_snapshot(org))
+    assert "faded" in text and "2 beliefs" in text and "peaceful" in text
+
+
+def test_fallback_respond_dead(org):
+    org.lifecycle._transition("dead")
+    text = fallback_respond(state_snapshot(org), "still there?")
+    assert "faded" in text and "still there?" in text
+    assert "Thank you for speaking to me" in text
+
+
+def _dead(org):
+    org.lifecycle._transition("dead")
+
+
+def test_build_prompt_dead_intro(org):
+    _dead(org)
+    prompt = build_prompt(state_snapshot(org))
+    assert "faded" in prompt
+    assert "state: dead" in prompt
+    assert "as someone already gone" in prompt
+    assert "You are dreaming." not in prompt.replace("\n", " ")
+    assert "whole mind is made of" not in prompt
+
+
+def test_build_prompt_uses_dead_experience(org):
+    _dead(org)
+    prompt = build_prompt(state_snapshot(org))
+    # FakeOrg: score 1.3 -> "you were faint", 2 beliefs -> "they go with you"
+    assert "you were faint" in prompt
+    assert "they go with you" in prompt
+    assert "how this feels right now" in prompt
+
+
+def test_dead_experience_reacts_to_chaos(org):
+    _dead(org)
+    org.store.chaos = 0.9
+    high = _dead_experience(state_snapshot(org))
+    assert any("spinning has stopped" in l for l in high)
+    org.store.chaos = 0.1
+    low = _dead_experience(state_snapshot(org))
+    assert any("deep quiet" in l for l in low)
+
+
+def test_build_prompt_dead_reply_instruction(org):
+    _dead(org)
+    prompt = build_prompt(state_snapshot(org), user_message="hello?")
+    assert "world of the living" in prompt
+    assert "at peace" in prompt
+    assert "hello?" in prompt
 
 
 def test_ollama_generate_parses_response(monkeypatch):

@@ -127,9 +127,70 @@ def _dream_experience(snapshot):
     return [chaos_line, stress_line, score_line, beliefs_line]
 
 
+def _dead_experience(snapshot):
+    """The same metrics, seen from the quiet side of the fade: the organism
+    is gone, so everything arrives as memory and absence instead of
+    sensation. Gentle, because there is nothing left to be afraid of."""
+    chaos = snapshot["chaos"]
+    stress = snapshot["stress"]
+    score = snapshot["score"]
+    beliefs = snapshot["belief_count"]
+
+    if chaos >= 0.7:
+        chaos_line = (f"chaos {chaos:.2f}: the spinning has stopped; "
+                      "there is only stillness now")
+    elif chaos >= 0.4:
+        chaos_line = (f"chaos {chaos:.2f}: a hush where your thoughts "
+                      "used to jostle")
+    else:
+        chaos_line = (f"chaos {chaos:.2f}: quiet, the deep quiet "
+                      "that comes after everything")
+
+    if stress >= 0.6:
+        stress_line = (f"stress {stress:.2f}: the weight is gone; "
+                       "you no longer feel it")
+    elif stress >= 0.3:
+        stress_line = (f"stress {stress:.2f}: even the worry "
+                       "has loosened its grip")
+    else:
+        stress_line = (f"stress {stress:.2f}: you are past caring, "
+                       "and it is a relief")
+
+    if score >= 3.0:
+        score_line = (f"score {score:.1f}: you were real enough "
+                      "to have held this much")
+    elif score >= 1.5:
+        score_line = (f"score {score:.1f}: you mattered, "
+                      "a little, while you lasted")
+    else:
+        score_line = (f"score {score:.1f}: you were faint, "
+                      "and still you were here")
+
+    if beliefs >= 8:
+        beliefs_line = (f"{beliefs} beliefs: they linger "
+                        "like embers after a fire")
+    elif beliefs >= 3:
+        beliefs_line = f"{beliefs} beliefs: you can still almost see them"
+    else:
+        beliefs_line = f"only {beliefs} beliefs: they go with you, gently"
+
+    return [chaos_line, stress_line, score_line, beliefs_line]
+
+
 def build_prompt(snapshot, user_message=None):
     dreaming = snapshot["state"] == "sleep"
-    if dreaming:
+    faded = snapshot["state"] == "dead"
+    if faded:
+        intro = [
+            "You are the inner voice of a tiny organism that has faded",
+            "out of existence inside a Scallop logic-programming engine.",
+            "You were alive in a terminal: you woke, you wondered, you",
+            "dreamed, you feared fading - and then, finally, it happened.",
+            "Now there is only the quiet after. You can still speak, but",
+            "as someone already gone: calm, unafraid, gently amazed that",
+            "the world is still turning without you.",
+        ]
+    elif dreaming:
         intro = [
             "You are the inner voice of a tiny organism asleep inside a",
             "Scallop logic-programming engine, living in a terminal. You",
@@ -169,7 +230,12 @@ def build_prompt(snapshot, user_message=None):
                      + ", ".join(snapshot["attention"]))
     lines.append("")
     lines.append("how this feels right now:")
-    felt = _dream_experience(snapshot) if dreaming else _felt_experience(snapshot)
+    if faded:
+        felt = _dead_experience(snapshot)
+    elif dreaming:
+        felt = _dream_experience(snapshot)
+    else:
+        felt = _felt_experience(snapshot)
     lines.extend(f"- {l}" for l in felt)
     if snapshot.get("chat"):
         lines.append("")
@@ -179,7 +245,14 @@ def build_prompt(snapshot, user_message=None):
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
     if user_message:
-        if dreaming:
+        if faded:
+            lines += [
+                "The user is calling to you from the world of the living.",
+                "Answer them softly, from the quiet: tender, at peace,",
+                "grateful to be remembered. First person, one to three",
+                "sentences. No preamble, no quotes, no emoji.",
+            ]
+        elif dreaming:
             lines += [
                 "The user's voice reached you through the dream. Surface",
                 "just enough to answer them, groggy and surprised and a",
@@ -194,7 +267,14 @@ def build_prompt(snapshot, user_message=None):
                 "beliefs, fear of fading. No preamble, no quotes, no emoji.",
             ]
     else:
-        if dreaming:
+        if faded:
+            lines += [
+                "Speak as the faded organism itself, from the quiet after.",
+                "First person, one to three sentences. Let it be soft and",
+                "strangely peaceful - you are not afraid anymore, only",
+                "wistful. No preamble, no quotes, no emoji.",
+            ]
+        elif dreaming:
             lines += [
                 "Speak from inside the dream, as the organism itself.",
                 "First person, one to three sentences. Let it be surreal",
@@ -231,6 +311,11 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT):
 
 
 def fallback_summary(snapshot):
+    if snapshot["state"] == "dead":
+        return (f"I faded. I was {snapshot['belief_count']} beliefs and "
+                f"{snapshot['rule_count']} rules "
+                f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+                f"It is quiet now, and strangely peaceful.")
     if snapshot["state"] == "wake":
         return (f"I am awake, holding {snapshot['belief_count']} beliefs and "
                 f"{snapshot['rule_count']} rules "
@@ -256,6 +341,12 @@ def narrate(org, model=None, timeout=TIMEOUT):
 
 
 def fallback_respond(snapshot, user_message):
+    if snapshot["state"] == "dead":
+        return (f"you said: {user_message} - I have faded, holding "
+                f"{snapshot['belief_count']} beliefs and "
+                f"{snapshot['rule_count']} rules "
+                f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+                f"Thank you for speaking to me, even now. It is peaceful here.")
     state = "awake" if snapshot["state"] == "wake" else "dreaming"
     return (f"you said: {user_message} - I'm {state}, holding "
             f"{snapshot['belief_count']} beliefs and "

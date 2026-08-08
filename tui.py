@@ -176,19 +176,22 @@ class OrganismApp(App):
         self.org.mind.rebuild()
         self.org.meter.tick(
             sleeping=(self.org.lifecycle.state == "sleep"), dt=1.0)
-        if self.org.lifecycle.due():
-            if self.org.lifecycle.state == "wake":
-                self.org.lifecycle._transition("sleep")
-                promoted = self.org._sleep()
-                if promoted:
-                    self.query_one("#dreams", Static).update(
-                        "DREAM: " + ", ".join(p["combo"] for p in promoted))
-                else:
-                    self.query_one("#dreams", Static).update(
-                        "DREAMS: (none promoted)")
+        new_state = self.org.lifecycle.advance()
+        if new_state == "sleep":
+            promoted = self.org._sleep()
+            if promoted:
+                self.query_one("#dreams", Static).update(
+                    "DREAM: " + ", ".join(p["combo"] for p in promoted))
             else:
-                self.org.lifecycle._transition("wake")
-                self.org._wake()
+                self.query_one("#dreams", Static).update(
+                    "DREAMS: (none promoted)")
+        elif new_state == "wake":
+            self.org._wake()
+        elif new_state == "dead":
+            self.query_one("#dreams", Static).update(
+                "the organism has faded.")
+            self._narration = "…fading, gently, into the quiet."
+            self._maybe_narrate()
         self.refresh_status()
         self.refresh_beliefs()
         self.refresh_mind()
@@ -217,12 +220,13 @@ class OrganismApp(App):
         if len(self._history) > 24:
             self._history.pop(0)
         lc = self.org.lifecycle
-        limit = lc.wake_seconds if lc.state == "wake" else lc.sleep_seconds
+        limit = (lc.wake_seconds if lc.state == "wake"
+                 else lc.sleep_seconds if lc.state == "sleep" else 1)
         frac = min(1.0, lc.elapsed() / limit) if limit else 0.0
         bar = "█" * int(frac * 10) + "░" * (10 - int(frac * 10))
         window = ", ".join(sorted(str(p) for p in self.org.window.pairs)) or "—"
         thought = " ".join((self._narration or "thinking…").splitlines())
-        icon = "🧠" if lc.state == "wake" else "💤"
+        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
         self.query_one("#mind", Static).update(
             f"{icon} {lc.state} | cycle {self.org.store.cycle} "
             f"| chaos {self.org.store.chaos:.2f} | stress {self.org.store.stress:.2f} "
@@ -280,6 +284,17 @@ class OrganismApp(App):
             if self.org.lifecycle.state == "sleep":
                 self.org.lifecycle._transition("wake")
                 self.org._wake()
+        elif name == "/revive":
+            if self.org.lifecycle.state == "dead":
+                self.org.lifecycle.revive()
+                self.org.store.save()
+                self.query_one("#dreams", Static).update(
+                    "revived: the organism stirs back into existence.")
+                self._maybe_narrate()
+            else:
+                self.query_one("#dreams", Static).update(
+                    f"/revive: it is not faded (state "
+                    f"{self.org.lifecycle.state}).")
         elif name == "/stats":
             m = self.org.metrics()
             self.query_one("#dreams", Static).update(

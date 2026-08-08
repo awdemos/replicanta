@@ -7,6 +7,7 @@ COMMANDS = [
     ("/focus", "/focus attr", "lock attention on attr (bare /focus clears)"),
     ("/sleep", "/sleep", "force wake->sleep"),
     ("/wake", "/wake", "force sleep->wake"),
+    ("/revive", "/revive", "bring a faded organism back"),
     ("/stats", "/stats", "show growth metrics"),
     ("/save", "/save", "persist state + genome"),
     ("/think", "/think", "narrate thoughts now"),
