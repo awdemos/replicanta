@@ -1,5 +1,7 @@
 from typing import ClassVar
 
+import narration
+import tui_commands
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -7,9 +9,6 @@ from textual.command import Hit, Matcher, Provider
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static
-
-import narration
-import tui_commands
 
 
 class SlashCommands(Provider):
@@ -145,6 +144,8 @@ class OrganismApp(App):
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
         self.org.mind.rebuild()
+        self.org.meter.tick(
+            sleeping=(self.org.lifecycle.state == "sleep"), dt=1.0)
         if self.org.lifecycle.due():
             if self.org.lifecycle.state == "wake":
                 self.org.lifecycle._transition("sleep")
@@ -166,7 +167,8 @@ class OrganismApp(App):
         m = self.org.metrics()
         self.query_one("#status", Static).update(
             f"state: {self.org.lifecycle.state} | cycle: {self.org.store.cycle} "
-            f"| chaos: {self.org.store.chaos:.2f} | beliefs: {m.belief_count} "
+            f"| chaos: {self.org.store.chaos:.2f} | stress: {self.org.store.stress:.2f} "
+            f"| beliefs: {m.belief_count} "
             f"| rules: {m.rule_count} | score: {m.score():.1f}")
 
     def refresh_beliefs(self):
@@ -193,7 +195,8 @@ class OrganismApp(App):
         icon = "🧠" if lc.state == "wake" else "💤"
         self.query_one("#mind", Static).update(
             f"{icon} {lc.state} | cycle {self.org.store.cycle} "
-            f"| chaos {self.org.store.chaos:.2f} | {bar}\n"
+            f"| chaos {self.org.store.chaos:.2f} | stress {self.org.store.stress:.2f} "
+            f"| {bar}\n"
             f"beliefs {m.belief_count} (+{delta_b}) "
             f"| rules {m.rule_count} (+{delta_r}) "
             f"| score {m.score():.1f}\n"
@@ -263,6 +266,7 @@ class OrganismApp(App):
 
     def handle_chat(self, text):
         self.query_one("#dreams", Static).update(f"you: {text}")
+        self.org.meter.bump(tui_commands.harshness(text))
         self._maybe_respond(text)
 
 

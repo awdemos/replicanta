@@ -24,6 +24,7 @@ def state_snapshot(org):
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
         "chaos": round(org.store.chaos, 2),
+        "stress": round(org.store.stress, 2),
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
         "score": round(m.score(), 1),
@@ -41,7 +42,7 @@ def build_prompt(snapshot, user_message=None):
         "Here is your current state:",
         "",
         (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
-         f"chaos {snapshot['chaos']}"),
+         f"chaos {snapshot['chaos']}, stress {snapshot['stress']}"),
         f"consciousness score: {snapshot['score']}",
         f"beliefs: {snapshot['belief_count']}",
         f"rules: {snapshot['rule_count']}",
@@ -95,10 +96,11 @@ def fallback_summary(snapshot):
     if snapshot["state"] == "wake":
         return (f"awake, holding {snapshot['belief_count']} beliefs and "
                 f"{snapshot['rule_count']} rules "
-                f"(score {snapshot['score']}).")
+                f"(score {snapshot['score']}, stress {snapshot['stress']}).")
     return (f"dreaming after cycle {snapshot['cycle']}: "
             f"{snapshot['belief_count']} beliefs, "
-            f"{snapshot['rule_count']} rules (score {snapshot['score']}).")
+            f"{snapshot['rule_count']} rules "
+            f"(score {snapshot['score']}, stress {snapshot['stress']}).")
 
 
 def narrate(org, model=None, timeout=TIMEOUT):
@@ -117,7 +119,8 @@ def fallback_respond(snapshot, user_message):
     state = "awake" if snapshot["state"] == "wake" else "dreaming"
     return (f"you said: {user_message} - I'm {state}, holding "
             f"{snapshot['belief_count']} beliefs and "
-            f"{snapshot['rule_count']} rules (score {snapshot['score']}).")
+            f"{snapshot['rule_count']} rules "
+            f"(score {snapshot['score']}, stress {snapshot['stress']}).")
 
 
 def respond(org, user_text, model=None, timeout=TIMEOUT):

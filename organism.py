@@ -2,6 +2,7 @@ import json
 import random
 import re
 import time
+from typing import ClassVar
 
 import scallopy
 
@@ -22,10 +23,12 @@ class BeliefStore:
         self.beliefs_map = {}
         self.archived_map = {}
         self.chaos = 0.5
+        self.stress = 0.05
         self.cycle = 0
         self.rule_counter = 0
         self.rules = []          # list of (text, depth)
         self.attention = set()   # (attr, val) pairs in the window
+        self.on_adverse = None   # callback(amount) fired on contradiction
 
     # -- belief operations -------------------------------------------------
     def add(self, belief, conf):
@@ -38,6 +41,8 @@ class BeliefStore:
         for (o, a, v), c in list(self.beliefs_map.items()):
             if (o, a) == (obj, attr) and v != val and c >= CONTRADICTION_THRESHOLD \
                and conf >= CONTRADICTION_THRESHOLD:
+                if self.on_adverse is not None:
+                    self.on_adverse(0.03)
                 if conf > c:
                     self.archived_map[(o, a, v)] = c
                     del self.beliefs_map[(o, a, v)]
@@ -72,6 +77,7 @@ class BeliefStore:
         self.scl_path.write_text(self.render_scl())
         state = {
             "chaos": self.chaos,
+            "stress": self.stress,
             "cycle": self.cycle,
             "rule_counter": self.rule_counter,
             "rules": self.rules,
@@ -86,6 +92,7 @@ class BeliefStore:
             return
         state = json.loads(self.state_path.read_text())
         self.chaos = state.get("chaos", 0.5)
+        self.stress = state.get("stress", 0.05)
         self.cycle = state.get("cycle", 0)
         self.rule_counter = state.get("rule_counter", 0)
         self.rules = [tuple(r) for r in state.get("rules", [])]
@@ -136,6 +143,54 @@ class ChaosKnob:
     def roll(self, rng):
         """True with probability = chaos."""
         return rng.random() < self.value
+
+
+class StressMeter:
+    """Tracks the organism's stress (0.0-1.0, baseline 0.05), held in
+    `BeliefStore.stress` and persisted with state.json. Adverse experiences
+    bump it up; sleep recovers it faster than wake decays it; sleep-debt
+    and negative moods add upward pressure while awake. High stress feeds
+    back into the chaos knob via `Organism.chaos_effective()`."""
+
+    BASELINE = 0.05
+    SLEEP_RECOVERY_RATE = 0.02    # per second, toward baseline while sleeping
+    WAKE_DECAY_RATE = 0.005       # per second, toward baseline while awake
+    SLEEP_DEBT_RATE = 0.004       # per second, upward pressure while awake
+    NEGATIVE_MOOD_RATE = 0.003    # per second, extra pressure from bad moods
+    NEGATIVE_MOODS: ClassVar[set] = {"sad", "angry", "anxious", "afraid", "hurt"}
+
+    def __init__(self, store):
+        self.store = store
+
+    @property
+    def value(self):
+        return self.store.stress
+
+    def _clamp(self, value):
+        return max(0.0, min(1.0, value))
+
+    def bump(self, amount):
+        """Adverse-experience hook: raise stress by amount, clamped."""
+        self.store.stress = self._clamp(self.store.stress + amount)
+
+    def tick(self, sleeping, dt=1.0):
+        """Advance stress by dt seconds of lived time. Sleep recovers fast
+        toward baseline; wake decays slowly while sleep-debt and negative
+        moods push upward."""
+        if sleeping:
+            stress = self.store.stress - self.SLEEP_RECOVERY_RATE * dt
+            stress = max(stress, self.BASELINE)
+        else:
+            stress = self.store.stress - self.WAKE_DECAY_RATE * dt
+            stress = max(stress, self.BASELINE)
+            stress += self.SLEEP_DEBT_RATE * dt
+            if self._negative_mood():
+                stress += self.NEGATIVE_MOOD_RATE * dt
+        self.store.stress = self._clamp(stress)
+
+    def _negative_mood(self):
+        return any(("self", "mood", mood) in self.store.beliefs()
+                   for mood in self.NEGATIVE_MOODS)
 
 
 class AttentionWindow:
@@ -193,6 +248,8 @@ class SelfQuestioner:
         rule = self._candidate_rule(head, attr_val_a, attr_val_b)
         derived = self.mind.query_rule(rule, head)
         if not derived:
+            if getattr(self, "stress", None) is not None:
+                self.stress.bump(0.01)  # failed question = adverse
             return []
         attr_a, val_a = attr_val_a
         attr_b, val_b = attr_val_b
@@ -256,6 +313,8 @@ class DreamEngine:
         for dream in dreams:
             derived = self.mind.query_rule(dream["rule"], dream["head"])
             if not derived:
+                if getattr(self, "stress", None) is not None:
+                    self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
             self.store.rule_counter += 1
             self.store.rules.append((dream["rule"], 1))
@@ -344,7 +403,11 @@ class Organism:
         self.questioner = SelfQuestioner(self.store, self.mind, dir_path)
         self.dreamer = DreamEngine(self.store, self.mind)
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
+        self.meter = StressMeter(self.store)
         self.store.chaos = chaos
+        self.store.on_adverse = self.meter.bump
+        self.questioner.stress = self.meter
+        self.dreamer.stress = self.meter
 
     def load(self):
         # First boot = no state.json yet: the .scl genome is the source of
@@ -364,6 +427,13 @@ class Organism:
     def metrics(self):
         return Metrics(self.store)
 
+    def chaos_effective(self):
+        """Chaos knob nudged upward by sustained stress: once stress exceeds
+        0.5, each +0.1 of stress adds +0.03 to effective chaos (clamped at 1)."""
+        if self.store.stress > 0.5:
+            return min(1.0, self.store.chaos + (self.store.stress - 0.5) * 0.3)
+        return self.store.chaos
+
     def cycle(self):
         """One full wake->sleep transition (forced, for scheduler + tests)."""
         self._wake()
@@ -373,7 +443,7 @@ class Organism:
         self.window.refresh(cycle=self.store.cycle)
         pairs = sorted(self.window.pairs)
         rng = random.Random()
-        questions = 2 + (1 if self.store.chaos > 0.5 else 0)
+        questions = 2 + (1 if self.chaos_effective() > 0.5 else 0)
         for _ in range(questions):
             if len(pairs) >= 2:
                 a, b = rng.sample(pairs, 2)
