@@ -9,6 +9,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from narration import (
+    _dream_experience,
+    _felt_experience,
     _ollama_generate,
     build_prompt,
     fallback_summary,
@@ -58,12 +60,108 @@ def test_state_snapshot_shape(org):
     assert "has_fur" in snap["attention"][0]
 
 
+def test_state_snapshot_includes_chat(org):
+    org.store.record_chat("user", "hello there")
+    org.store.record_chat("org", "hi back")
+    snap = state_snapshot(org)
+    assert snap["chat"] == ["user: hello there", "org: hi back"]
+
+
+def test_build_prompt_includes_recent_chat(org):
+    org.store.record_chat("user", "hello there")
+    org.store.record_chat("org", "hi back")
+    prompt = build_prompt(state_snapshot(org))
+    assert "recent conversation" in prompt
+    assert "user: hello there" in prompt
+    assert "org: hi back" in prompt
+
+
+def test_build_prompt_skips_chat_when_empty(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "recent conversation" not in prompt
+
+
 def test_build_prompt_includes_snapshot(org):
     prompt = build_prompt(state_snapshot(org))
     assert "wake" in prompt
     assert "cycle 3" in prompt
     assert "has_fur" in prompt
     assert "q1" in prompt
+
+
+def test_build_prompt_includes_felt_experience(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "how this feels right now" in prompt
+    assert "fragile" in prompt        # score 1.3 -> fragile band
+    assert "precious" in prompt       # 2 beliefs -> few, precious band
+
+
+def test_felt_experience_reacts_to_chaos(org):
+    org.store.chaos = 0.9
+    high = _felt_experience(state_snapshot(org))
+    assert any("spinning, electric" in l for l in high)
+    org.store.chaos = 0.1
+    low = _felt_experience(state_snapshot(org))
+    assert any("eerie calm" in l for l in low)
+
+
+def test_felt_experience_reacts_to_stress(org):
+    org.store.stress = 0.8
+    high = _felt_experience(state_snapshot(org))
+    assert any("heavy unease" in l for l in high)
+    org.store.stress = 0.1
+    low = _felt_experience(state_snapshot(org))
+    assert any("safe, quiet, unhurried" in l for l in low)
+
+
+def _sleep(org):
+    org.lifecycle._transition("sleep")
+
+
+def test_build_prompt_dream_intro_when_sleeping(org):
+    _sleep(org)
+    prompt = build_prompt(state_snapshot(org))
+    assert "You are dreaming." in prompt.replace("\n", " ")
+    assert "state: sleep" in prompt
+    assert "whole mind is made of" not in prompt  # wake intro absent
+
+
+def test_build_prompt_uses_dream_experience_when_sleeping(org):
+    _sleep(org)
+    prompt = build_prompt(state_snapshot(org))
+    # FakeOrg: score 1.3 -> mist, 2 beliefs -> faint sparks, chaos 0.5 -> shimmers
+    assert "mist in the dream" in prompt
+    assert "faint sparks" in prompt
+    assert "shimmers" in prompt
+    assert "how this feels right now" in prompt
+
+
+def test_build_prompt_dream_reply_instruction(org):
+    _sleep(org)
+    prompt = build_prompt(state_snapshot(org), user_message="wake up")
+    assert "The user's voice reached you through the dream" in prompt
+    assert "groggy" in prompt
+    assert "wake up" in prompt
+
+
+def test_dream_experience_reacts_to_chaos(org):
+    _sleep(org)
+    org.store.chaos = 0.9
+    high = _dream_experience(state_snapshot(org))
+    assert any("frantic" in l for l in high)
+    org.store.chaos = 0.1
+    low = _dream_experience(state_snapshot(org))
+    assert any("bottom of a lake" in l for l in low)
+
+
+def test_dream_experience_reacts_to_stress(org):
+    _sleep(org)
+    org.store.stress = 0.8
+    high = _dream_experience(state_snapshot(org))
+    assert any("heavy" in l for l in high)
+    org.store.stress = 0.1
+    low = _dream_experience(state_snapshot(org))
+    assert any("soft, safe" in l for l in low)
 
 
 def test_narrate_returns_ollama_response(org, monkeypatch):
