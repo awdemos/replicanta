@@ -5,6 +5,7 @@ back to a deterministic summary when ollama is unavailable or slow."""
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_MODEL = "qwen2.5:3b"
@@ -12,6 +13,78 @@ OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 120
 TIMEOUT = 15
+
+VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
+VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
+
+
+# -- voice health -----------------------------------------------------------
+# Cached ollama reachability. `None` = never probed (the arena then tries the
+# debate, preserving the pre-detection behavior); True/False = probed result
+# or inferred from a failure streak. Only `probe_voice()` does network I/O.
+
+class _Voice:
+    def __init__(self):
+        self.online = None
+        self.failures = 0
+
+
+_voice = _Voice()
+
+
+def reset_voice():
+    """Forget the cached voice state (test isolation)."""
+    global _voice
+    _voice = _Voice()
+
+
+def _tags_url():
+    parts = urllib.parse.urlsplit(OLLAMA_URL)
+    return urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc, "/api/tags", "", ""))
+
+
+def probe_voice(model=None):
+    """Network probe: is ollama reachable with the model pulled? Updates the
+    cached voice state and returns it."""
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        req = urllib.request.Request(_tags_url())
+        with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode())
+        names = [m.get("name", "") for m in data.get("models", [])]
+        bases = [n.split(":")[0] for n in names]
+        _voice.online = bool(
+            model in names or model.split(":")[0] in bases)
+    except (urllib.error.URLError, OSError, ValueError):
+        _voice.online = False
+    _voice.failures = 0
+    return _voice.online
+
+
+def voice_online():
+    """Cached reachability: True/False, or None when never probed."""
+    return _voice.online
+
+
+def voice_status():
+    """Human label for the status bar: online / offline / ? (unknown)."""
+    if _voice.online is None:
+        return "?"
+    return "online" if _voice.online else "offline"
+
+
+def note_voice_success():
+    _voice.failures = 0
+    _voice.online = True
+
+
+def note_voice_failure():
+    """A debate call failed; a streak marks the voice offline so the arena
+    stops paying the timeout cost on every utterance."""
+    _voice.failures += 1
+    if _voice.failures >= VOICE_FAILURE_STREAK:
+        _voice.online = False
 
 
 def state_snapshot(org):

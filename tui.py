@@ -60,6 +60,7 @@ STYLE_WARN = "red"
 STYLE_DIM = "dim"
 
 NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
+VOICE_PROBE_INTERVAL = 60.0   # seconds between ollama reachability probes
 
 
 class OrganismApp(App):
@@ -95,6 +96,8 @@ class OrganismApp(App):
         self._history_index = -1
         self._history_draft = ""
         self._suppress_changed = False
+        self._probing_voice = False
+        self._voice_announced = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -122,6 +125,8 @@ class OrganismApp(App):
         self.refresh_status()
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
+        self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
+        self._probe_voice()
         self._maybe_narrate()
 
     # -- actions ---------------------------------------------------------
@@ -172,6 +177,35 @@ class OrganismApp(App):
             self._history_index = -1
         self._suppress_changed = False
 
+    # -- voice health ------------------------------------------------------
+    def _probe_voice(self):
+        """Probe ollama reachability off the UI thread (noop while one is
+        already in flight); the arena reads the cached result."""
+        if not self._probing_voice:
+            self._probing_voice = True
+            self._probe_voice_worker()
+
+    @work(thread=True)
+    def _probe_voice_worker(self):
+        try:
+            narration.probe_voice()
+        finally:
+            self._probing_voice = False
+        self.call_from_thread(self._announce_voice)
+
+    def _announce_voice(self):
+        """Tell the user once per voice-state flip how the organism speaks."""
+        state = narration.voice_status()
+        if state != self._voice_announced:
+            self._voice_announced = state
+            if state == "offline":
+                self._append_log(
+                    "voice: offline — speaking from my bones "
+                    "(local fallback)", STYLE_DIM)
+            elif state == "online":
+                self._append_log("voice: online (ollama)", STYLE_DIM)
+        self.refresh_status()
+
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
         for event in self.org.tick(1.0):
@@ -219,6 +253,7 @@ class OrganismApp(App):
             f"| chaos {self.org.store.chaos:.2f} "
             f"| stress {self.org.store.stress:.2f} | mood {mood} "
             f"| beliefs {self.org.metrics().belief_count} "
+            f"| voice {narration.voice_status()} "
             f"| {self.org.probe.clock_utc()}{busy}")
 
     # -- log ---------------------------------------------------------------

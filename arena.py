@@ -62,11 +62,18 @@ class ThoughtArena:
         # temperature=0 in the snapshot means deterministic probe mode
         # (tests); anything else jitters per round
         temperature = 0.0 if snapshot.get("temperature") == 0 else None
-        try:
-            return self._debate(org, snapshot, user_message, model,
-                                timeout, surprise, temperature)
-        except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        # voice known-offline: skip the debate entirely so replies stay
+        # instant instead of paying an ollama timeout on every utterance
+        if narration.voice_online() is False:
             return self._fallback(snapshot, user_message)
+        try:
+            result = self._debate(org, snapshot, user_message, model,
+                                  timeout, surprise, temperature)
+        except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+            narration.note_voice_failure()
+            return self._fallback(snapshot, user_message)
+        narration.note_voice_success()
+        return result
 
     # -- debate ----------------------------------------------------------
     def _debate(self, org, snapshot, user_message, model, timeout,
