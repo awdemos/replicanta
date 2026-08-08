@@ -426,3 +426,54 @@ def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
     assert org.lifecycle.state == "wake"
     assert org.store.fade_streak == 0
     assert org.store.stress == 0.05
+
+
+def test_tui_command_self_talk_toggles(monkeypatch, tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    app._maybe_self_talk = lambda: None  # avoid worker threads in test
+
+    class FakeStatic:
+        def update(self, *a, **k):
+            pass
+
+        def write(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: FakeStatic())
+    app.handle_command("/self-talk")
+    assert app._self_talk_on is True
+    app.handle_command("/self-talk")
+    assert app._self_talk_on is False
+
+
+def test_tui_narrate_routes_to_self_talk_when_on(tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    calls = []
+    app._self_talk_on = True
+    app._maybe_self_talk = lambda: calls.append("self_talk")
+    app._narrate = lambda: calls.append("narrate")
+    app._narrating = False
+    app._maybe_narrate()
+    assert calls == ["self_talk"]
+
+
+def test_tui_narrate_stays_dream_when_sleeping(tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    calls = []
+    app._self_talk_on = True
+    org.lifecycle._transition("sleep")
+    app.refresh_status = lambda: None
+    app._maybe_self_talk = lambda: calls.append("self_talk")
+    app._narrate = lambda: calls.append("narrate")
+    app._narrating = False
+    app._maybe_narrate()
+    assert calls == ["narrate"]

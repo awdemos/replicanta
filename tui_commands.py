@@ -14,6 +14,7 @@ COMMANDS = [
     ("/stats", "/stats", "show growth metrics"),
     ("/save", "/save", "persist state + genome"),
     ("/think", "/think", "narrate thoughts now"),
+    ("/self-talk", "/self-talk", "let the organism speak to itself"),
     ("/help", "/help", "this help screen"),
 ]
 

@@ -21,14 +21,17 @@ def test_complete_first_match():
 
 def test_complete_cycles_with_wrap():
     names = [n for n in COMMAND_NAMES if n.startswith("/s")]
-    value, index = complete_command("/s", 0)
-    assert value == names[0]
-    value, index = complete_command("/s", index)
-    assert value == names[1]
-    value, index = complete_command("/s", index)
-    assert value == names[2]
+    index = 0
+    for expected in names:
+        value, index = complete_command("/s", index)
+        assert value == expected
     value, index = complete_command("/s", index)
     assert value == names[0]  # wrapped
+
+
+def test_complete_self_talk_prefix():
+    value, _index = complete_command("/sel", 0)
+    assert value == "/self-talk"
 
 
 def test_complete_partial_preserves_args():

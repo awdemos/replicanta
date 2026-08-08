@@ -56,6 +56,7 @@ STYLE_YOU = "cyan"
 STYLE_ORG = "green"
 STYLE_DREAM = "magenta"
 STYLE_LEARNED = "yellow"
+STYLE_SELF = "italic yellow"
 STYLE_WARN = "red"
 STYLE_DIM = "dim"
 
@@ -98,6 +99,8 @@ class OrganismApp(App):
         self._suppress_changed = False
         self._probing_voice = False
         self._voice_announced = None
+        self._self_talk_on = False
+        self._self_talking = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -255,7 +258,9 @@ class OrganismApp(App):
         mood = next(
             (v for (o, a, v) in self.org.store.beliefs()
              if (o, a) == ("self", "mood")), "—")
-        busy = " | thinking…" if (self._narrating or self._responding) else ""
+        busy = (" | thinking…"
+                if (self._narrating or self._responding or self._self_talking)
+                else "")
         self.query_one("#status", Static).update(
             f"{icon} {lc.state} | cycle {self.org.store.cycle} "
             f"| chaos {self.org.store.chaos:.2f} "
@@ -279,10 +284,43 @@ class OrganismApp(App):
 
     # -- narration -------------------------------------------------------
     def _maybe_narrate(self):
+        """Route the periodic voice: self-dialogue when toggled on and
+        awake, ordinary narration otherwise."""
+        if self._self_talk_on and self.org.lifecycle.state == "wake":
+            self._maybe_self_talk()
+            return
         if not self._narrating:
             self._narrating = True
             self.refresh_status()
             self._narrate()
+
+    # -- self-talk ---------------------------------------------------------
+    def _maybe_self_talk(self):
+        if not self._self_talking:
+            self._self_talking = True
+            self.refresh_status()
+            self._self_talk()
+
+    @work(thread=True)
+    def _self_talk(self):
+        answer = None
+        try:
+            question = narration.self_ask(self.org)
+            self.call_from_thread(self._set_self_question, question)
+            answer = narration.self_answer(self.org, question)
+        finally:
+            self._self_talking = False
+        if answer is not None:
+            self.call_from_thread(self._set_self_answer, answer)
+
+    def _set_self_question(self, question):
+        self.org.store.record_chat("org", question)
+        self._append_log(f"self: {question}", STYLE_SELF)
+
+    def _set_self_answer(self, answer):
+        self.org.store.record_chat("org", answer)
+        self._append_log(f"self: {answer}", STYLE_SELF)
+        self.refresh_status()
 
     @work(thread=True)
     def _narrate(self):
@@ -341,6 +379,16 @@ class OrganismApp(App):
             self.action_save_now()
         elif name == "/think":
             self.action_think_now()
+        elif name == "/self-talk":
+            self._self_talk_on = not self._self_talk_on
+            if self._self_talk_on:
+                self._append_log(
+                    "self-talk on — the organism may speak to itself.",
+                    STYLE_DIM)
+                if self.org.lifecycle.state == "wake":
+                    self._maybe_self_talk()
+            else:
+                self._append_log("self-talk off", STYLE_DIM)
         elif name == "/help":
             self.action_help()
         else:

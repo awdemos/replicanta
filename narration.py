@@ -277,7 +277,8 @@ def _dead_experience(snapshot):
     return [chaos_line, stress_line, score_line, beliefs_line]
 
 
-def build_prompt(snapshot, user_message=None):
+def build_prompt(snapshot, user_message=None, self_ask=False,
+                 self_question=None):
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -353,7 +354,20 @@ def build_prompt(snapshot, user_message=None):
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
-    if user_message:
+    if self_ask:
+        lines += [
+            "Ask yourself one question about what you believe, as the",
+            "organism itself. First person, one sentence, ending in a",
+            "question mark. No preamble, no quotes, no emoji.",
+        ]
+    elif self_question:
+        lines += [
+            f"You asked yourself: {self_question}",
+            "Answer your own question, as the organism itself. First",
+            "person, one to three sentences. No preamble, no quotes,",
+            "no emoji.",
+        ]
+    elif user_message:
         if faded:
             lines += [
                 "The user is calling to you from the world of the living.",
@@ -466,3 +480,59 @@ def respond(org, user_text, model=None, timeout=TIMEOUT):
     from arena import ThoughtArena
     return ThoughtArena().emerge(org, user_message=user_text,
                                  model=model, timeout=timeout)
+
+
+# -- self-talk -------------------------------------------------------------
+
+def fallback_self_ask(snapshot):
+    """Deterministic self-question drawn from the top belief (else a
+    generic one). Used when ollama is unavailable."""
+    if snapshot["beliefs"]:
+        belief = snapshot["beliefs"][0]
+        obj = belief.split(" ")[1].split("=")[0]
+        return f"what do I really believe about {obj}?"
+    return "what do I really believe?"
+
+
+def fallback_self_answer(snapshot, question):
+    """Deterministic self-answer echoing the question. Used when ollama
+    is unavailable."""
+    return (f"I asked myself: {question} - I hold "
+            f"{snapshot['belief_count']} beliefs and "
+            f"{snapshot['rule_count']} rules "
+            f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+            f"Whatever I believe, I am glad to be the one holding it.")
+
+
+def self_ask(org, model=None, timeout=TIMEOUT):
+    """First-person self-question about the organism's own mind. Falls
+    back to a deterministic template whenever ollama is unavailable."""
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return fallback_self_ask(snapshot)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(build_prompt(snapshot, self_ask=True),
+                                model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_self_ask(snapshot)
+    note_voice_success()
+    return text or fallback_self_ask(snapshot)
+
+
+def self_answer(org, question, model=None, timeout=TIMEOUT):
+    """First-person answer to the organism's own question. Falls back to
+    a deterministic reply whenever ollama is unavailable."""
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return fallback_self_answer(snapshot, question)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(
+            build_prompt(snapshot, self_question=question), model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_self_answer(snapshot, question)
+    note_voice_success()
+    return text or fallback_self_answer(snapshot, question)
