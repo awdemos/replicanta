@@ -417,6 +417,9 @@ def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
         def update(self, *a, **k):
             pass
 
+        def write(self, *a, **k):
+            pass
+
     monkeypatch.setattr(app, "query_one", lambda *a, **k: FakeStatic())
     monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
     app.handle_command("/revive")

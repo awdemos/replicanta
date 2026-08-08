@@ -8,7 +8,7 @@ from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, RichLog, Static
 
 
 class SlashCommands(Provider):
@@ -53,7 +53,7 @@ class HelpScreen(ModalScreen):
 
 class OrganismApp(App):
     """Terminal front-end for the Scallop organism: mind pane with LLM
-    narration + live activity, dream stream, belief viewer, command line
+    narration + live activity, scrollable chat/dream log, command line
     with tab completion. Commands: /chaos N, /focus X, /sleep, /wake,
     /stats, /save, /think, /help (or ctrl+p / F1)."""
 
@@ -67,12 +67,11 @@ class OrganismApp(App):
 
     CSS = """
     Screen { layout: horizontal; }
-    #left { width: 40%; height: 100%; border: solid green; }
-    #right { width: 60%; height: 100%; border: solid blue; }
+    #left { width: 35%; height: 100%; border: solid green; }
+    #right { width: 65%; height: 100%; border: solid blue; }
     #chat { height: 3; border: solid yellow; }
-    #mind { height: 42%; border: solid magenta; }
-    #dreams { height: 22%; border: solid cyan; }
-    #beliefs { border: solid cyan; overflow-y: auto; }
+    #mind { height: 45%; border: solid magenta; }
+    #dreams { height: 1fr; border: solid cyan; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     """
 
@@ -98,9 +97,10 @@ class OrganismApp(App):
             with Vertical(id="left"):
                 yield Static("STATUS", id="status")
                 yield Static("🧠 MIND", id="mind")
-                yield Static("DREAMS", id="dreams")
             with Vertical(id="right"):
-                yield Static("BELIEFS", id="beliefs")
+                yield RichLog(
+                    id="dreams", max_lines=500, wrap=True, markup=False,
+                    highlight=False)
                 self.chat_input = Input(
                     placeholder="talk to me, or /chaos 0.7 ... (tab completes)",
                     id="chat")
@@ -113,8 +113,9 @@ class OrganismApp(App):
         self._last_rules = m.rule_count
         self._chat_history = [line for role, line in self.org.store.chat_log
                               if role == "user"]
+        for role, line in self.org.store.chat_log[-100:]:
+            self._append_log(f"{'you' if role == 'user' else 'org'}: {line}")
         self.refresh_status()
-        self.refresh_beliefs()
         self.refresh_mind()
         self.set_interval(1.0, self._on_tick)
         self.set_interval(15.0, self._maybe_narrate)
@@ -180,20 +181,17 @@ class OrganismApp(App):
         if new_state == "sleep":
             promoted = self.org._sleep()
             if promoted:
-                self.query_one("#dreams", Static).update(
+                self._append_log(
                     "DREAM: " + ", ".join(p["combo"] for p in promoted))
             else:
-                self.query_one("#dreams", Static).update(
-                    "DREAMS: (none promoted)")
+                self._append_log("DREAMS: (none promoted)")
         elif new_state == "wake":
             self.org._wake()
         elif new_state == "dead":
-            self.query_one("#dreams", Static).update(
-                "the organism has faded.")
+            self._append_log("the organism has faded.")
             self._narration = "…fading, gently, into the quiet."
             self._maybe_narrate()
         self.refresh_status()
-        self.refresh_beliefs()
         self.refresh_mind()
 
     def refresh_status(self):
@@ -202,13 +200,12 @@ class OrganismApp(App):
             f"state: {self.org.lifecycle.state} | cycle: {self.org.store.cycle} "
             f"| chaos: {self.org.store.chaos:.2f} | stress: {self.org.store.stress:.2f} "
             f"| beliefs: {m.belief_count} "
-            f"| rules: {m.rule_count} | score: {m.score():.1f}")
+            f"| rules: {m.rule_count} | score: {m.score():.1f}"
+            f" | clock: {self.org.probe.clock_utc()}")
 
-    def refresh_beliefs(self):
-        lines = [f"{conf:.2f}  {obj}:{attr}={val}"
-                 for (obj, attr, val), conf
-                 in sorted(self.org.store.beliefs().items())]
-        self.query_one("#beliefs", Static).update("\n".join(lines[-40:]))
+    def _append_log(self, line):
+        """Append a line to the scrollable chat/dream log."""
+        self.query_one("#dreams", RichLog).write(line)
 
     def refresh_mind(self):
         m = self.org.metrics()
@@ -250,10 +247,12 @@ class OrganismApp(App):
             text = narration.narrate(self.org)
         finally:
             self._narrating = False
-        self.call_from_thread(self._set_narration, text)
+        self.call_from_thread(self._set_narration, text, log=True)
 
-    def _set_narration(self, text):
+    def _set_narration(self, text, log=False):
         self._narration = text
+        if log:
+            self._append_log(f"org: {text}")
         self.refresh_mind()
 
     # -- chat line -------------------------------------------------------
@@ -288,16 +287,16 @@ class OrganismApp(App):
             if self.org.lifecycle.state == "dead":
                 self.org.lifecycle.revive()
                 self.org.store.save()
-                self.query_one("#dreams", Static).update(
+                self._append_log(
                     "revived: the organism stirs back into existence.")
                 self._maybe_narrate()
             else:
-                self.query_one("#dreams", Static).update(
+                self._append_log(
                     f"/revive: it is not faded (state "
                     f"{self.org.lifecycle.state}).")
         elif name == "/stats":
             m = self.org.metrics()
-            self.query_one("#dreams", Static).update(
+            self._append_log(
                 f"stats: beliefs={m.belief_count} rules={m.rule_count} "
                 f"depth={m.total_depth} score={m.score():.1f}")
         elif name == "/save":
@@ -307,12 +306,11 @@ class OrganismApp(App):
         elif name == "/help":
             self.action_help()
         else:
-            self.query_one("#dreams", Static).update(
-                f"unknown: {name} (try /help)")
+            self._append_log(f"unknown: {name} (try /help)")
 
     def handle_chat(self, text):
         self.org.store.record_chat("user", text)
-        self.query_one("#dreams", Static).update(f"you: {text}")
+        self._append_log(f"you: {text}")
         self.org.meter.bump(tui_commands.harshness(text))
         self._maybe_respond(text)
 
@@ -333,6 +331,7 @@ class OrganismApp(App):
 
     def _set_reply(self, reply):
         self.org.store.record_chat("org", reply)
+        self._append_log(f"org: {reply}")
         self._set_narration(reply)
 
 

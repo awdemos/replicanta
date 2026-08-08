@@ -173,7 +173,7 @@ def test_narrate_returns_ollama_response(org, monkeypatch):
 
 
 def test_narrate_falls_back_on_ollama_failure(org, monkeypatch):
-    def boom(prompt, model, timeout):
+    def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
     monkeypatch.setattr("narration._ollama_generate", boom)
     text = narrate(org)
@@ -301,7 +301,7 @@ def test_build_prompt_includes_user_message(org):
 def test_respond_returns_ollama_response(org, monkeypatch):
     captured = {}
 
-    def fake_generate(prompt, model, timeout):
+    def fake_generate(prompt, model, timeout, temperature=0.95):
         captured["prompt"] = prompt
         return "Hello, human. I am awake."
     monkeypatch.setattr("narration._ollama_generate", fake_generate)
@@ -311,7 +311,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
 
 
 def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
-    def boom(prompt, model, timeout):
+    def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
     monkeypatch.setattr("narration._ollama_generate", boom)
     reply = respond(org, "hello there")

@@ -20,6 +20,8 @@ def state_snapshot(org):
     top_beliefs = sorted(org.store.beliefs().items(),
                          key=lambda kv: -kv[1])[:6]
     rules = [r[0] for r in org.store.rules[:4]]
+    probe = getattr(org, "probe", None)
+    clock = probe.clock_utc() if probe is not None else "unknown"
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -32,6 +34,7 @@ def state_snapshot(org):
                     for (obj, attr, val), conf in top_beliefs],
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
+        "clock": clock,
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
     }
@@ -215,6 +218,7 @@ def build_prompt(snapshot, user_message=None):
         "",
         (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
          f"chaos {snapshot['chaos']}, stress {snapshot['stress']}"),
+        f"clock: {snapshot['clock']}",
         f"consciousness score: {snapshot['score']}",
         f"beliefs: {snapshot['belief_count']}",
         f"rules: {snapshot['rule_count']}",
@@ -292,13 +296,13 @@ def build_prompt(snapshot, user_message=None):
     return "\n".join(lines)
 
 
-def _ollama_generate(prompt, model, timeout=TIMEOUT):
+def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
     """POST to ollama /api/generate, non-streaming. Raises on failure."""
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "options": {"num_predict": MAX_TOKENS, "temperature": 0.95},
+        "options": {"num_predict": MAX_TOKENS, "temperature": temperature},
     }).encode()
     req = urllib.request.Request(
         OLLAMA_URL, data=payload,
@@ -329,15 +333,11 @@ def fallback_summary(snapshot):
 
 
 def narrate(org, model=None, timeout=TIMEOUT):
-    """First-person thought for the organism. Falls back to a local
-    summary whenever ollama is unavailable."""
-    snapshot = state_snapshot(org)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        text = _ollama_generate(build_prompt(snapshot), model, timeout)
-        return text or fallback_summary(snapshot)
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        return fallback_summary(snapshot)
+    """First-person thought for the organism. Runs the inner arena (two
+    proposers and an adversarial critic debate until a majority winner
+    emerges) and falls back to a local summary whenever ollama fails."""
+    from arena import ThoughtArena
+    return ThoughtArena().emerge(org, model=model, timeout=timeout)
 
 
 def fallback_respond(snapshot, user_message):
@@ -356,13 +356,8 @@ def fallback_respond(snapshot, user_message):
 
 
 def respond(org, user_text, model=None, timeout=TIMEOUT):
-    """First-person reply to the user. Falls back to a deterministic
-    reply whenever ollama is unavailable."""
-    snapshot = state_snapshot(org)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        text = _ollama_generate(
-            build_prompt(snapshot, user_message=user_text), model, timeout)
-        return text or fallback_respond(snapshot, user_text)
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        return fallback_respond(snapshot, user_text)
+    """First-person reply to the user, decided by the inner arena. Falls
+    back to a deterministic reply whenever ollama fails."""
+    from arena import ThoughtArena
+    return ThoughtArena().emerge(org, user_message=user_text,
+                                 model=model, timeout=timeout)

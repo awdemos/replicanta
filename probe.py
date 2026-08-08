@@ -1,11 +1,13 @@
 """System probe: the organism's senses. Samples the host machine from the
 same sources btm reads — /proc/stat (CPU), /proc/meminfo (memory),
 /proc/loadavg (load), /proc/uptime, /sys/class/thermal (temperatures),
-/sys/class/power_supply (battery) and statvfs (disk) — and quantizes the
-continuous metrics into discrete symbolic beliefs the reasoner can use
-(e.g. cpu:load=high, mem:usage=mid, temp:cpu=hot)."""
+/sys/class/power_supply (battery) and statvfs (disk) — plus the UTC wall
+clock, and quantizes the continuous metrics into discrete symbolic
+beliefs the reasoner can use (e.g. cpu:load=high, mem:usage=mid,
+temp:cpu=hot, time:hour=fourteen)."""
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 LOAD_LOW = 0.5      # load1/ncpu below this -> "low"
@@ -19,6 +21,15 @@ TEMP_WARM = 80.0    # celsius below this -> "warm", else "hot"
 BATTERY_LOW = 20.0  # percent below this -> "low", else "ok"
 UPTIME_BRIEF = 3600.0    # seconds below this -> "brief"
 UPTIME_DAY = 86400.0     # seconds below this -> "day", else "long"
+
+# hour of the UTC clock as a symbolic value (VALID_VALUE_RE: letters only)
+HOUR_WORDS = (
+    "midnight", "one", "two", "three", "four", "five", "six",
+    "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+    "eighteen", "nineteen", "twenty", "twenty_one", "twenty_two",
+    "twenty_three",
+)
 
 # adverse-metric stress weights, capped by DISTRESS_CAP
 DISTRESS_WEIGHTS = {
@@ -43,15 +54,33 @@ class SystemProbe:
     """Reads live system metrics. All sources are injectable so tests can
     point at fake /proc and /sys trees."""
 
-    def __init__(self, proc="/proc", sys="/sys", ncpu=None, statvfs=None):
+    def __init__(self, proc="/proc", sys="/sys", ncpu=None, statvfs=None,
+                 clock=None):
         self.proc = Path(proc)
         self.sys = Path(sys)
         self.ncpu = ncpu if ncpu is not None else os.cpu_count() or 1
         self._statvfs = statvfs or os.statvfs
+        self._clock = clock if clock is not None \
+            else (lambda: datetime.now(timezone.utc))
         self._prev_cpu = None   # (idle, total) from the previous stat read
+        self._adverse_seen = set()   # adverse beliefs already counted
+
+    def _clock_now(self):
+        """The wall clock, always normalized to UTC (naive clocks are
+        assumed to already be UTC)."""
+        now = self._clock()
+        if now.tzinfo is None:
+            return now.replace(tzinfo=timezone.utc)
+        return now.astimezone(timezone.utc)
+
+    def clock_utc(self):
+        """Computer time as 'HH:MM UTC' (e.g. '14:30 UTC')."""
+        now = self._clock_now()
+        return f"{now.hour:02d}:{now.minute:02d} UTC"
 
     # -- raw metrics ------------------------------------------------------
     def snapshot(self):
+        now = self._clock_now()
         return {
             "cpu_percent": self._cpu_percent(),
             "mem_percent": self._mem_percent(),
@@ -61,6 +90,8 @@ class SystemProbe:
             "battery_percent": self._battery_percent(),
             "battery_charging": self._battery_charging(),
             "disk_free_percent": self._disk_free_percent(),
+            "clock_hour": now.hour,
+            "clock_minute": now.minute,
         }
 
     def _cpu_percent(self):
@@ -180,13 +211,19 @@ class SystemProbe:
             lvl = ("brief" if snap["uptime_s"] < UPTIME_BRIEF
                    else "day" if snap["uptime_s"] < UPTIME_DAY else "long")
             b[("system", "uptime", lvl)] = 0.9
+        b[("time", "hour", HOUR_WORDS[snap["clock_hour"]])] = 0.9
         return b
 
     # -- stress coupling ---------------------------------------------------
     def distress(self, snap):
-        """Adverse-metric pressure: sum of weights for bad readings, capped."""
-        amount = 0.0
-        for belief, weight in DISTRESS_WEIGHTS.items():
-            if self.beliefs(snap).get(belief):
-                amount += weight
+        """Adverse-metric pressure, edge-triggered: only conditions that
+        newly appear (cross into adverse territory) count, each once, and
+        each capped by DISTRESS_CAP. A persistently busy host therefore
+        bumps stress on the first sense() but does not re-stack every
+        second, so ambient load alone can never pin stress in the fade
+        zone. If an adverse condition recovers and later returns, it
+        counts again."""
+        current = {b for b in DISTRESS_WEIGHTS if self.beliefs(snap).get(b)}
+        amount = sum(DISTRESS_WEIGHTS[b] for b in current - self._adverse_seen)
+        self._adverse_seen = current
         return min(amount, DISTRESS_CAP)
