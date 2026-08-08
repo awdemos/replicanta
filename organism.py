@@ -1,6 +1,7 @@
 import json
 import random
 import re
+import time
 
 import scallopy
 
@@ -262,3 +263,70 @@ class DreamEngine:
                 self.store.add((obj, dream["combo"], "true"), tag)
             promoted.append(dream)
         return promoted
+
+
+class Lifecycle:
+    """Wake/sleep clock. Wake: self-questioning loop runs at chaos-governed
+    rate; window narrows with fatigue. Sleep: dreams fire, then beliefs
+    consolidate, window resets wide, state auto-saves."""
+
+    def __init__(self, store, wake_seconds=180, sleep_seconds=60):
+        self.store = store
+        self.wake_seconds = wake_seconds
+        self.sleep_seconds = sleep_seconds
+        self.state = "wake"
+        self.state_started = time.time()
+
+    def elapsed(self):
+        return time.time() - self.state_started
+
+    def tick(self):
+        """Advance lifecycle by one forced transition (used by the scheduler
+        and tests). Returns the new state."""
+        self.store.cycle += 1
+        if self.state == "wake":
+            self._transition("sleep")
+        else:
+            self._transition("wake")
+        return self.state
+
+    def _transition(self, new_state):
+        self.state = new_state
+        self.state_started = time.time()
+
+    def due(self):
+        limit = self.wake_seconds if self.state == "wake" else self.sleep_seconds
+        return self.elapsed() >= limit
+
+
+class Metrics:
+    """Consciousness score = weighted belief_count, rule_count, edges
+    (committed-rule references), avg derivation depth, abstraction
+    (rules whose body attrs appear as other rules' head attrs)."""
+
+    def __init__(self, store):
+        self.store = store
+
+    @property
+    def belief_count(self):
+        return len(self.store.beliefs())
+
+    @property
+    def rule_count(self):
+        return len(self.store.rules)
+
+    @property
+    def total_depth(self):
+        return sum(d for (_t, d) in self.store.rules) if self.store.rules else 0
+
+    @property
+    def abstraction_count(self):
+        heads = {r[0].split("(")[0].split()[-1] for r in self.store.rules}
+        refs = sum(1 for (_t, _d) in self.store.rules for h in heads if h in _t and h != _t.split("(")[0].split()[-1])
+        return refs
+
+    def score(self):
+        return (0.4 * self.belief_count
+                + 0.3 * self.rule_count
+                + 0.2 * self.total_depth
+                + 0.1 * self.abstraction_count)

@@ -194,3 +194,30 @@ def test_dream_discards_unsupported(tmp_path):
                     "combo": "red_true", "head": "q99"}]
     promoted = engine.validate(unsupported)
     assert promoted == []
+
+from organism import Lifecycle, Metrics, BeliefStore
+
+def test_lifecycle_advances_cycle(monkeypatch, tmp_path):
+    store = BeliefStore(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0)
+    lc.tick()  # forces wake -> sleep transition
+    assert store.cycle == 1
+    assert lc.state in ("sleep", "wake")
+
+def test_metrics_score_components(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.beliefs_map = {("a", "color", "red"): 0.9, ("b", "shape", "round"): 0.8}
+    store.rules = [('q1(x) = bel(x, "color", "red")', 1)]
+    m = Metrics(store)
+    assert m.belief_count == 2
+    assert m.rule_count == 1
+    assert m.score() > 0
+
+def test_metrics_score_monotonic_under_prune_archive(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.add(("apple", "color", "red"), 0.9)
+    store.add(("apple", "color", "green"), 0.6)
+    m1 = Metrics(store).score()
+    store.add(("ball", "shape", "round"), 0.8)
+    m2 = Metrics(store).score()
+    assert m2 >= m1
