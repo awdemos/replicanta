@@ -17,6 +17,8 @@ COMMAND_NAMES = [c[0] for c in COMMANDS]
 
 _SPARK_BARS = "▁▂▃▄▅▆▇█"
 
+CHAT_HISTORY_LIMIT = 50
+
 HARSHNESS_CAP = 0.15
 _HARSH_HITS = 0.03
 _HARSH_TERMS = (
@@ -46,6 +48,41 @@ def complete_command(value, index=0):
     return matches[used] + value[len(token):], (used + 1) % len(matches)
 
 
+def history_push(history, text):
+    """Remember a submitted chat line, deduped against the previous line."""
+    text = text.strip()
+    if not text or (history and history[-1] == text):
+        return history
+    history.append(text)
+    if len(history) > CHAT_HISTORY_LIMIT:
+        del history[: len(history) - CHAT_HISTORY_LIMIT]
+    return history
+
+
+def history_browse(history, index, draft, current, delta):
+    """Move through chat history. `index` is the browse position (-1 = not
+    browsing), `draft` the input value saved when browsing started, `current`
+    the live input value, `delta` -1 = older (up) / +1 = newer (down).
+    Returns (new_index, draft, value) where `value` is the text to show or
+    None when the input should stay untouched."""
+    n = len(history)
+    if n == 0:
+        return index, draft, None
+    if index == -1:
+        if delta > 0:
+            return index, draft, None
+        draft = current
+        index = n - 1
+    else:
+        target = index + delta
+        if target < 0:
+            return index, draft, None
+        if target >= n:
+            return -1, draft, draft
+        index = target
+    return index, draft, history[index]
+
+
 def sparkline(values):
     """One-line histogram of recent activity (belief counts)."""
     if not values:
@@ -69,6 +106,7 @@ def help_text():
         "ctrl+s  save now",
         "ctrl+t  think now",
         "tab     complete a slash command",
+        "up/down recall previous chat lines",
         "q       quit",
     ]
     return "\n".join(lines)

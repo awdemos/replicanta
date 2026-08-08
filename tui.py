@@ -87,6 +87,10 @@ class OrganismApp(App):
         self._last_rules = 0
         self._history = []
         self._completion_index = 0
+        self._chat_history = []
+        self._history_index = -1
+        self._history_draft = ""
+        self._suppress_changed = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -107,6 +111,8 @@ class OrganismApp(App):
         m = self.org.metrics()
         self._last_beliefs = m.belief_count
         self._last_rules = m.rule_count
+        self._chat_history = [line for role, line in self.org.store.chat_log
+                              if role == "user"]
         self.refresh_status()
         self.refresh_beliefs()
         self.refresh_mind()
@@ -128,18 +134,41 @@ class OrganismApp(App):
 
     # -- keys ------------------------------------------------------------
     def on_key(self, event):
-        if (event.key == "tab" and self.chat_input is not None
-                and self.chat_input.has_focus):
+        if self.chat_input is None or not self.chat_input.has_focus:
+            return
+        if event.key == "tab":
             value = self.chat_input.value
             new_value, self._completion_index = tui_commands.complete_command(
                 value, self._completion_index)
             if new_value != value:
-                self.chat_input.value = new_value
-                self.chat_input.cursor_position = len(new_value)
+                self._set_chat_value(new_value)
+            event.stop()
+        elif event.key in ("up", "down"):
+            delta = -1 if event.key == "up" else 1
+            value = self._browse_history(delta)
+            if value is not None and value != self.chat_input.value:
+                self._set_chat_value(value)
             event.stop()
 
+    def _set_chat_value(self, text):
+        """Programmatic input set: value + cursor, suppressing the next
+        Input.Changed so completion/history navigation state survives."""
+        self._suppress_changed = True
+        self.chat_input.value = text
+        self.chat_input.cursor_position = len(text)
+
+    def _browse_history(self, delta):
+        self._history_index, self._history_draft, value = (
+            tui_commands.history_browse(
+                self._chat_history, self._history_index, self._history_draft,
+                self.chat_input.value, delta))
+        return value
+
     def on_input_changed(self, event):
-        self._completion_index = 0
+        if not self._suppress_changed:
+            self._completion_index = 0
+            self._history_index = -1
+        self._suppress_changed = False
 
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
@@ -227,6 +256,7 @@ class OrganismApp(App):
     def on_input_submitted(self, event):
         text = event.value.strip()
         self.query_one("#chat", Input).value = ""
+        tui_commands.history_push(self._chat_history, text)
         if text.startswith("/"):
             self.handle_command(text)
         elif text:
@@ -266,6 +296,7 @@ class OrganismApp(App):
                 f"unknown: {name} (try /help)")
 
     def handle_chat(self, text):
+        self.org.store.record_chat("user", text)
         self.query_one("#dreams", Static).update(f"you: {text}")
         self.org.meter.bump(tui_commands.harshness(text))
         self._maybe_respond(text)
@@ -283,7 +314,11 @@ class OrganismApp(App):
             reply = narration.respond(self.org, text)
         finally:
             self._responding = False
-        self.call_from_thread(self._set_narration, reply)
+        self.call_from_thread(self._set_reply, reply)
+
+    def _set_reply(self, reply):
+        self.org.store.record_chat("org", reply)
+        self._set_narration(reply)
 
 
 def main():

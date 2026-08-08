@@ -22,7 +22,7 @@ def test_mind_beliefs_returns_float_confidences():
         assert isinstance(conf, float)
         assert 0.0 <= conf <= 1.0
 
-from organism import BeliefStore, VALID_VALUE_RE  # noqa: F401
+from organism import CHAT_LOG_LIMIT, VALID_VALUE_RE, BeliefStore  # noqa: F401
 import pytest
 
 @pytest.fixture
@@ -72,6 +72,30 @@ def test_scl_with_committed_rules_reimports(tmp_path):
     mind = Mind(tmp_path / "organism.scl")
     mind.rebuild()
     assert mind.beliefs()[("apple", "color", "red")] == 0.9
+
+def test_record_chat_strips_and_skips_empty(store):
+    store.record_chat("user", "  hi there  ")
+    store.record_chat("org", "   ")
+    assert store.chat_log == [["user", "hi there"]]
+
+def test_record_chat_appends_entries(store):
+    store.record_chat("user", "hello")
+    store.record_chat("org", "hi back")
+    assert store.chat_log == [["user", "hello"], ["org", "hi back"]]
+
+def test_record_chat_caps_log(store):
+    for i in range(CHAT_LOG_LIMIT + 10):
+        store.record_chat("user", f"line {i}")
+    assert len(store.chat_log) == CHAT_LOG_LIMIT
+    assert store.chat_log[-1] == ["user", f"line {CHAT_LOG_LIMIT + 9}"]
+
+def test_chat_log_roundtrips_via_save_load(store):
+    store.record_chat("user", "hello")
+    store.record_chat("org", "hi back")
+    store.save()
+    loaded = BeliefStore(store.dir_path)
+    loaded.load()
+    assert loaded.chat_log == [["user", "hello"], ["org", "hi back"]]
 
 from organism import ChaosKnob, AttentionWindow
 

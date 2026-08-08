@@ -3,7 +3,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tui_commands import COMMAND_NAMES, complete_command, help_text, sparkline
+from tui_commands import (
+    COMMAND_NAMES,
+    complete_command,
+    help_text,
+    history_browse,
+    history_push,
+    sparkline,
+)
 
 
 def test_complete_first_match():
@@ -62,5 +69,64 @@ def test_help_text_lists_all_commands_and_keys():
     text = help_text()
     for name in COMMAND_NAMES:
         assert name in text
-    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "tab"):
+    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "tab", "up/down"):
         assert key in text
+
+
+def test_history_push_strips_and_skips_empty():
+    history = []
+    history_push(history, "  hello  ")
+    assert history == ["hello"]
+    history_push(history, "   ")
+    assert history == ["hello"]
+
+
+def test_history_push_dedupes_consecutive():
+    history = []
+    history_push(history, "a")
+    history_push(history, "a")
+    assert history == ["a"]
+
+
+def test_history_push_caps_at_limit():
+    history = []
+    for i in range(60):
+        history_push(history, f"line {i}")
+    assert len(history) == 50
+    assert history[0] == "line 10"
+    assert history[-1] == "line 59"
+
+
+def test_history_browse_empty_is_noop():
+    index, draft, value = history_browse([], -1, "", "draft", -1)
+    assert (index, draft, value) == (-1, "", None)
+
+
+def test_history_browse_up_enters_and_cycles():
+    history = ["one", "two", "three"]
+    index, draft, value = history_browse(history, -1, "", "draft", -1)
+    assert (index, draft, value) == (2, "draft", "three")
+    index, draft, value = history_browse(history, index, draft, value, -1)
+    assert (index, draft, value) == (1, "draft", "two")
+    index, draft, value = history_browse(history, index, draft, value, -1)
+    assert (index, draft, value) == (0, "draft", "one")
+    index, draft, value = history_browse(history, index, draft, value, -1)
+    assert (index, draft, value) == (0, "draft", None)
+
+
+def test_history_browse_down_returns_newer_and_restores_draft():
+    history = ["one", "two"]
+    index, draft, value = history_browse(history, -1, "", "draft", -1)
+    assert (index, draft, value) == (1, "draft", "two")
+    index, draft, value = history_browse(history, index, draft, value, -1)
+    assert (index, draft, value) == (0, "draft", "one")
+    index, draft, value = history_browse(history, index, draft, value, 1)
+    assert (index, draft, value) == (1, "draft", "two")
+    index, draft, value = history_browse(history, index, draft, value, 1)
+    assert (index, draft, value) == (-1, "draft", "draft")
+
+
+def test_history_browse_down_from_fresh_is_noop():
+    history = ["one"]
+    index, draft, value = history_browse(history, -1, "", "draft", 1)
+    assert (index, draft, value) == (-1, "", None)
