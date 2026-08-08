@@ -241,3 +241,29 @@ def test_organism_self_play_grows_over_cycles(tmp_path):
         org.cycle()
         scores.append(org.metrics().score())
     assert scores[-1] >= scores[0]
+
+
+from tui import OrganismApp
+
+def test_tui_app_constructs(tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    assert app is not None
+
+def test_tui_command_chaos(tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    app.handle_command("/chaos 0.8")
+    assert org.store.chaos == 0.8
+
+def test_tui_command_focus(tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    app.handle_command("/focus color")
+    assert org.window.focus_attr == "color"
