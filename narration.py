@@ -103,6 +103,7 @@ def state_snapshot(org):
     user_facts = [learning.describe(b) for b in beliefs if b[0] == "user"]
     user_view = next((v for (o, a, v) in beliefs
                       if (o, a) == ("self", "described_as")), None)
+    memory = getattr(org.store, "memory", [])
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -119,6 +120,7 @@ def state_snapshot(org):
         "clock": clock,
         "user_facts": user_facts,
         "user_view": user_view,
+        "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
     }
@@ -332,6 +334,9 @@ def build_prompt(snapshot, user_message=None):
         lines.extend(f"- {f}" for f in snapshot["user_facts"])
     if snapshot.get("user_view"):
         lines.append(f"the user says you are: {snapshot['user_view']}")
+    if snapshot.get("memory"):
+        lines.append("you remember:")
+        lines.extend(f"- {m}" for m in snapshot["memory"])
     lines.append("")
     lines.append("how this feels right now:")
     if faded:
