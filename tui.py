@@ -2,11 +2,11 @@ from typing import ClassVar
 
 import narration
 import tui_commands
+from rich.markup import escape
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
-from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, RichLog, Static
 
@@ -51,11 +51,23 @@ class HelpScreen(ModalScreen):
         yield Static(tui_commands.help_text(), id="help")
 
 
+# role -> log style (Rich markup); engine events get their own styles
+STYLE_YOU = "cyan"
+STYLE_ORG = "green"
+STYLE_DREAM = "magenta"
+STYLE_LEARNED = "yellow"
+STYLE_WARN = "red"
+STYLE_DIM = "dim"
+
+NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
+
+
 class OrganismApp(App):
-    """Terminal front-end for the Scallop organism: mind pane with LLM
-    narration + live activity, scrollable chat/dream log, command line
-    with tab completion. Commands: /chaos N, /focus X, /sleep, /wake,
-    /stats, /save, /think, /help (or ctrl+p / F1)."""
+    """Terminal front-end for the Scallop organism, conversation-first: one
+    dominant styled log (chat, dreams, learned facts, lifecycle events), a
+    one-line status bar, and a command line with tab completion. Commands:
+    /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
+    /help (or ctrl+p / F1)."""
 
     COMMANDS: ClassVar[set] = App.COMMANDS | {SlashCommands}
     BINDINGS: ClassVar[list[Binding]] = [
@@ -66,12 +78,9 @@ class OrganismApp(App):
     ]
 
     CSS = """
-    Screen { layout: horizontal; }
-    #left { width: 35%; height: 100%; border: solid green; }
-    #right { width: 65%; height: 100%; border: solid blue; }
+    #status { height: 1; padding: 0 1; background: $surface; }
+    #dreams { height: 1fr; border: solid cyan; padding: 0 1; }
     #chat { height: 3; border: solid yellow; }
-    #mind { height: 45%; border: solid magenta; }
-    #dreams { height: 1fr; border: solid cyan; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     """
 
@@ -79,12 +88,8 @@ class OrganismApp(App):
         super().__init__()
         self.org = organism
         self.chat_input = None
-        self._narration = None
         self._narrating = False
         self._responding = False
-        self._last_beliefs = 0
-        self._last_rules = 0
-        self._history = []
         self._completion_index = 0
         self._chat_history = []
         self._history_index = -1
@@ -93,32 +98,30 @@ class OrganismApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Horizontal():
-            with Vertical(id="left"):
-                yield Static("STATUS", id="status")
-                yield Static("🧠 MIND", id="mind")
-            with Vertical(id="right"):
-                yield RichLog(
-                    id="dreams", max_lines=500, wrap=True, markup=False,
-                    highlight=False)
-                self.chat_input = Input(
-                    placeholder="talk to me, or /chaos 0.7 ... (tab completes)",
-                    id="chat")
-                yield self.chat_input
+        yield Static("", id="status")
+        yield RichLog(
+            id="dreams", max_lines=1000, wrap=True, markup=True,
+            highlight=False)
+        self.chat_input = Input(
+            placeholder="talk to me, or /chaos 0.7 ... (tab completes)",
+            id="chat")
+        yield self.chat_input
         yield Footer()
 
     def on_mount(self):
-        m = self.org.metrics()
-        self._last_beliefs = m.belief_count
-        self._last_rules = m.rule_count
         self._chat_history = [line for role, line in self.org.store.chat_log
                               if role == "user"]
+        if not self.org.store.chat_log and self.org.store.cycle == 0:
+            self._append_log(
+                "a tiny organism wakes up inside your machine.", STYLE_DIM)
+            self._append_log(
+                "talk to it — it learns from you. /help (or F1) for commands.",
+                STYLE_DIM)
         for role, line in self.org.store.chat_log[-100:]:
-            self._append_log(f"{'you' if role == 'user' else 'org'}: {line}")
+            self._log_chat(role, line)
         self.refresh_status()
-        self.refresh_mind()
         self.set_interval(1.0, self._on_tick)
-        self.set_interval(15.0, self._maybe_narrate)
+        self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self._maybe_narrate()
 
     # -- actions ---------------------------------------------------------
@@ -126,11 +129,9 @@ class OrganismApp(App):
         self.push_screen(HelpScreen())
 
     def action_save_now(self):
-        self.org.store.save()
+        self.org.flush(force=True)
 
     def action_think_now(self):
-        self._narration = "thinking…"
-        self.refresh_mind()
         self._maybe_narrate()
 
     # -- keys ------------------------------------------------------------
@@ -176,81 +177,68 @@ class OrganismApp(App):
         for event in self.org.tick(1.0):
             self._render_event(event)
         self.refresh_status()
-        self.refresh_mind()
 
     def _render_event(self, event):
-        """Render one engine event into the chat/dream log."""
+        """Render one engine event into the log."""
         kind = event["kind"]
         if kind == "state":
             to = event["to"]
             if to == "dead":
-                self._append_log("the organism has faded.")
-                self._narration = "…fading, gently, into the quiet."
+                self._append_log("the organism has faded.", STYLE_WARN)
                 self._maybe_narrate()
             else:
-                self._append_log(f"— the organism drifts to {to} —")
+                self._append_log(
+                    f"— the organism drifts to {to} —", STYLE_DIM)
         elif kind == "dream":
             combos = event["combos"]
             if combos:
-                self._append_log("DREAM: " + ", ".join(combos))
+                self._append_log("dream: " + ", ".join(combos), STYLE_DREAM)
             else:
-                self._append_log("DREAMS: (none promoted)")
+                self._append_log("dreams: (none promoted)", STYLE_DIM)
         elif kind == "beliefs":
             learned = ", ".join(
                 f"{o}:{a}={v}" for (o, a, v) in event["new"])
-            self._append_log(f"new beliefs: {learned}")
+            self._append_log(f"new beliefs: {learned}", STYLE_LEARNED)
         elif kind == "sense":
             self._append_log(
-                f"the host strains (distress +{event['distress']:.2f})")
+                f"the host strains (distress +{event['distress']:.2f})",
+                STYLE_WARN)
         elif kind == "stress":
             level = "high" if event["band"] == 1 else "critical"
-            self._append_log(f"stress rising: {level}")
+            self._append_log(f"stress rising: {level}", STYLE_WARN)
 
     def refresh_status(self):
-        m = self.org.metrics()
+        lc = self.org.lifecycle
+        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
+        mood = next(
+            (v for (o, a, v) in self.org.store.beliefs()
+             if (o, a) == ("self", "mood")), "—")
+        busy = " | thinking…" if (self._narrating or self._responding) else ""
         self.query_one("#status", Static).update(
-            f"state: {self.org.lifecycle.state} | cycle: {self.org.store.cycle} "
-            f"| chaos: {self.org.store.chaos:.2f} | stress: {self.org.store.stress:.2f} "
-            f"| beliefs: {m.belief_count} "
-            f"| rules: {m.rule_count} | score: {m.score():.1f}"
-            f" | clock: {self.org.probe.clock_utc()}")
+            f"{icon} {lc.state} | cycle {self.org.store.cycle} "
+            f"| chaos {self.org.store.chaos:.2f} "
+            f"| stress {self.org.store.stress:.2f} | mood {mood} "
+            f"| beliefs {self.org.metrics().belief_count} "
+            f"| {self.org.probe.clock_utc()}{busy}")
 
-    def _append_log(self, line):
-        """Append a line to the scrollable chat/dream log."""
+    # -- log ---------------------------------------------------------------
+    def _append_log(self, text, style=None):
+        """Append one styled line to the scrollable log (markup-escaped)."""
+        line = escape(text)
+        if style:
+            line = f"[{style}]{line}[/{style}]"
         self.query_one("#dreams", RichLog).write(line)
 
-    def refresh_mind(self):
-        m = self.org.metrics()
-        delta_b = m.belief_count - self._last_beliefs
-        delta_r = m.rule_count - self._last_rules
-        self._last_beliefs = m.belief_count
-        self._last_rules = m.rule_count
-        self._history.append(m.belief_count)
-        if len(self._history) > 24:
-            self._history.pop(0)
-        lc = self.org.lifecycle
-        limit = (lc.wake_seconds if lc.state == "wake"
-                 else lc.sleep_seconds if lc.state == "sleep" else 1)
-        frac = min(1.0, lc.elapsed() / limit) if limit else 0.0
-        bar = "█" * int(frac * 10) + "░" * (10 - int(frac * 10))
-        window = ", ".join(sorted(str(p) for p in self.org.window.pairs)) or "—"
-        thought = " ".join((self._narration or "thinking…").splitlines())
-        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
-        self.query_one("#mind", Static).update(
-            f"{icon} {lc.state} | cycle {self.org.store.cycle} "
-            f"| chaos {self.org.store.chaos:.2f} | stress {self.org.store.stress:.2f} "
-            f"| {bar}\n"
-            f"beliefs {m.belief_count} (+{delta_b}) "
-            f"| rules {m.rule_count} (+{delta_r}) "
-            f"| score {m.score():.1f}\n"
-            f"activity {tui_commands.sparkline(self._history)}\n"
-            f"window {window}\n"
-            f"thought: {thought}")
+    def _log_chat(self, role, text):
+        style = STYLE_YOU if role == "user" else STYLE_ORG
+        who = "you" if role == "user" else "org"
+        self._append_log(f"{who}: {text}", style)
 
     # -- narration -------------------------------------------------------
     def _maybe_narrate(self):
         if not self._narrating:
             self._narrating = True
+            self.refresh_status()
             self._narrate()
 
     @work(thread=True)
@@ -259,13 +247,11 @@ class OrganismApp(App):
             text = narration.narrate(self.org)
         finally:
             self._narrating = False
-        self.call_from_thread(self._set_narration, text, log=True)
+        self.call_from_thread(self._log_narration, text)
 
-    def _set_narration(self, text, log=False):
-        self._narration = text
-        if log:
-            self._append_log(f"org: {text}")
-        self.refresh_mind()
+    def _log_narration(self, text):
+        self._append_log(f"org: {text}", STYLE_ORG)
+        self.refresh_status()
 
     # -- chat line -------------------------------------------------------
     def on_input_submitted(self, event):
@@ -296,38 +282,38 @@ class OrganismApp(App):
         elif name == "/revive":
             if self.org.revive():
                 self._append_log(
-                    "revived: the organism stirs back into existence.")
+                    "revived: the organism stirs back into existence.",
+                    STYLE_DIM)
                 self._maybe_narrate()
             else:
                 self._append_log(
                     f"/revive: it is not faded (state "
-                    f"{self.org.lifecycle.state}).")
+                    f"{self.org.lifecycle.state}).", STYLE_DIM)
         elif name == "/stats":
             m = self.org.metrics()
             self._append_log(
                 f"stats: beliefs={m.belief_count} rules={m.rule_count} "
-                f"depth={m.total_depth} score={m.score():.1f}")
+                f"depth={m.total_depth} score={m.score():.1f}", STYLE_DIM)
         elif name == "/save":
-            self.org.store.save()
+            self.action_save_now()
         elif name == "/think":
             self.action_think_now()
         elif name == "/help":
             self.action_help()
         else:
-            self._append_log(f"unknown: {name} (try /help)")
+            self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
 
     def handle_chat(self, text):
         self.org.store.record_chat("user", text)
-        self._append_log(f"you: {text}")
+        self._log_chat("user", text)
         self.org.meter.bump(tui_commands.harshness(text))
         self._maybe_respond(text)
-
 
     def _maybe_respond(self, text):
         if not self._responding:
             self._responding = True
+            self.refresh_status()
             self._respond(text)
-
 
     @work(thread=True)
     def _respond(self, text):
@@ -339,8 +325,8 @@ class OrganismApp(App):
 
     def _set_reply(self, reply):
         self.org.store.record_chat("org", reply)
-        self._append_log(f"org: {reply}")
-        self._set_narration(reply)
+        self._log_chat("org", reply)
+        self.refresh_status()
 
 
 def main():
