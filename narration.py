@@ -8,6 +8,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import learning
+
 DEFAULT_MODEL = "qwen2.5:3b"
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
@@ -97,6 +99,10 @@ def state_snapshot(org):
     clock = probe.clock_utc() if probe is not None else "unknown"
     mood = next((v for (o, a, v) in org.store.beliefs()
                  if (o, a) == ("self", "mood")), "calm")
+    beliefs = org.store.beliefs()
+    user_facts = [learning.describe(b) for b in beliefs if b[0] == "user"]
+    user_view = next((v for (o, a, v) in beliefs
+                      if (o, a) == ("self", "described_as")), None)
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -111,6 +117,8 @@ def state_snapshot(org):
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
         "clock": clock,
+        "user_facts": user_facts,
+        "user_view": user_view,
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
     }
@@ -319,6 +327,11 @@ def build_prompt(snapshot, user_message=None):
     if snapshot["attention"]:
         lines.append("attention window: "
                      + ", ".join(snapshot["attention"]))
+    if snapshot.get("user_facts"):
+        lines.append("what you know about the user:")
+        lines.extend(f"- {f}" for f in snapshot["user_facts"])
+    if snapshot.get("user_view"):
+        lines.append(f"the user says you are: {snapshot['user_view']}")
     lines.append("")
     lines.append("how this feels right now:")
     if faded:

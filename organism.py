@@ -4,6 +4,7 @@ import re
 import time
 from typing import ClassVar
 
+import learning
 import scallopy
 import sentiment
 from probe import SystemProbe
@@ -639,20 +640,32 @@ class Organism:
 
     # -- mood ----------------------------------------------------------------
     def hear(self, text):
-        """The user said something: record it, let its tone touch the body
-        (harsh words bruise, kind words soothe), and re-evaluate mood.
-        Returns events for the front-end."""
+        """The user said something: record it, learn the facts it carries,
+        let its tone touch the body (harsh words bruise, kind words soothe),
+        and re-evaluate mood. Returns events for the front-end."""
         events = []
         self.store.record_chat("user", text)
         harsh = sentiment.harshness(text)
         kind = sentiment.kindness(text)
+        learned = learning.extract(text)
+        for belief, replace in learned:
+            if replace:
+                self.store.observe(belief, learning.LEARN_CONF)
+            else:
+                self.store.add(belief, learning.LEARN_CONF)
+            events.append({"kind": "learned", "belief": belief,
+                           "text": learning.describe(belief)})
         if harsh > 0.0:
             self.meter.bump(harsh)
             self._sentiment = ("harsh", time.time())
-        elif kind > 0.0:
-            self.store.stress = max(StressMeter.BASELINE,
-                                    self.store.stress - kind)
-            self._sentiment = ("kind", time.time())
+        else:
+            if kind > 0.0:
+                self.store.stress = max(StressMeter.BASELINE,
+                                        self.store.stress - kind)
+            if learned:
+                self._sentiment = ("learn", time.time())
+            elif kind > 0.0:
+                self._sentiment = ("kind", time.time())
         mood = self._update_mood()
         if mood is not None:
             events.append({"kind": "mood", "mood": mood})

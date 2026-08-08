@@ -246,6 +246,8 @@ class OrganismApp(App):
                      else STYLE_LEARNED if mood in ("grateful", "curious")
                      else STYLE_DIM)
             self._append_log(f"mood: {mood}", style)
+        elif kind == "learned":
+            self._append_log(f"learned: {event['text']}", STYLE_LEARNED)
 
     def refresh_status(self):
         lc = self.org.lifecycle
