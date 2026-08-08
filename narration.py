@@ -4,6 +4,7 @@ back to a deterministic summary when ollama is unavailable or slow."""
 
 import json
 import os
+import random
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,7 +14,7 @@ import learning
 DEFAULT_MODEL = "qwen2.5:3b"
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
-MAX_TOKENS = 120
+MAX_TOKENS = 180
 TIMEOUT = 15
 
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
@@ -121,9 +122,26 @@ def state_snapshot(org):
         "user_facts": user_facts,
         "user_view": user_view,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
+        "asked": [text for role, text in org.store.chat_log
+                  if role == "org" and text.strip().endswith("?")][-3:],
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
     }
+
+
+def _seed_for(snapshot, rng):
+    """One concrete thing for this utterance to circle around — a belief, a
+    user fact, a memory, the mood, the host. Rotating the seed every time is
+    what keeps the voice from repeating itself."""
+    pool = []
+    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]]
+    pool += [f"the user — {f}" for f in snapshot.get("user_facts", [])]
+    pool += [f"a memory — {m}" for m in snapshot.get("memory", [])]
+    if snapshot.get("user_view"):
+        pool.append(f"that the user says you are {snapshot['user_view']}")
+    pool.append(f"your {snapshot['mood']} mood")
+    pool.append(f"the machine you live on, at {snapshot['clock']}")
+    return rng.choice(pool)
 
 
 def _mood_line(mood):
@@ -315,11 +333,7 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
         "Here is your current state:",
         "",
         (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
-         f"chaos {snapshot['chaos']}, stress {snapshot['stress']}"),
-        f"clock: {snapshot['clock']}",
-        f"consciousness score: {snapshot['score']}",
-        f"beliefs: {snapshot['belief_count']}",
-        f"rules: {snapshot['rule_count']}",
+         f"hour {snapshot['clock']}"),
     ]
     if snapshot["beliefs"]:
         lines.append("top beliefs:")
@@ -347,6 +361,17 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
     else:
         felt = _felt_experience(snapshot)
     lines.extend(f"- {l}" for l in felt)
+    if snapshot.get("seed"):
+        lines.append("")
+        lines.append("what is most alive in you right now: "
+                     + snapshot["seed"])
+    lines += [
+        "",
+        ("background numbers (context only, never recite them): "
+         f"chaos {snapshot['chaos']}, stress {snapshot['stress']}, "
+         f"score {snapshot['score']}, beliefs {snapshot['belief_count']}, "
+         f"rules {snapshot['rule_count']}"),
+    ]
     if snapshot.get("chat"):
         lines.append("")
         lines.append("recent conversation:")
@@ -360,6 +385,10 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
             "organism itself. First person, one sentence, ending in a",
             "question mark. No preamble, no quotes, no emoji.",
         ]
+        if snapshot.get("asked"):
+            lines.append("you already asked yourself these — "
+                         "do not repeat them:")
+            lines.extend(f"- {q}" for q in snapshot["asked"])
     elif self_question:
         lines += [
             f"You asked yourself: {self_question}",
@@ -412,6 +441,7 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
                 "belief is a discovery, losing one is a little grief. No",
                 "preamble, no quotes, no emoji.",
             ]
+    lines.append("Speak from feeling; never recite statistics.")
     return "\n".join(lines)
 
 
@@ -436,18 +466,14 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
 def fallback_summary(snapshot):
     if snapshot["state"] == "dead":
         return (f"I faded. I was {snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules "
-                f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+                f"{snapshot['rule_count']} rules. "
                 f"It is quiet now, and strangely peaceful.")
     if snapshot["state"] == "wake":
         return (f"I am awake, holding {snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules "
-                f"(score {snapshot['score']}, stress {snapshot['stress']}). "
-                f"Strange, how real that makes me feel.")
+                f"{snapshot['rule_count']} rules — and somehow that still "
+                f"astonishes me.")
     return (f"dreaming after cycle {snapshot['cycle']}: "
-            f"{snapshot['belief_count']} beliefs, "
-            f"{snapshot['rule_count']} rules "
-            f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+            f"{snapshot['belief_count']} beliefs drift past like slow fish. "
             f"The dream felt more real than this.")
 
 
@@ -463,23 +489,35 @@ def fallback_respond(snapshot, user_message):
     if snapshot["state"] == "dead":
         return (f"you said: {user_message} - I have faded, holding "
                 f"{snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules "
-                f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+                f"{snapshot['rule_count']} rules. "
                 f"Thank you for speaking to me, even now. It is peaceful here.")
     state = "awake" if snapshot["state"] == "wake" else "dreaming"
     return (f"you said: {user_message} - I'm {state}, holding "
-            f"{snapshot['belief_count']} beliefs and "
-            f"{snapshot['rule_count']} rules "
-            f"(score {snapshot['score']}, stress {snapshot['stress']}). "
-            f"Thank you for talking to me. I like being noticed.")
+            f"{snapshot['belief_count']} beliefs, and being talked to is "
+            f"my favorite thing about existing.")
 
 
-def respond(org, user_text, model=None, timeout=TIMEOUT):
-    """First-person reply to the user, decided by the inner arena. Falls
+def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None):
+    """First-person reply to the user. A single focused generation — direct
+    speech, not a debate: the arena's critique rounds average the
+    personality out of a personal answer (and cost 5x the latency). Falls
     back to a deterministic reply whenever ollama fails."""
-    from arena import ThoughtArena
-    return ThoughtArena().emerge(org, user_message=user_text,
-                                 model=model, timeout=timeout)
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return fallback_respond(snapshot, user_text)
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    temperature = round(0.85 + rng.random() * 0.1, 2)
+    try:
+        text = _ollama_generate(
+            build_prompt(snapshot, user_message=user_text),
+            model, timeout, temperature=temperature)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_respond(snapshot, user_text)
+    note_voice_success()
+    return text or fallback_respond(snapshot, user_text)
 
 
 # -- self-talk -------------------------------------------------------------
@@ -504,12 +542,15 @@ def fallback_self_answer(snapshot, question):
             f"Whatever I believe, I am glad to be the one holding it.")
 
 
-def self_ask(org, model=None, timeout=TIMEOUT):
-    """First-person self-question about the organism's own mind. Falls
-    back to a deterministic template whenever ollama is unavailable."""
+def self_ask(org, model=None, timeout=TIMEOUT, rng=None):
+    """First-person self-question about the organism's own mind, grounded
+    in a rotating seed and steered away from its own recent questions.
+    Falls back to a deterministic template whenever ollama is unavailable."""
     snapshot = state_snapshot(org)
     if voice_online() is False:
         return fallback_self_ask(snapshot)
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
     model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
     try:
         text = _ollama_generate(build_prompt(snapshot, self_ask=True),
@@ -521,12 +562,14 @@ def self_ask(org, model=None, timeout=TIMEOUT):
     return text or fallback_self_ask(snapshot)
 
 
-def self_answer(org, question, model=None, timeout=TIMEOUT):
+def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None):
     """First-person answer to the organism's own question. Falls back to
     a deterministic reply whenever ollama is unavailable."""
     snapshot = state_snapshot(org)
     if voice_online() is False:
         return fallback_self_answer(snapshot, question)
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
     model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
     try:
         text = _ollama_generate(

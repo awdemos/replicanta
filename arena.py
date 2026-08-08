@@ -54,6 +54,9 @@ class ThoughtArena:
                  or os.environ.get("OLLAMA_MODEL", narration.DEFAULT_MODEL))
         timeout = timeout or self._timeout or narration.TIMEOUT
         snapshot = narration.state_snapshot(org)
+        # every debate circles a different concrete thing — this rotation is
+        # what keeps the idle voice from repeating itself
+        snapshot["seed"] = narration._seed_for(snapshot, self._rng)
         # the whole organism treats chaos as stress-nudged
         # (organism.chaos_effective()); the arena should too, so surprise
         # rises as the organism gets stressed, not just on the raw knob

@@ -113,16 +113,12 @@ def test_narrate_runs_a_debate(org, monkeypatch):
     assert len(calls) == 5
 
 
-def test_respond_runs_a_debate(org, monkeypatch):
-    calls = _scripted(monkeypatch, [
-        "fur and paws",
-        "fur and quiet",
-        "neither is strong",
-        "VOTE: 2",
-        "VOTE: 2",
-    ])
-    assert respond(org, "hello there") == "fur and quiet"
-    assert len(calls) == 5
+def test_respond_is_a_single_direct_generation(org, monkeypatch):
+    """Replies to the user deliberately bypass the debate: the arena's
+    critique rounds average the personality out of a personal answer."""
+    calls = _scripted(monkeypatch, ["hello, little one"])
+    assert respond(org, "hello there") == "hello, little one"
+    assert len(calls) == 1
 
 
 # -- nonlinearity ----------------------------------------------------------

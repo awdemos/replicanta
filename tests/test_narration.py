@@ -1,4 +1,5 @@
 import json
+import random
 import sys
 import urllib.error
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import narration
 from narration import (
     _dead_experience,
     _dream_experience,
@@ -317,3 +319,60 @@ def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
     reply = respond(org, "hello there")
     assert "hello there" in reply
     assert "2 beliefs" in reply
+
+
+# -- voice quality: seeds, anti-repetition, de-emphasized stats ---------------
+
+
+def test_seed_appears_in_prompt(org):
+    snap = state_snapshot(org)
+    snap["seed"] = "the user — you like rain"
+    prompt = build_prompt(snap)
+    assert "what is most alive in you right now" in prompt
+    assert "you like rain" in prompt
+
+
+def test_stats_pushed_to_background_note(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "background numbers (context only, never recite them)" in prompt
+    assert "consciousness score:" not in prompt  # no longer headline stats
+
+
+def test_every_prompt_forbids_reciting_statistics(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "never recite statistics" in prompt
+
+
+def test_seed_pool_draws_from_lived_state(org):
+    snap = state_snapshot(org)
+    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(20)}
+    assert len(seeds) > 1  # rotation actually varies
+
+
+def test_narrate_prompt_carries_a_seed(org, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    narrate(org)
+    assert "what is most alive in you right now" in captured["prompt"]
+
+
+def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
+    org.store.record_chat("org", "am I more than my beliefs?")
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    narration.self_ask(org)
+    assert "do not repeat them" in captured["prompt"]
+    assert "am I more than my beliefs?" in captured["prompt"]
+
+
+def test_respond_prompt_carries_a_seed(org, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    respond(org, "hello there")
+    assert "what is most alive in you right now" in captured["prompt"]
