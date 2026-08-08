@@ -27,6 +27,8 @@ line. Talk to it — it learns from what you say.
 - `/focus color` — steer attention window; `/focus` to clear
 - `/sleep`, `/wake` — force lifecycle transitions; `/revive` after a fade
 - `/stats` — growth metrics; `/save` — persist; `/think` — narrate now
+- `/self-talk` — toggle self-dialogue: it asks itself a question and
+  answers it, out loud, every narration cycle
 - `/help` (or F1, ctrl+p) — everything else
 
 ## Mind
