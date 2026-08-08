@@ -105,3 +105,44 @@ def test_focus_clears():
     win.focus(None)
     win.refresh()
     assert ("color", "red") in win.pairs
+
+from organism import SelfQuestioner, Mind
+
+def _make_questioner(tmp_path):
+    scl = tmp_path / "organism.scl"
+    scl.write_text(
+        'rel 0.9::bel("apple", "color", "red")\n'
+        'rel 0.8::bel("apple", "shape", "round")\n'
+        'rel 0.7::bel("ball", "color", "red")\n'
+    )
+    from organism import BeliefStore
+    store = BeliefStore(tmp_path)
+    store.load()
+    store.beliefs_map = {
+        ("apple", "color", "red"): 0.9,
+        ("apple", "shape", "round"): 0.8,
+        ("ball", "color", "red"): 0.7,
+    }
+    mind = Mind(scl)
+    mind.rebuild()
+    return SelfQuestioner(store, mind, tmp_path)
+
+def test_derives_new_belief(tmp_path):
+    q = _make_questioner(tmp_path)
+    # apple is red AND round -> new belief apple has "red+round" = true
+    q.ask(("color", "red"), ("shape", "round"))
+    assert q.store.conf(("apple", "red_round", "true")) is not None
+
+def test_no_derivation_no_growth(tmp_path):
+    q = _make_questioner(tmp_path)
+    # nothing is red AND drinkable -> no new belief
+    q.ask(("color", "red"), ("drinkable", "true"))
+    assert len(q.store.beliefs()) == 3
+
+def test_consolidation_strengthens(tmp_path):
+    q = _make_questioner(tmp_path)
+    q.ask(("color", "red"), ("shape", "round"))
+    before = q.store.conf(("apple", "red_round", "true"))
+    q.ask(("color", "red"), ("shape", "round"))
+    after = q.store.conf(("apple", "red_round", "true"))
+    assert after >= before

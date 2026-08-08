@@ -164,3 +164,57 @@ class AttentionWindow:
 
     def _all_pairs(self):
         return {(a, v) for (_o, a, v) in self.beliefs}
+
+
+class SelfQuestioner:
+    """The heart: poses 'if A and B, what follows?' over its own beliefs,
+    derives with the Scallop reasoner, and assimilates new/strengthened
+    beliefs. With chaos probability, generalizes a successful derivation
+    into a committed rule."""
+
+    def __init__(self, store, mind, dir_path):
+        self.store = store
+        self.mind = mind
+        self.dir_path = dir_path
+
+    def _next_rule_id(self):
+        self.store.rule_counter += 1
+        return self.store.rule_counter
+
+    def _candidate_rule(self, head, attr_val_a, attr_val_b):
+        attr_a, val_a = attr_val_a
+        attr_b, val_b = attr_val_b
+        return (f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), '
+                f'{BEL}(x, "{attr_b}", "{val_b}")')
+
+    def ask(self, attr_val_a, attr_val_b):
+        head = f"q{self._next_rule_id()}"
+        rule = self._candidate_rule(head, attr_val_a, attr_val_b)
+        derived = self.mind.query_rule(rule, head)
+        if not derived:
+            return []
+        attr_a, val_a = attr_val_a
+        attr_b, val_b = attr_val_b
+        combo = f"{val_a}_{val_b}"
+        new_beliefs = []
+        for (tag, (obj,)) in derived:
+            belief = (obj, combo, "true")
+            before = self.store.conf(belief)
+            self.store.add(belief, tag)
+            if before is None:
+                new_beliefs.append(belief)
+            else:
+                self.store.add(belief, max(before, tag))
+        # chaos-weighted generalization: commit the rule itself
+        if self.store.chaos > 0.0 and random.random() < self.store.chaos * 0.25:
+            depth = self._rule_depth(attr_a, attr_b)
+            self.store.rules.append((rule, depth))
+        return new_beliefs
+
+    def _rule_depth(self, attr_a, attr_b):
+        committed = {a for (_a, d) in [(r[0].split('"')[1], r[1]) for r in self.store.rules]}
+        depth = 1
+        for a in (attr_a, attr_b):
+            if a in committed:
+                depth = max(depth, 2)
+        return depth
