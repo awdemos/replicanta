@@ -5,11 +5,16 @@ import time
 from typing import ClassVar
 
 import scallopy
+from probe import SystemProbe
 
 BEL = "bel"
 PROVENANCE = "minmaxprob"
 CONTRADICTION_THRESHOLD = 0.5
 VALID_VALUE_RE = re.compile(r"^[a-z_]+$")
+
+# Objects from the toy object/color seed world. Purged on load: the
+# organism's beliefs now come from the real host machine via SystemProbe.
+LEGACY_OBJECTS = {"apple", "ball", "milk", "water"}
 
 
 class BeliefStore:
@@ -56,6 +61,21 @@ class BeliefStore:
 
     def conf(self, belief):
         return self.beliefs_map.get(belief)
+
+    def observe(self, belief, conf):
+        """Replace the current reading for (obj, attr): a fresh perception
+        supersedes the old one without triggering the contradiction/archive
+        path (which is reserved for conflicting internal derivations)."""
+        obj, attr, val = belief
+        if not VALID_VALUE_RE.match(obj) or not VALID_VALUE_RE.match(attr) \
+           or not VALID_VALUE_RE.match(val):
+            raise ValueError(f"invalid belief value in {belief}")
+        conf = float(conf)
+        key = (obj, attr, val)
+        for (o, a, v) in list(self.beliefs_map):
+            if (o, a) == (obj, attr) and v != val:
+                del self.beliefs_map[(o, a, v)]
+        self.beliefs_map[key] = conf
 
     def beliefs(self):
         return dict(self.beliefs_map)
@@ -395,7 +415,8 @@ class Organism:
     """Facade wiring the parts into a living cycle: wake self-questioning,
     sleep dreams + consolidation, persistence at every transition."""
 
-    def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5):
+    def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5,
+                 probe=None):
         self.dir_path = dir_path
         self.store = BeliefStore(dir_path)
         self.mind = Mind(dir_path / "organism.scl")
@@ -404,6 +425,7 @@ class Organism:
         self.dreamer = DreamEngine(self.store, self.mind)
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.meter = StressMeter(self.store)
+        self.probe = probe if probe is not None else SystemProbe()
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
         self.questioner.stress = self.meter
@@ -417,12 +439,30 @@ class Organism:
         self.store.dir_path = self.dir_path
         self.store.scl_path = self.dir_path / "organism.scl"
         self.store.state_path = self.dir_path / "state.json"
+        for obj in LEGACY_OBJECTS:
+            self.store.beliefs_map = {(o, a, v): c for (o, a, v), c
+                                      in self.store.beliefs_map.items()
+                                      if o != obj}
+            self.store.archived_map = {(o, a, v): c for (o, a, v), c
+                                       in self.store.archived_map.items()
+                                       if o != obj}
         self.mind.rebuild()
         if fresh and self.mind.scl_path.exists():
             for belief, conf in self.mind.beliefs().items():
                 self.store.add(belief, conf)
         self.window = AttentionWindow(self.store.beliefs())
         self.window.refresh(cycle=self.store.cycle)
+
+    def sense(self):
+        """Perceive the host machine: fold a fresh metric snapshot into the
+        belief store and let adverse conditions raise stress."""
+        snap = self.probe.snapshot()
+        for belief, conf in self.probe.beliefs(snap).items():
+            self.store.observe(belief, conf)
+        distress = self.probe.distress(snap)
+        if distress:
+            self.meter.bump(distress)
+        self.store.save()
 
     def metrics(self):
         return Metrics(self.store)

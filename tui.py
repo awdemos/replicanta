@@ -143,6 +143,7 @@ class OrganismApp(App):
 
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
+        self.org.sense()
         self.org.mind.rebuild()
         self.org.meter.tick(
             sleeping=(self.org.lifecycle.state == "sleep"), dt=1.0)

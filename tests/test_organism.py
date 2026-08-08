@@ -11,9 +11,8 @@ def test_mind_loads_seed_and_reads_beliefs():
     mind = Mind(SCL)
     mind.rebuild()
     beliefs = mind.beliefs()
-    assert ("self", "color", "blue") in beliefs
-    assert ("self", "shape", "round") in beliefs
-    assert beliefs[("self", "color", "blue")] > 0.5
+    assert ("self", "mood", "calm") in beliefs
+    assert beliefs[("self", "mood", "calm")] > 0.5
 
 
 def test_mind_beliefs_returns_float_confidences():
