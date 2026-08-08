@@ -221,3 +221,23 @@ def test_metrics_score_monotonic_under_prune_archive(tmp_path):
     store.add(("ball", "shape", "round"), 0.8)
     m2 = Metrics(store).score()
     assert m2 >= m1
+
+from organism import Organism
+
+def test_organism_sleeps_and_grows(tmp_path):
+    org = Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
+    org.load()
+    score_before = org.metrics().score()
+    org.cycle()
+    score_after = org.metrics().score()
+    assert score_after >= score_before
+    assert org.store.cycle >= 1
+
+def test_organism_self_play_grows_over_cycles(tmp_path):
+    org = Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
+    org.load()
+    scores = [org.metrics().score()]
+    for _ in range(5):
+        org.cycle()
+        scores.append(org.metrics().score())
+    assert scores[-1] >= scores[0]

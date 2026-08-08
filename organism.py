@@ -330,3 +330,55 @@ class Metrics:
                 + 0.3 * self.rule_count
                 + 0.2 * self.total_depth
                 + 0.1 * self.abstraction_count)
+
+
+class Organism:
+    """Facade wiring the parts into a living cycle: wake self-questioning,
+    sleep dreams + consolidation, persistence at every transition."""
+
+    def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5):
+        self.dir_path = dir_path
+        self.store = BeliefStore(dir_path)
+        self.mind = Mind(dir_path / "organism.scl")
+        self.window = AttentionWindow(self.store.beliefs())
+        self.questioner = SelfQuestioner(self.store, self.mind, dir_path)
+        self.dreamer = DreamEngine(self.store, self.mind)
+        self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
+        self.store.chaos = chaos
+
+    def load(self):
+        self.store.load()
+        self.store.dir_path = self.dir_path
+        self.store.scl_path = self.dir_path / "organism.scl"
+        self.store.state_path = self.dir_path / "state.json"
+        self.mind.rebuild()
+        self.window = AttentionWindow(self.store.beliefs())
+        self.window.refresh(cycle=self.store.cycle)
+
+    def metrics(self):
+        return Metrics(self.store)
+
+    def cycle(self):
+        """One full wake->sleep transition (forced, for scheduler + tests)."""
+        self._wake()
+        self._sleep()
+
+    def _wake(self):
+        self.window.refresh(cycle=self.store.cycle)
+        pairs = sorted(self.window.pairs)
+        rng = random.Random()
+        questions = 2 + (1 if self.store.chaos > 0.5 else 0)
+        for _ in range(questions):
+            if len(pairs) >= 2:
+                a, b = rng.sample(pairs, 2)
+                self.questioner.ask(a, b)
+        self.store.cycle += 1
+        self.store.save()
+
+    def _sleep(self):
+        self.dreamer.rng = random.Random()
+        dreams = self.dreamer.dream(count=3)
+        promoted = self.dreamer.validate(dreams)
+        self.store.attention = self.window.pairs
+        self.store.save()
+        return promoted
