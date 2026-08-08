@@ -213,10 +213,10 @@ class SelfQuestioner:
         return new_beliefs
 
     def _rule_depth(self, attr_a, attr_b):
-        committed = {a for (_a, d) in [(r[0].split('"')[1], r[1]) for r in self.store.rules]}
+        committed = {r[0].split('"')[1] for r in self.store.rules}
         depth = 1
-        for a in (attr_a, attr_b):
-            if a in committed:
+        for attr in (attr_a, attr_b):
+            if attr in committed:
                 depth = max(depth, 2)
         return depth
 
@@ -347,11 +347,17 @@ class Organism:
         self.store.chaos = chaos
 
     def load(self):
+        # First boot = no state.json yet: the .scl genome is the source of
+        # truth, so seed the belief store from the mind before anything runs.
+        fresh = not self.store.state_path.exists()
         self.store.load()
         self.store.dir_path = self.dir_path
         self.store.scl_path = self.dir_path / "organism.scl"
         self.store.state_path = self.dir_path / "state.json"
         self.mind.rebuild()
+        if fresh and self.mind.scl_path.exists():
+            for belief, conf in self.mind.beliefs().items():
+                self.store.add(belief, conf)
         self.window = AttentionWindow(self.store.beliefs())
         self.window.refresh(cycle=self.store.cycle)
 

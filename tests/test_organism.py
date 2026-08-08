@@ -147,6 +147,16 @@ def test_consolidation_strengthens(tmp_path):
     after = q.store.conf(("apple", "red_round", "true"))
     assert after >= before
 
+def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
+    q = _make_questioner(tmp_path)
+    q.store.chaos = 1.0
+    q.store.rules.append(('q0(x) = bel(x, "color", "red")', 1))
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    q.ask(("color", "red"), ("shape", "round"))
+    rule, depth = q.store.rules[-1]
+    assert depth == 2
+    assert rule.startswith("q1(x)")
+
 from organism import DreamEngine, Mind
 import random
 
@@ -224,8 +234,25 @@ def test_metrics_score_monotonic_under_prune_archive(tmp_path):
 
 from organism import Organism
 
+def _seeded_organism(tmp_path):
+    scl = tmp_path / "organism.scl"
+    scl.write_text(
+        'rel 0.9::bel("apple", "color", "red")\n'
+        'rel 0.8::bel("apple", "shape", "round")\n'
+        'rel 0.7::bel("ball", "color", "red")\n'
+        'rel 0.9::bel("ball", "shape", "round")\n'
+    )
+    return Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
+
+def test_organism_bootstraps_from_genome(tmp_path):
+    org = _seeded_organism(tmp_path)
+    org.load()
+    assert org.store.conf(("apple", "color", "red")) == 0.9
+    assert org.store.conf(("ball", "shape", "round")) == 0.9
+    assert org.metrics().score() > 0
+
 def test_organism_sleeps_and_grows(tmp_path):
-    org = Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
+    org = _seeded_organism(tmp_path)
     org.load()
     score_before = org.metrics().score()
     org.cycle()
@@ -234,7 +261,7 @@ def test_organism_sleeps_and_grows(tmp_path):
     assert org.store.cycle >= 1
 
 def test_organism_self_play_grows_over_cycles(tmp_path):
-    org = Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
+    org = _seeded_organism(tmp_path)
     org.load()
     scores = [org.metrics().score()]
     for _ in range(5):
