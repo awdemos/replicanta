@@ -146,3 +146,51 @@ def test_consolidation_strengthens(tmp_path):
     q.ask(("color", "red"), ("shape", "round"))
     after = q.store.conf(("apple", "red_round", "true"))
     assert after >= before
+
+from organism import DreamEngine, Mind
+import random
+
+def _make_dreamer(tmp_path):
+    scl = tmp_path / "organism.scl"
+    scl.write_text(
+        'rel 0.9::bel("apple", "color", "red")\n'
+        'rel 0.8::bel("apple", "shape", "round")\n'
+        'rel 0.7::bel("ball", "color", "red")\n'
+        'rel 0.9::bel("ball", "shape", "round")\n'
+    )
+    from organism import BeliefStore
+    store = BeliefStore(tmp_path)
+    store.load()
+    store.beliefs_map = {
+        ("apple", "color", "red"): 0.9,
+        ("apple", "shape", "round"): 0.8,
+        ("ball", "color", "red"): 0.7,
+        ("ball", "shape", "round"): 0.9,
+    }
+    mind = Mind(scl)
+    mind.rebuild()
+    return DreamEngine(store, mind)
+
+def test_dream_generates_candidate_facts(tmp_path):
+    engine = _make_dreamer(tmp_path)
+    engine.rng = random.Random(42)
+    dreams = engine.dream(count=3)
+    assert len(dreams) == 3
+    for d in dreams:
+        assert isinstance(d, dict)
+        assert "rule" in d and "combo" in d
+
+def test_dream_validates_and_promotes(tmp_path):
+    engine = _make_dreamer(tmp_path)
+    engine.rng = random.Random(42)
+    dreams = engine.dream(count=5)
+    promoted = engine.validate(dreams)
+    # at least one dream should promote (apple/ball share color+shape)
+    assert len(promoted) >= 1
+
+def test_dream_discards_unsupported(tmp_path):
+    engine = _make_dreamer(tmp_path)
+    unsupported = [{"rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
+                    "combo": "red_true", "head": "q99"}]
+    promoted = engine.validate(unsupported)
+    assert promoted == []

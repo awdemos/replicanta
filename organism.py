@@ -218,3 +218,47 @@ class SelfQuestioner:
             if a in committed:
                 depth = max(depth, 2)
         return depth
+
+
+class DreamEngine:
+    """During sleep: recombines random belief attribute-pairs at high chaos
+    into novel candidate rules ('dream facts'). On wake: validates each
+    against the reasoner; supported dreams promote to committed rules and
+    derived beliefs; unsupported dreams are discarded with a log line."""
+
+    def __init__(self, store, mind):
+        self.store = store
+        self.mind = mind
+        self.rng = random.Random()
+
+    def _attr_val_pairs(self):
+        return sorted({(a, v) for (_o, a, v) in self.store.beliefs()})
+
+    def dream(self, count=3):
+        pairs = self._attr_val_pairs()
+        if len(pairs) < 2:
+            return []
+        dreams = []
+        for _ in range(count):
+            a, b = self.rng.sample(pairs, 2)
+            attr_a, val_a = a
+            attr_b, val_b = b
+            combo = f"{val_a}_{val_b}"
+            head = f"q{self.store.rule_counter + 1}"
+            rule = (f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), '
+                    f'{BEL}(x, "{attr_b}", "{val_b}")')
+            dreams.append({"rule": rule, "combo": combo, "head": head})
+        return dreams
+
+    def validate(self, dreams):
+        promoted = []
+        for dream in dreams:
+            derived = self.mind.query_rule(dream["rule"], dream["head"])
+            if not derived:
+                continue  # unsupported dream, discarded
+            self.store.rule_counter += 1
+            self.store.rules.append((dream["rule"], 1))
+            for (tag, (obj,)) in derived:
+                self.store.add((obj, dream["combo"], "true"), tag)
+            promoted.append(dream)
+        return promoted
