@@ -64,6 +64,16 @@ def test_save_load_roundtrip(store):
     assert loaded.conf(("apple", "color", "red")) == 0.9
     assert loaded.chaos == 0.7
 
+def test_scl_with_committed_rules_reimports(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.add(("apple", "color", "red"), 0.9)
+    store.add(("apple", "shape", "round"), 0.8)
+    store.rules.append(('q1(x) = bel(x, "color", "red"), bel(x, "shape", "round")', 1))
+    store.save()
+    mind = Mind(tmp_path / "organism.scl")
+    mind.rebuild()
+    assert mind.beliefs()[("apple", "color", "red")] == 0.9
+
 from organism import ChaosKnob, AttentionWindow
 
 def test_chaos_knob_clamps():

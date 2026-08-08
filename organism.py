@@ -64,7 +64,7 @@ class BeliefStore:
         for (obj, attr, val), conf in sorted(self.beliefs_map.items()):
             lines.append(f"rel {conf}::{BEL}(\"{obj}\", \"{attr}\", \"{val}\")")
         for text, _depth in self.rules:
-            lines.append(text)
+            lines.append(f"rel {text}")
         return "\n".join(lines) + "\n"
 
     def save(self):
