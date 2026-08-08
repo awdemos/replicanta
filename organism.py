@@ -1,4 +1,5 @@
 import json
+import random
 import re
 
 import scallopy
@@ -119,3 +120,47 @@ class Mind:
         ctx.add_rule(rule)
         ctx.run()
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
+
+
+class ChaosKnob:
+    """Live-tunable 0..1 randomness constant. High = novel self-questions,
+    wild dreams, wandering. Low = conservative consolidation."""
+
+    def __init__(self, value=0.5):
+        self.value = max(0.0, min(1.0, float(value)))
+
+    def set(self, value):
+        self.value = max(0.0, min(1.0, float(value)))
+
+    def roll(self, rng):
+        """True with probability = chaos."""
+        return rng.random() < self.value
+
+
+class AttentionWindow:
+    """Finite shifting subset of (attr, val) pairs 'in mind'. Sleep widens it;
+    wake narrows it with fatigue. Steerable via focus(attr)."""
+
+    MIN_WINDOW = 3
+
+    def __init__(self, beliefs):
+        self.beliefs = beliefs
+        self.pairs = set()
+        self.focus_attr = None
+
+    def refresh(self, cycle=0):
+        all_pairs = {(a, v) for (_o, a, v) in self.beliefs}
+        if self.focus_attr is not None:
+            self.pairs = {(a, v) for (a, v) in all_pairs if a == self.focus_attr}
+            return
+        size = max(self.MIN_WINDOW, len(all_pairs) - cycle)
+        self.pairs = set(random.sample(sorted(all_pairs), min(size, len(all_pairs))))
+
+    def focus(self, attr):
+        self.focus_attr = attr
+        if attr is not None:
+            self.pairs = {(a, v) for (a, v) in self.pairs if a == attr} or \
+                         {(a, v) for (a, v) in self._all_pairs() if a == attr}
+
+    def _all_pairs(self):
+        return {(a, v) for (_o, a, v) in self.beliefs}

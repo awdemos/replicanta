@@ -63,3 +63,45 @@ def test_save_load_roundtrip(store):
     loaded.load()
     assert loaded.conf(("apple", "color", "red")) == 0.9
     assert loaded.chaos == 0.7
+
+from organism import ChaosKnob, AttentionWindow
+
+def test_chaos_knob_clamps():
+    knob = ChaosKnob()
+    knob.set(1.5)
+    assert knob.value == 1.0
+    knob.set(-0.2)
+    assert knob.value == 0.0
+    knob.set(0.7)
+    assert knob.value == 0.7
+
+def test_attention_window_from_beliefs():
+    beliefs = {("apple", "color", "red"): 0.9, ("ball", "shape", "round"): 0.8}
+    win = AttentionWindow(beliefs)
+    win.refresh()
+    assert ("color", "red") in win.pairs
+    assert ("shape", "round") in win.pairs
+
+def test_attention_window_narrows_with_fatigue():
+    beliefs = {("o1", f"attr{i}", f"val{i}"): 0.9 for i in range(20)}
+    win = AttentionWindow(beliefs)
+    win.refresh(cycle=1)
+    wide = len(win.pairs)
+    win.refresh(cycle=10)
+    narrow = len(win.pairs)
+    assert narrow < wide
+    assert narrow >= 3
+
+def test_focus_steering():
+    beliefs = {("apple", "color", "red"): 0.9, ("ball", "shape", "round"): 0.8}
+    win = AttentionWindow(beliefs)
+    win.focus("color")
+    assert set(win.pairs) == {("color", "red")}
+
+def test_focus_clears():
+    beliefs = {("apple", "color", "red"): 0.9}
+    win = AttentionWindow(beliefs)
+    win.focus("color")
+    win.focus(None)
+    win.refresh()
+    assert ("color", "red") in win.pairs
