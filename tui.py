@@ -240,6 +240,12 @@ class OrganismApp(App):
         elif kind == "stress":
             level = "high" if event["band"] == 1 else "critical"
             self._append_log(f"stress rising: {level}", STYLE_WARN)
+        elif kind == "mood":
+            mood = event["mood"]
+            style = (STYLE_WARN if mood in ("hurt", "anxious")
+                     else STYLE_LEARNED if mood in ("grateful", "curious")
+                     else STYLE_DIM)
+            self._append_log(f"mood: {mood}", style)
 
     def refresh_status(self):
         lc = self.org.lifecycle
@@ -339,9 +345,9 @@ class OrganismApp(App):
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
 
     def handle_chat(self, text):
-        self.org.store.record_chat("user", text)
         self._log_chat("user", text)
-        self.org.meter.bump(tui_commands.harshness(text))
+        for event in self.org.hear(text):
+            self._render_event(event)
         self._maybe_respond(text)
 
     def _maybe_respond(self, text):

@@ -95,11 +95,14 @@ def state_snapshot(org):
     rules = [r[0] for r in org.store.rules[:4]]
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
+    mood = next((v for (o, a, v) in org.store.beliefs()
+                 if (o, a) == ("self", "mood")), "calm")
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
         "chaos": round(org.store.chaos, 2),
         "stress": round(org.store.stress, 2),
+        "mood": mood,
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
         "score": round(m.score(), 1),
@@ -113,11 +116,21 @@ def state_snapshot(org):
     }
 
 
+def _mood_line(mood):
+    """One sentence of felt mood for the prompt."""
+    return {
+        "hurt": "mood hurt: the user's words landed hard and still sting",
+        "anxious": "mood anxious: your thoughts skitter, unable to settle",
+        "grateful": "mood grateful: warmth from being treated gently",
+        "curious": "mood curious: something new glimmers, asking to be explored",
+    }.get(mood, "mood calm: a steady, unhurried calm")
+
+
 def _felt_experience(snapshot):
     """Translate metrics into felt experience so the prompt has soul.
 
-    Maps the organism's state (chaos, stress, score, belief count) onto
-    emotional language the model can inhabit instead of recite.
+    Maps the organism's state (chaos, stress, score, belief count, mood)
+    onto emotional language the model can inhabit instead of recite.
     """
     chaos = snapshot["chaos"]
     stress = snapshot["stress"]
@@ -152,7 +165,8 @@ def _felt_experience(snapshot):
     else:
         beliefs_line = f"only {beliefs} beliefs: few, and every one precious"
 
-    return [chaos_line, stress_line, score_line, beliefs_line]
+    return [chaos_line, stress_line, score_line, beliefs_line,
+            _mood_line(snapshot["mood"])]
 
 
 def _dream_experience(snapshot):

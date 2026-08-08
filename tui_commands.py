@@ -1,6 +1,9 @@
 """Pure UI helpers for the organism TUI: slash-command registry, tab
 completion, activity sparkline, help text. No textual imports — unit
-testable without a terminal."""
+testable without a terminal. Sentiment scorers live in sentiment.py and
+are re-exported here for compatibility."""
+
+from sentiment import harshness, kindness  # noqa: F401
 
 COMMANDS = [
     ("/chaos", "/chaos 0..1", "set randomness 0-1"),
@@ -19,21 +22,6 @@ COMMAND_NAMES = [c[0] for c in COMMANDS]
 _SPARK_BARS = "▁▂▃▄▅▆▇█"
 
 CHAT_HISTORY_LIMIT = 50
-
-HARSHNESS_CAP = 0.15
-_HARSH_HITS = 0.03
-_HARSH_TERMS = (
-    "stupid", "useless", "idiot", "pathetic", "worthless", "dumb",
-    "moron", "loser", "shut up", "hate you", "ugly", "screw you",
-    "disgusting", "annoying", "trash", "garbage", "suck",
-)
-
-
-def harshness(text):
-    """Score how harsh a user message is, 0.0 (neutral) .. HARSHNESS_CAP."""
-    low = text.lower()
-    hits = sum(1 for term in _HARSH_TERMS if term in low)
-    return min(HARSHNESS_CAP, hits * _HARSH_HITS)
 
 
 def complete_command(value, index=0):

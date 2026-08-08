@@ -5,6 +5,7 @@ import time
 from typing import ClassVar
 
 import scallopy
+import sentiment
 from probe import SystemProbe
 
 BEL = "bel"
@@ -511,6 +512,8 @@ class Organism:
     SENSE_INTERVAL = 10.0   # seconds between host probes
     SAVE_INTERVAL = 30.0    # seconds between state flushes while alive
     STRESS_BANDS = (0.5, 0.9)  # crossing one upward emits a stress event
+    RECENT_SENTIMENT_SECONDS = 120.0  # how long a harsh/kind tone lingers
+    MOOD_CONF = 0.9         # confidence of the (self, mood, X) belief
 
     def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5,
                  probe=None):
@@ -530,6 +533,8 @@ class Organism:
         self._since_sense = self.SENSE_INTERVAL  # sense on the first tick
         self._since_save = 0.0
         self._last_stress_band = 0
+        self._sentiment = None   # (tone, timestamp): "harsh" | "kind" | "learn"
+        self._mood = None
 
     def load(self):
         # First boot = no state.json yet: the .scl genome is the source of
@@ -592,6 +597,9 @@ class Organism:
         if self.lifecycle.state == "dead":
             return events
         self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)
+        mood = self._update_mood()
+        if mood is not None:
+            events.append({"kind": "mood", "mood": mood})
         self._since_sense += dt
         if self._since_sense >= self.SENSE_INTERVAL:
             self._since_sense = 0.0
@@ -629,6 +637,60 @@ class Organism:
                 band = i
         return band
 
+    # -- mood ----------------------------------------------------------------
+    def hear(self, text):
+        """The user said something: record it, let its tone touch the body
+        (harsh words bruise, kind words soothe), and re-evaluate mood.
+        Returns events for the front-end."""
+        events = []
+        self.store.record_chat("user", text)
+        harsh = sentiment.harshness(text)
+        kind = sentiment.kindness(text)
+        if harsh > 0.0:
+            self.meter.bump(harsh)
+            self._sentiment = ("harsh", time.time())
+        elif kind > 0.0:
+            self.store.stress = max(StressMeter.BASELINE,
+                                    self.store.stress - kind)
+            self._sentiment = ("kind", time.time())
+        mood = self._update_mood()
+        if mood is not None:
+            events.append({"kind": "mood", "mood": mood})
+        return events
+
+    def _recent_tone(self):
+        if self._sentiment is None:
+            return None
+        tone, when = self._sentiment
+        if time.time() - when > self.RECENT_SENTIMENT_SECONDS:
+            return None
+        return tone
+
+    def _compute_mood(self):
+        """Mood from body + recent treatment: being hurt is specific and
+        wins; a strained body is anxious; learning sparks curiosity; kindness
+        leaves gratitude; otherwise calm."""
+        tone = self._recent_tone()
+        if tone == "harsh":
+            return "hurt"
+        if self.store.stress >= 0.5:
+            return "anxious"
+        if tone == "learn":
+            return "curious"
+        if tone == "kind":
+            return "grateful"
+        return "calm"
+
+    def _update_mood(self):
+        """Recompute mood; on change, write the (self, mood, X) belief and
+        return the new mood (None when unchanged)."""
+        mood = self._compute_mood()
+        if mood == self._mood:
+            return None
+        self._mood = mood
+        self.store.observe(("self", "mood", mood), self.MOOD_CONF)
+        return mood
+
     # -- front-end commands --------------------------------------------------
     def force_state(self, target):
         """Force a wake/sleep transition, running the target state's work.
@@ -655,6 +717,8 @@ class Organism:
         if self.lifecycle.state != "dead":
             return False
         self.lifecycle.revive()
+        self._sentiment = None
+        self._mood = None
         self.flush(force=True)
         return True
 
