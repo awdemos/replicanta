@@ -13,9 +13,20 @@ consciousness (measured as belief-network complexity).
 
 ## Interact
 
-The screen is a conversation: one scrollable log (your words, its voice,
-dreams, lessons, moods, lifecycle events), a one-line status bar, and a chat
-line. Talk to it — it learns from what you say.
+The app has three tabs — **chat** (F2), **mind** (F3), **memory** (F4) —
+over a global status bar and chat line. The status bar speaks in words:
+`🧠 awake · curious · 23 beliefs · 4 rules · voice online · 14:32`, with an
+animated `thinking…` while it composes. Talk to it — it learns from what
+you say.
+
+- **chat** — the conversation: your words, its voice (replies stream in
+  token-by-token above the input before settling into the log), dreams,
+  lessons, moods, lifecycle events, all timestamped. Background events
+  (voice flips, learned facts, fading) also pop as toasts.
+- **mind** — its head, live: top beliefs with confidence bars, committed
+  rules, attention focus, genome stats.
+- **memory** — every episode it remembers (cycle-stamped), what it knows
+  about you, and what you said it is.
 
 - **"my name is Sam"**, **"i like rain"**, **"you are brave"** — it picks up
   facts about you and itself, keeps them as beliefs, and remembers them
@@ -29,6 +40,8 @@ line. Talk to it — it learns from what you say.
 - `/stats` — growth metrics; `/save` — persist; `/think` — narrate now
 - `/self-talk` — toggle self-dialogue: it asks itself a question and
   answers it, out loud, every narration cycle
+- it also asks *you* questions — about a third of its idle wake utterances
+  are curiosity aimed at you, not at itself
 - `/help` (or F1, ctrl+p) — everything else
 
 ## Mind
@@ -41,10 +54,11 @@ line. Talk to it — it learns from what you say.
   moments, fading, revival) are cycle-stamped, persisted, and injected into
   its narration prompt — it has continuity, not amnesia.
 - **Voice**: a local ollama model (`OLLAMA_URL` / `OLLAMA_MODEL` overridable)
-  speaks as the organism through an inner arena — two proposers, an
-  adversarial critic, two voters; high chaos injects rogue thoughts. When
-  ollama is unreachable the status bar shows `voice: offline` and it speaks
-  from a deterministic fallback instead of stalling.
+  speaks as the organism. Replies and questions stream token-by-token; idle
+  musings pass through an inner arena — two proposers, an adversarial
+  critic, two voters; high chaos injects rogue thoughts. When ollama is
+  unreachable the status bar shows `voice offline` and it speaks from a
+  deterministic fallback instead of stalling.
 
 ## Lifecycle
 
