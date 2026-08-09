@@ -6,8 +6,15 @@ without a terminal."""
 
 import json
 
+from rich.panel import Panel
+from rich.text import Text
+
 import activity
 from learning import describe
+
+STYLE_USER = "cyan"
+STYLE_ORG = "green"
+STYLE_DIM = "dim"
 
 _BELIEF_LIMIT = 12
 _RULE_LIMIT = 10
@@ -17,6 +24,19 @@ def conf_bar(conf, width=5):
     """A tiny confidence meter: ▮▮▮▮▯."""
     filled = max(0, min(width, round(conf * width)))
     return "▮" * filled + "▯" * (width - filled)
+
+
+def chat_card(who, text, timestamp=None, border_style=None):
+    """A consistent panel card for chat utterances."""
+    border_style = border_style or (STYLE_USER if who == "you" else STYLE_ORG)
+    title = f"{who} · {timestamp}" if timestamp else who
+    return Panel(
+        Text(text),
+        title=title,
+        title_align="left",
+        border_style=border_style,
+        padding=(0, 1),
+    )
 
 
 def mind_view(org):

@@ -4,8 +4,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import escape
-from rich.panel import Panel
-from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
@@ -97,9 +95,9 @@ MUD_TURN_DELAY = 4.0      # seconds between dungeon moves
 
 
 class OrganismApp(App):
-    """Replicanta's terminal front-end, conversation-first: one dominant
-    styled log (chat, dreams, learned facts, lifecycle events), a one-line
-    status bar, and a command line with tab completion. Commands:
+    """Replicanta's terminal front-end, conversation-first: a workspace
+    chrome with a top organism bar, a nursery sidebar, a bottom status
+    line, and a tabbed main area (chat, mind, memory, inner). Commands:
     /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
     /new, /swap, /organisms, /reload, /lua file.lua, /listen,
     /microphone, /look, /camera, /help (or ctrl+p / F1)."""
@@ -752,9 +750,9 @@ class OrganismApp(App):
         timestamped title), preceded by a blank line so exchanges breathe.
         Content is a plain Rich Text — organism output may contain markup
         metacharacters."""
-        title = f"{who} · {self._stamp()}" if stamp else who
-        card = Panel(Text(text), title=title, title_align="left",
-                     border_style=border_style, padding=(0, 1))
+        ts = self._stamp() if stamp else None
+        card = tui_views.chat_card(who, text, timestamp=ts,
+                                   border_style=border_style)
         log = self.query_one("#dreams", RichLog)
         log.write("")
         log.write(card)
