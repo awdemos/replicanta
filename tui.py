@@ -15,6 +15,9 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Input,
+    Label,
+    ListItem,
+    ListView,
     RichLog,
     Static,
     TabbedContent,
@@ -125,7 +128,11 @@ class OrganismApp(App):
                border-right: solid $primary; }
     #sidebar-header { height: 1; padding: 0 1; background: $surface;
                       color: $text-muted; text-style: bold; }
-    #sidebar-list { padding: 0 1; }
+    #sidebar-list { padding: 0; height: 1fr; border: none;
+                     background: $surface; }
+    #sidebar-list > ListItem { padding: 0 1; }
+    #sidebar-list > ListItem.--highlight { background: $primary;
+                                            color: $text; }
     #content { width: 1fr; height: 1fr; }
     TabbedContent { height: 1fr; }
     #dreams { height: 1fr; padding: 0 1; }
@@ -180,7 +187,7 @@ class OrganismApp(App):
         with Horizontal(id="main"):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
-                yield Static("", id="sidebar-list")
+                yield ListView(id="sidebar-list")
             with Vertical(id="content"), TabbedContent(initial="chat-pane"):
                 with TabPane("chat", id="chat-pane"):
                     dreams = RichLog(
@@ -299,20 +306,26 @@ class OrganismApp(App):
     def _refresh_sidebar(self):
         """Rebuild the nursery sidebar, highlighting the current organism."""
         try:
-            sidebar = self.query_one("#sidebar-list", Static)
+            lv = self.query_one("#sidebar-list", ListView)
         except (ScreenStackError, NoMatches):
             return
+        if not isinstance(lv, ListView):
+            return
+        lv.clear()
         current = self.org.dir_path.name
         names = nursery.list_organisms(self.root)
         if not names:
-            text = "nursery\n  (no organisms)"
-        else:
-            lines = ["nursery"]
-            for name in names:
-                marker = "● " if name == current else "  "
-                lines.append(f"{marker}{name}")
-            text = "\n".join(lines)
-        sidebar.update(text)
+            lv.append(ListItem(Label("(no organisms)")))
+            return
+        for name in names:
+            marker = "● " if name == current else "  "
+            lv.append(ListItem(Label(f"{marker}{name}"), name=name))
+
+    def on_list_view_selected(self, event):
+        """Sidebar organism selection swaps to that organism."""
+        item = event.item
+        if item.name and item.name != self.org.dir_path.name:
+            self._swap_to(item.name)
 
     def action_think_now(self):
         self._maybe_narrate()
