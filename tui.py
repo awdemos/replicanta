@@ -1,5 +1,7 @@
 import json
+import os
 import random
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -366,14 +368,29 @@ class OrganismApp(App):
         self.org.flush(force=True)
 
     def action_quit(self):
-        """Quit cleanly: persist organism state before exiting."""
+        """Quit cleanly: persist organism state, tear down the UI, then
+        make sure the process actually dies. Thread workers blocked in an
+        ollama call cannot be cancelled, and the default executor joins
+        them at interpreter exit — without the hard-exit fallback the UI
+        closes but the process hangs until the call times out."""
         self.action_save_now()
+        self._arm_hard_exit()
         self.exit()
+
+    def _arm_hard_exit(self, delay=2.0):
+        """Force os._exit(0) after a grace period if the interpreter is
+        still alive (stuck joining LLM worker threads). State is already
+        flushed by the caller, and file writes are atomic, so dying
+        mid-flight cannot corrupt the organism."""
+        def killer():
+            time.sleep(delay)
+            os._exit(0)
+        threading.Thread(target=killer, daemon=True).start()
 
     def action_quit_or_hint(self):
         """Quit on double-tap; show a hint on first ctrl+c press."""
         now = time.monotonic()
-        if now - self._quit_hint_time < 1.0:
+        if now - self._quit_hint_time < 2.0:
             self.action_quit()
             return
         self._quit_hint_time = now

@@ -143,6 +143,12 @@ def test_ctrl_q_binding_exists_and_saves_before_quit(monkeypatch, tmp_path):
         quit_called["called"] = True
 
     monkeypatch.setattr(OrganismApp, "exit", fake_exit)
+    # stub the hard-exit timer: the real one would os._exit the pytest
+    # process two seconds after this test runs
+    armed = {"called": False}
+    monkeypatch.setattr(
+        app, "_arm_hard_exit", lambda: armed.update(called=True))
     app.action_quit()
     assert flushed["called"], "action_quit did not flush organism state"
+    assert armed["called"], "action_quit did not arm the hard-exit fallback"
     assert quit_called["called"], "action_quit did not call exit"
