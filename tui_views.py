@@ -290,3 +290,97 @@ def inner_view(org):
         lines.append(proposal)
         lines.append("(/approve to apply · /reject to discard)")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Neural memory grid (cells tab)
+# ---------------------------------------------------------------------------
+
+import hashlib
+
+CELLS_COLS = 48
+CELLS_ROWS = 20
+_CELLS_BG = "#0b0f1a"
+
+
+def _hex_to_rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _lerp_color(low, high, t):
+    lo = _hex_to_rgb(low)
+    hi = _hex_to_rgb(high)
+    t = max(0.0, min(1.0, t))
+    r = round(lo[0] + (hi[0] - lo[0]) * t)
+    g = round(lo[1] + (hi[1] - lo[1]) * t)
+    b = round(lo[2] + (hi[2] - lo[2]) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _cell_color(kind, conf):
+    if kind == "self":
+        return _lerp_color("#7f1d1d", "#f472b6", conf)
+    if kind == "rule":
+        return _lerp_color("#065f46", "#34d399", conf)
+    if kind == "memory":
+        return _lerp_color("#78350f", "#fbbf24", conf)
+    if kind == "goal":
+        return _lerp_color("#701a75", "#e879f9", conf)
+    return _lerp_color("#1e3a8a", "#22d3ee", conf)
+
+
+def _stable_index(key, capacity):
+    digest = hashlib.md5(key.encode()).digest()
+    return int.from_bytes(digest[:8], "big") % capacity
+
+
+def cells_view(org):
+    """Top-down neural memory grid: one cell per belief/rule/memory/goal.
+
+    Colors encode the kind of thing remembered; brightness encodes how
+    strongly the organism holds it. Empty cells use the deep-space
+    background."""
+    capacity = CELLS_COLS * CELLS_ROWS
+    items = []
+    for (obj, attr, val), conf in org.store.beliefs().items():
+        kind = "self" if obj == "self" else "belief"
+        items.append((kind, conf, f"{obj}:{attr}={val}"))
+    for text, depth in org.store.rules:
+        items.append(("rule", 0.5 + min(depth, 4) / 8, text))
+    for entry in org.store.memory[-50:]:
+        kind = entry.get("kind", "memory")
+        items.append(("memory", 0.7, f"{kind}:{entry.get('text', '')}"))
+    goal = org.store.active_goal()
+    if goal:
+        items.append(("goal", 0.9, goal["text"]))
+
+    # Most strongly held memories get a cell when space runs out.
+    items.sort(key=lambda item: -item[1])
+    items = items[:capacity]
+
+    grid = [None] * capacity
+    for kind, conf, key in items:
+        start = _stable_index(key, capacity)
+        for probe in range(capacity):
+            pos = (start + probe) % capacity
+            if grid[pos] is None:
+                grid[pos] = (kind, conf)
+                break
+
+    text = Text()
+    text.append(f"neural memory · {len(items)} cells\n",
+                style="bold #e2e8f0")
+    for row in range(CELLS_ROWS):
+        for col in range(CELLS_COLS):
+            cell = grid[row * CELLS_COLS + col]
+            if cell is None:
+                text.append("  ", style=f"on {_CELLS_BG}")
+            else:
+                kind, conf = cell
+                text.append("  ", style=f"on {_cell_color(kind, conf)}")
+        text.append("\n")
+    text.append(
+        "legend: beliefs cyan · self pink · rules green · memory amber · "
+        "goals magenta",
+        style="#94a3b8")
+    return text

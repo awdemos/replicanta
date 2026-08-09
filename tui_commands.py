@@ -118,6 +118,7 @@ def help_text():
         "F5      push-to-talk (same as /listen)",
         "F6      look through the camera (same as /look)",
         "F7      inner tab (mental state, perpetuation loop)",
+        "F8      cells tab (top-down neural memory grid)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
         "F10     quit (ctrl+q too, but terminals may eat it via flow control;",

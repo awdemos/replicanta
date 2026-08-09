@@ -119,6 +119,7 @@ class OrganismApp(App):
         Binding("f5", "talk", "talk (push-to-talk)"),
         Binding("f6", "look", "look through the camera"),
         Binding("f7", "show_tab('inner-pane')", "inner"),
+        Binding("f8", "show_tab('cells-pane')", "cells"),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
@@ -208,9 +209,11 @@ class OrganismApp(App):
                     yield Static("", id="memory", markup=False)
                 with TabPane("inner", id="inner-pane"), VerticalScroll():
                     yield Static("", id="inner", markup=False)
+                with TabPane("cells", id="cells-pane"), VerticalScroll():
+                    yield Static("", id="cells", markup=False)
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
-                        "F2 chat · F3 mind · F4 memory · F7 inner)",
+                        "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells)",
             id="chat")
         yield self.chat_input
         yield Static("", id="bottombar")
@@ -281,7 +284,7 @@ class OrganismApp(App):
     def action_quit(self):
         """Quit cleanly: persist organism state before exiting."""
         self.action_save_now()
-        super().action_quit()
+        self.exit()
 
     def action_quit_or_hint(self):
         """Quit on double-tap; show a hint on first ctrl+c press."""
@@ -881,6 +884,8 @@ class OrganismApp(App):
         self.query_one("#memory", Static).update(self._memory_text)
         self.query_one("#inner", Static).update(
             tui_views.inner_renderable(self.org))
+        self.query_one("#cells", Static).update(
+            tui_views.cells_view(self.org))
 
     def _render_event(self, event):
         """Render one engine event into the log."""
@@ -969,7 +974,7 @@ class OrganismApp(App):
             f"{m.rule_count} rules · inner voice "
             f"{narration.voice_status()}{spoken}{mic}{playing} · "
             f"{self.org.probe.clock_utc()}{busy}  │  "
-            "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit "
+            "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)")
         self._status_text = self._bottombar_text
         try:

@@ -522,7 +522,8 @@ def test_tui_has_four_tabs(monkeypatch, tmp_path):
         async with app.run_test():
             tabs = app.query_one(TabbedContent)
             assert {p.id for p in tabs.query(TabPane)} == {
-                "chat-pane", "mind-pane", "memory-pane", "inner-pane"}
+                "chat-pane", "mind-pane", "memory-pane", "inner-pane",
+                "cells-pane"}
 
     asyncio.run(check())
 

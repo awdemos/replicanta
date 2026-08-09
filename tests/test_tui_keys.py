@@ -139,10 +139,10 @@ def test_ctrl_q_binding_exists_and_saves_before_quit(monkeypatch, tmp_path):
 
     quit_called = {"called": False}
 
-    def fake_super_quit(_self):
+    def fake_exit(_self):
         quit_called["called"] = True
 
-    monkeypatch.setattr(OrganismApp.__bases__[0], "action_quit", fake_super_quit)
+    monkeypatch.setattr(OrganismApp, "exit", fake_exit)
     app.action_quit()
     assert flushed["called"], "action_quit did not flush organism state"
-    assert quit_called["called"], "action_quit did not delegate to App.action_quit"
+    assert quit_called["called"], "action_quit did not call exit"
