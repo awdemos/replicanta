@@ -1,8 +1,9 @@
 # Replicanta
 
-A self-learning digital organism whose mind is a probabilistic Scallop program.
-It wakes, asks itself questions, sleeps, dreams, learns from you, and grows in
-consciousness (measured as belief-network complexity).
+A neurosymbolic organism implementation: a self-learning digital being whose
+mind couples a probabilistic Scallop program with an LLM backend. Inspired by
+biological organisms, it wakes, asks itself questions, sleeps, dreams, learns
+from you, and grows in consciousness (measured as belief-network complexity).
 
 ## Run
 
