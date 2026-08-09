@@ -1,0 +1,30 @@
+-- Replicanta Lua hooks — template. Copy this file (or uncomment below)
+-- and edit; /reload picks changes up without restarting.
+--
+-- Every script in scripts/*.lua may define any of:
+--   on_birth(ctx)      fresh boot
+--   on_cycle(ctx)      lifecycle transition (ctx.text = "wake"|"sleep")
+--   on_learned(ctx)    the organism learned a fact from you (ctx.text = your words)
+--   on_utterance(ctx)  an utterance manifested in chat (ctx.text = its words)
+--   on_fade(ctx)       the organism faded
+--
+-- ctx reads:  event, text, state, cycle, mood, belief_count, rule_count,
+--             score, chaos, stress, organism, activity (table of counters)
+-- ctx acts:   log(msg), set_chaos(x), focus(attr_or_nil)
+--
+-- Sandbox: no os, io, require, load. Errors are logged, never fatal.
+
+-- example: celebrate every fifth learned fact
+-- function on_learned(ctx)
+--   if ctx.activity.facts_learned % 5 == 0 then
+--     ctx.log("five facts! it really is paying attention")
+--   end
+-- end
+
+-- example: calm it down when stress runs high
+-- function on_cycle(ctx)
+--   if ctx.stress > 0.7 then
+--     ctx.set_chaos(0.2)
+--     ctx.log("stress high — turning the chaos down")
+--   end
+-- end

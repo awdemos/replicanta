@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
     "textual>=1.0",
+    "lupa>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,7 @@ py-modules = [
     "activity",
     "arena",
     "extensions",
+    "hooks",
     "learning",
     "narration",
     "nursery",

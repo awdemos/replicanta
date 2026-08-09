@@ -9,6 +9,7 @@ import extensions
 import learning
 import scallopy
 import sentiment
+from hooks import HookEngine, scripts_dir_for
 from probe import SystemProbe
 from skills import SkillStore
 
@@ -55,6 +56,7 @@ class BeliefStore:
         self.last_reflect_cycle = 0
         self.activity = {}       # neurosymbolic activity counters (activity.py)
         self.on_adverse = None   # callback(amount) fired on contradiction
+        self.on_utterance = None # callback(role, text) fired on chat lines
         self.dirty = False        # any state changed since last save()
         self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
 
@@ -139,6 +141,8 @@ class BeliefStore:
         if len(self.chat_log) > CHAT_LOG_LIMIT:
             del self.chat_log[:len(self.chat_log) - CHAT_LOG_LIMIT]
         self.dirty = True
+        if role == "org" and self.on_utterance is not None:
+            self.on_utterance(role, text)
 
     # -- rules -------------------------------------------------------------
     def commit_rule(self, text, depth):
@@ -609,6 +613,9 @@ class Organism:
         self.meter = StressMeter(self.store)
         self.probe = probe if probe is not None else SystemProbe()
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
+        self.hooks = HookEngine(scripts_dir_for(dir_path))
+        self.store.on_utterance = \
+            lambda role, text: self.hooks.fire("utterance", self, text=text)
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
         self.questioner.stress = self.meter
@@ -643,6 +650,7 @@ class Organism:
                 self.store.add(belief, conf)
         if fresh:
             self.store.remember("born", "woke into existence")
+            self.hooks.fire("birth", self)
         self.window = AttentionWindow(self.store.beliefs())
         self.window.refresh(cycle=self.store.cycle)
 
@@ -698,16 +706,19 @@ class Organism:
         new_state = self.lifecycle.advance()
         if new_state == "sleep":
             events.append({"kind": "state", "to": "sleep"})
+            self.hooks.fire("cycle", self, text="sleep")
             promoted = self._sleep()
             events.append({"kind": "dream",
                            "combos": [p["combo"] for p in promoted]})
         elif new_state == "wake":
             events.append({"kind": "state", "to": "wake"})
+            self.hooks.fire("cycle", self, text="wake")
             new_beliefs = self._wake()
             if new_beliefs:
                 events.append({"kind": "beliefs", "new": new_beliefs})
         elif new_state == "dead":
             events.append({"kind": "state", "to": "dead"})
+            self.hooks.fire("fade", self)
         band = self._stress_band()
         if band != self._last_stress_band:
             if band > self._last_stress_band and band > 0:
@@ -813,6 +824,8 @@ class Organism:
             self.store.remember("learned", learning.describe(belief))
             events.append({"kind": "learned", "belief": belief,
                            "text": learning.describe(belief)})
+        if learned:
+            self.hooks.fire("learned", self, text=text)
         if harsh > 0.0:
             self.meter.bump(harsh)
             self._sentiment = ("harsh", time.time())

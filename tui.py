@@ -187,6 +187,8 @@ class OrganismApp(App):
                 STYLE_DIM)
         for role, line in self.org.store.chat_log[-100:]:
             self._log_chat(role, line, stamp=False)
+        self.org.hooks.emit = \
+            lambda msg: self._append_log(f"lua · {msg}", STYLE_DIM, stamp=True)
         self.refresh_status()
         self._refresh_views()
 
@@ -658,6 +660,12 @@ class OrganismApp(App):
             self.action_save_now()
         elif name == "/think":
             self.action_think_now()
+        elif name == "/reload":
+            self.org.hooks.reload()
+            count = len(self.org.hooks.scripts)
+            self._append_log(
+                f"lua hooks reloaded ({count} script"
+                f"{'s' if count != 1 else ''})", STYLE_DIM)
         elif name == "/organisms":
             names = nursery.list_organisms(self.root)
             current = self.org.dir_path.name

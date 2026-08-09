@@ -56,6 +56,7 @@ you say.
   first (regex compiles, fires on its own example, never on unrelated
   sentences).
 - `/approve`, `/reject`, `/revert` — the approval gate for its patches
+- `/reload` — re-read the Lua hook scripts in `scripts/` (see Scripting)
 - **Many organisms**: they live in a nursery — `organisms/<name>/` under
   the app root, each with its own genome, state and artifacts; a `current`
   pointer file remembers who is awake. `/new fern` births a fresh organism
@@ -141,6 +142,31 @@ tab as totals with per-cycle rates:
 Rates are derived (totals ÷ lifecycle cycles); the counters themselves
 are exact events. What is deliberately **not** measured: consciousness
 itself — these are activity counters, not a sentience score.
+
+## Scripting (Lua hooks)
+
+The organism is user-scriptable: drop `.lua` files in `scripts/` (at the
+nursery root, so one set of hooks covers every organism) and define
+event functions — `/reload` picks changes up without restarting:
+
+    function on_learned(ctx)
+      if ctx.activity.facts_learned % 5 == 0 then
+        ctx.log("five facts! it really is paying attention")
+      end
+    end
+
+- **events**: `on_birth`, `on_cycle` (`ctx.text` = wake/sleep),
+  `on_learned` (`ctx.text` = your words), `on_utterance` (`ctx.text` =
+  its manifested words), `on_fade`.
+- **ctx reads**: `event`, `text`, `state`, `cycle`, `mood`,
+  `belief_count`, `rule_count`, `score`, `chaos`, `stress`, `organism`,
+  and `activity` — the full activity-meter counters as a table.
+- **ctx acts**: `log(msg)` (a line in the chat log), `set_chaos(x)`,
+  `focus(attr)` (nil to clear).
+
+Scripts are sandboxed (no `os`/`io`/`require`/`load`) and every call is
+protected — a broken script logs an error line, it can never kill the
+organism. See `scripts/example.lua` for a template.
 
 ## Develop
 
