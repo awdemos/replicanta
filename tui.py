@@ -344,11 +344,18 @@ class OrganismApp(App):
             line = f"[dim]{self._stamp()}[/dim] {line}"
         self.query_one("#dreams", RichLog).write(line)
 
+    def _org_name(self):
+        """Card title for the organism: its learned name (the user can give
+        it one with 'your name is …'), or 'organism' until then."""
+        return next(
+            (v for (o, a, v) in self.org.store.beliefs()
+             if (o, a) == ("self", "name")), "organism")
+
     def _log_chat(self, role, text, stamp=True):
         if role == "user":
             self._write_card("you", text, STYLE_YOU, stamp=stamp)
         else:
-            self._write_card("org", text, STYLE_ORG, stamp=stamp)
+            self._write_card(self._org_name(), text, STYLE_ORG, stamp=stamp)
 
     def _write_card(self, who, text, border_style, stamp=True):
         """One conversation message as a padded card (role-colored border,
@@ -422,7 +429,7 @@ class OrganismApp(App):
     def _set_user_question(self, question):
         self._pending_hide()
         self.org.store.record_chat("org", question)
-        self._write_card("org", question, STYLE_ORG)
+        self._write_card(self._org_name(), question, STYLE_ORG)
         self.refresh_status()
 
     # -- self-talk ---------------------------------------------------------
@@ -479,7 +486,7 @@ class OrganismApp(App):
 
     def _log_narration(self, text):
         self._pending_hide()
-        self._write_card("org", text, STYLE_ORG)
+        self._write_card(self._org_name(), text, STYLE_ORG)
         self.refresh_status()
 
     # -- chat line -------------------------------------------------------

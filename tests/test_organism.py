@@ -642,3 +642,46 @@ def test_tui_events_stay_flat_lines(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
     app._render_event({"kind": "learned", "text": "your name is sam"})
     assert not [w for w in written if isinstance(w, Panel)]
+
+
+def test_tui_org_card_titled_organism_by_default(monkeypatch, tmp_path):
+    from organism import Organism
+    from rich.panel import Panel
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._log_chat("org", "hi")
+    panels = [w for w in written if isinstance(w, Panel)]
+    assert "organism" in str(panels[0].title)
+
+
+def test_tui_org_card_uses_learned_name(monkeypatch, tmp_path):
+    from organism import Organism
+    from rich.panel import Panel
+    org = Organism(tmp_path)
+    org.load()
+    org.store.add(("self", "name", "sprig"), 0.8)
+    app = OrganismApp(org)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._log_chat("org", "hi")
+    panels = [w for w in written if isinstance(w, Panel)]
+    assert "sprig" in str(panels[0].title)
