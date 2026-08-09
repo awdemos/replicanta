@@ -105,6 +105,7 @@ class OrganismMenuScreen(ModalScreen):
         if not self._is_current:
             options.append(Option(f"swap to {self._name}", id="swap"))
         options.append(Option(f"rename {self._name}", id="rename"))
+        options.append(Option(f"move {self._name} to group…", id="group"))
         options.append(Option("cancel", id="cancel"))
         yield OptionList(*options, id="org-menu")
 
@@ -116,9 +117,41 @@ class OrganismMenuScreen(ModalScreen):
         self.dismiss(None if action == "cancel" else (action, self._name))
 
 
-class RenameScreen(ModalScreen):
-    """Prompt for a new organism name. Dismisses with the typed name
-    (stripped) or None on escape."""
+class NamePromptScreen(ModalScreen):
+    """Generic one-line name prompt (groups, renames). Dismisses with the
+    typed name (stripped) or None on escape."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close")]
+    INPUT_ID: ClassVar[str] = "name-input"
+
+    def __init__(self, placeholder):
+        super().__init__()
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder=self._placeholder, id=self.INPUT_ID)
+
+    def on_mount(self):
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event):
+        self.dismiss(event.value.strip() or None)
+
+
+class RenameScreen(NamePromptScreen):
+    """Prompt for a new organism name."""
+
+    INPUT_ID: ClassVar[str] = "rename-input"
+
+    def __init__(self, name):
+        super().__init__(f"new name for {name} "
+                         "(letters, digits, - and _)")
+
+
+class GroupMenuScreen(ModalScreen):
+    """Left-click dropdown on a sidebar group header: rename / remove /
+    cancel. Dismisses with (action, group_name) or None."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "dismiss", "close")]
@@ -128,15 +161,53 @@ class RenameScreen(ModalScreen):
         self._name = name
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder=f"new name for {self._name} "
-                              "(letters, digits, - and _)",
-                    id="rename-input")
+        yield OptionList(
+            Option(f"rename {self._name}", id="rename"),
+            Option(f"remove group {self._name} (organisms stay)",
+                   id="remove"),
+            Option("cancel", id="cancel"),
+            id="group-menu")
 
     def on_mount(self):
-        self.query_one(Input).focus()
+        self.query_one(OptionList).focus()
 
-    def on_input_submitted(self, event):
-        self.dismiss(event.value.strip() or None)
+    def on_option_list_option_selected(self, event):
+        action = event.option.id
+        self.dismiss(None if action == "cancel" else (action, self._name))
+
+
+class GroupPickScreen(ModalScreen):
+    """Pick a group to move an organism into. Dismisses with the group
+    name, "" for no group, "new" to create one first, or None on cancel."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close")]
+
+    def __init__(self, org_name, groups):
+        super().__init__()
+        self._org_name = org_name
+        self._groups = list(groups)
+
+    def compose(self) -> ComposeResult:
+        options = [Option(g, id=f"g:{g}") for g in self._groups]
+        options.append(Option("(no group)", id="none"))
+        options.append(Option("new group…", id="new"))
+        options.append(Option("cancel", id="cancel"))
+        yield OptionList(*options, id="group-pick")
+
+    def on_mount(self):
+        self.query_one(OptionList).focus()
+
+    def on_option_list_option_selected(self, event):
+        oid = event.option.id
+        if oid == "cancel":
+            self.dismiss(None)
+        elif oid == "none":
+            self.dismiss("")
+        elif oid == "new":
+            self.dismiss("new")
+        else:
+            self.dismiss(oid[2:])
 
 
 class CellDetailScreen(ModalScreen):
@@ -221,10 +292,11 @@ class OrganismApp(App):
     #inner { overflow-y: auto; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
-    OrganismMenuScreen, RenameScreen { align: center middle; }
-    #org-menu { border: round $primary; width: 44; height: auto;
-                background: $surface; }
-    #rename-input { border: round $primary; width: 60; }
+    OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
+    GroupPickScreen { align: center middle; }
+    #org-menu, #group-menu, #group-pick { border: round $primary; width: 44;
+                height: auto; background: $surface; }
+    #rename-input, #name-input { border: round $primary; width: 60; }
     CellDetailScreen { align: center middle; }
     #cell-detail { border: round $secondary; padding: 1 2; width: 64;
                   height: auto; background: $surface; }
@@ -243,6 +315,9 @@ class OrganismApp(App):
         self._spawn = dict(spawn or {})
         # metadata grid behind the cells tab, for click-to-inspect
         self._cells_grid = []
+        # button of the most recent click anywhere; lets the sidebar tell a
+        # right-click (context menu) apart from a left-click selection
+        self._last_click_button = None
         # active group chat (GroupChat) and its reply worker flag
         self._group = None
         self._group_responding = False
@@ -445,20 +520,71 @@ class OrganismApp(App):
         if not names:
             lv.append(ListItem(Label("(no organisms)")))
             return
+        groups = nursery.load_groups(self.root)
+        grouped = {m for members in groups.values() for m in members}
         for name in names:
+            if name in grouped:
+                continue
             marker = "● " if name == current else "  "
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
+        for gname in sorted(groups):
+            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
+            for member in groups[gname]:
+                marker = "● " if member == current else "  "
+                lv.append(ListItem(Label(f"  {marker}{member}"),
+                                   name=member))
 
     def on_list_view_selected(self, event):
-        """Sidebar organism selection opens its action dropdown (left
-        click or Enter): swap to it, rename it, or cancel."""
-        if event.item.name:
+        """Sidebar selection opens a dropdown (left click or Enter): an
+        organism gets swap / rename / move-to-group, a group header gets
+        rename / remove."""
+        if not event.item.name:
+            return
+        # a right-click opens the context menu (on_mouse_down); the ListView
+        # still posts Selected for it, which must not open a second menu
+        if self._last_click_button == 3:
+            self._last_click_button = None
+            return
+        if event.item.name.startswith("group:"):
+            self._open_group_menu(event.item.name[6:])
+        else:
             self._open_org_menu(event.item.name)
+
+    def on_mouse_down(self, event):
+        """Right-click in the sidebar: a group header opens its rename
+        prompt, an organism its action menu, empty space the new-group
+        prompt. (Textual's Click message is left-button only, so this
+        handles button 3 directly.)"""
+        if event.button != 3:
+            return
+        widget, _region = self.screen.get_widget_at(event.screen_x,
+                                                    event.screen_y)
+        item = None
+        in_sidebar = False
+        node = widget
+        while node is not None:
+            if isinstance(node, ListItem) and node.name:
+                item = node
+                in_sidebar = True
+                break
+            if getattr(node, "id", None) == "sidebar":
+                in_sidebar = True
+                break
+            node = node.parent
+        if not in_sidebar:
+            return
+        if item is None:
+            self._prompt_new_group()
+        elif item.name.startswith("group:"):
+            self._prompt_rename_group(item.name[6:])
+        else:
+            self._open_org_menu(item.name)
 
     def on_click(self, event):
         """Left-click a neural-memory cell (F8 grid) to inspect what kind
         of object it holds and its metadata. Grid geometry: one header
         line, then CELLS_ROWS lines of 2-column-wide cells."""
+        self._last_click_button = event.button
         if getattr(event.widget, "id", None) != "cells":
             return
         col = event.x // 2
@@ -479,6 +605,8 @@ class OrganismApp(App):
                 self._swap_to(org_name)
             elif action == "rename":
                 self._prompt_rename(org_name)
+            elif action == "group":
+                self._pick_group_for(org_name)
         self.push_screen(
             OrganismMenuScreen(name, name == self.org.dir_path.name),
             on_choice)
@@ -506,6 +634,81 @@ class OrganismApp(App):
             nursery.rename(self.root, old, new)
             self._refresh_sidebar()
         self.notify(f"renamed {old} → {new}", timeout=3)
+
+    # -- nursery groups -----------------------------------------------------
+
+    def _open_group_menu(self, gname):
+        def on_choice(result):
+            if not result:
+                return
+            action, name = result
+            if action == "rename":
+                self._prompt_rename_group(name)
+            elif action == "remove":
+                try:
+                    nursery.remove_group(self.root, name)
+                except ValueError as exc:
+                    self.notify(str(exc), severity="error", timeout=4)
+                    return
+                self._refresh_sidebar()
+                self.notify(f"removed group {name} "
+                            "(organisms ungrouped)", timeout=3)
+        self.push_screen(GroupMenuScreen(gname), on_choice)
+
+    def _prompt_new_group(self, on_created=None):
+        def on_name(name):
+            if not name:
+                return
+            try:
+                nursery.create_group(self.root, name)
+            except ValueError as exc:
+                self.notify(str(exc), severity="error", timeout=4)
+                return
+            self._refresh_sidebar()
+            self.notify(f"created group {name}", timeout=3)
+            if on_created is not None:
+                on_created(name)
+        self.push_screen(
+            NamePromptScreen(
+                "new group name (letters, digits, spaces, - _ .)"),
+            on_name)
+
+    def _prompt_rename_group(self, gname):
+        def on_name(new_name):
+            if not new_name or new_name == gname:
+                return
+            try:
+                nursery.rename_group(self.root, gname, new_name)
+            except ValueError as exc:
+                self.notify(str(exc), severity="error", timeout=4)
+                return
+            self._refresh_sidebar()
+            self.notify(f"renamed group {gname} → {new_name}", timeout=3)
+        self.push_screen(
+            NamePromptScreen(f"new name for group {gname}"), on_name)
+
+    def _assign_to_group(self, org_name, group_name):
+        try:
+            nursery.assign(self.root, org_name, group_name)
+        except ValueError as exc:
+            self.notify(str(exc), severity="error", timeout=4)
+            return
+        self._refresh_sidebar()
+        self.notify(f"{org_name} → {group_name or 'ungrouped'}", timeout=3)
+
+    def _pick_group_for(self, org_name):
+        def on_pick(choice):
+            if choice is None:
+                return
+            if choice == "new":
+                self._prompt_new_group(
+                    on_created=lambda name: self._assign_to_group(
+                        org_name, name))
+                return
+            self._assign_to_group(org_name, choice or None)
+        self.push_screen(
+            GroupPickScreen(org_name, nursery.list_groups(self.root)),
+            on_pick)
 
     def action_think_now(self):
         self._maybe_narrate()
@@ -1396,6 +1599,10 @@ class OrganismApp(App):
 
     def _log_narration(self, text):
         self._pending_hide()
+        # record the musing so later prompts (and the cross-cycle repeat
+        # gate) know what the voice already said — this is what keeps the
+        # idle voice from circling the same thought
+        self.org.store.record_chat("org", text)
         self._write_card(self._org_name(), text, STYLE_ORG)
         speech.say(text)
         self.refresh_status()

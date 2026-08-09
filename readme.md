@@ -142,8 +142,14 @@ bar shows state, mood, belief/rule counts, and voice status.
 - `/reload` — re-read Lua hook scripts. `/lua name.lua` — run one on demand.
 - `/new fern` — create an organism; `/swap default` — switch;
   `/organisms` — list. Click an organism in the sidebar for its menu
-  (swap / rename). Each organism lives in `organisms/<name>/` with its own
+  (swap / rename / move to group). Each organism lives in
+  `organisms/<name>/` with its own
   state and artifacts. Launch with `python tui.py --org fern`.
+- Nursery groups organize the sidebar: right-click empty sidebar space to
+  create one (custom names, spaces allowed), assign organisms from their
+  menu (`move to group…`), right-click a group header to rename it. Groups
+  are pure metadata (`groups.json`) — they don't touch the organisms'
+  directories, and they're unrelated to `/group` chat sessions.
 - `/group start fern willow` (or `all`) — group chat: everything you type is
   broadcast to every member and each answers in turn (quick arena: one LLM
   call per reply). Address one member with `fern: …` or `@fern …`;

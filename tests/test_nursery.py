@@ -157,3 +157,116 @@ def test_rename_same_name_is_a_noop(tmp_path):
     nursery.create(root, "fern", root / "organism.scl")
     assert nursery.rename(root, "fern", "fern") == root / "organisms" / "fern"
     assert nursery.list_organisms(root) == ["fern"]
+
+
+# -- nursery groups -----------------------------------------------------------
+
+def _root_with(root, *names):
+    for name in names:
+        nursery.create(root, name, root / "organism.scl")
+    return root
+
+
+def test_create_and_list_groups(tmp_path):
+    root = _root(tmp_path)
+    nursery.create_group(root, "thinkers")
+    nursery.create_group(root, "busy bees")
+    assert nursery.list_groups(root) == ["busy bees", "thinkers"]
+
+
+def test_create_group_rejects_invalid_and_duplicate(tmp_path):
+    root = _root(tmp_path)
+    nursery.create_group(root, "thinkers")
+    with pytest.raises(ValueError, match="already exists"):
+        nursery.create_group(root, "thinkers")
+    for bad in ("a/b", "", " leading-space", "emoji☃", "x" * 40):
+        with pytest.raises(ValueError, match="invalid group name"):
+            nursery.create_group(root, bad)
+
+
+def test_group_names_may_have_custom_characters(tmp_path):
+    root = _root(tmp_path)
+    nursery.create_group(root, "Night Shift 2.0_beta-1")
+    assert nursery.list_groups(root) == ["Night Shift 2.0_beta-1"]
+
+
+def test_assign_moves_organism_between_groups(tmp_path):
+    root = _root_with(_root(tmp_path), "fern", "willow")
+    nursery.create_group(root, "a")
+    nursery.create_group(root, "b")
+    nursery.assign(root, "fern", "a")
+    assert nursery.group_of(root, "fern") == "a"
+    nursery.assign(root, "fern", "b")
+    assert nursery.group_of(root, "fern") == "b"
+    assert nursery.load_groups(root) == {"a": [], "b": ["fern"]}
+    nursery.assign(root, "fern", None)
+    assert nursery.group_of(root, "fern") is None
+    assert "fern" not in nursery.load_groups(root)["b"]
+
+
+def test_assign_rejects_unknown_organism_and_group(tmp_path):
+    root = _root_with(_root(tmp_path), "fern")
+    nursery.create_group(root, "a")
+    with pytest.raises(ValueError, match="no organism"):
+        nursery.assign(root, "ghost", "a")
+    with pytest.raises(ValueError, match="no group"):
+        nursery.assign(root, "fern", "nowhere")
+
+
+def test_rename_group_keeps_members(tmp_path):
+    root = _root_with(_root(tmp_path), "fern")
+    nursery.create_group(root, "old")
+    nursery.assign(root, "fern", "old")
+    nursery.rename_group(root, "old", "new")
+    assert nursery.load_groups(root) == {"new": ["fern"]}
+    assert nursery.group_of(root, "fern") == "new"
+    with pytest.raises(ValueError, match="no group"):
+        nursery.rename_group(root, "missing", "x")
+    nursery.create_group(root, "taken")
+    with pytest.raises(ValueError, match="already exists"):
+        nursery.rename_group(root, "new", "taken")
+
+
+def test_remove_group_ungroups_members(tmp_path):
+    root = _root_with(_root(tmp_path), "fern")
+    nursery.create_group(root, "a")
+    nursery.assign(root, "fern", "a")
+    nursery.remove_group(root, "a")
+    assert nursery.list_groups(root) == []
+    assert nursery.group_of(root, "fern") is None
+    with pytest.raises(ValueError, match="no group"):
+        nursery.remove_group(root, "a")
+
+
+def test_load_groups_prunes_deleted_organisms(tmp_path):
+    root = _root_with(_root(tmp_path), "fern", "willow")
+    nursery.create_group(root, "a")
+    nursery.assign(root, "fern", "a")
+    nursery.assign(root, "willow", "a")
+    import shutil
+    shutil.rmtree(root / "organisms" / "willow")
+    assert nursery.load_groups(root) == {"a": ["fern"]}
+
+
+def test_load_groups_tolerates_missing_and_corrupt_file(tmp_path):
+    root = _root(tmp_path)
+    assert nursery.load_groups(root) == {}
+    (root / "groups.json").write_text("{not json")
+    assert nursery.load_groups(root) == {}
+    (root / "groups.json").write_text('["not", "a", "dict"]')
+    assert nursery.load_groups(root) == {}
+
+
+def test_groups_persist_across_loads(tmp_path):
+    root = _root_with(_root(tmp_path), "fern")
+    nursery.create_group(root, "a")
+    nursery.assign(root, "fern", "a")
+    # a fresh read sees the same state (file-backed, not in-memory)
+    assert nursery.load_groups(root) == {"a": ["fern"]}
+    assert (root / "groups.json").exists()
+
+
+def test_empty_groups_survive_loads(tmp_path):
+    root = _root(tmp_path)
+    nursery.create_group(root, "vacant")
+    assert nursery.load_groups(root) == {"vacant": []}

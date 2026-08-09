@@ -166,7 +166,7 @@ def test_menu_for_awake_organism_has_no_swap_option(monkeypatch, tmp_path):
             assert isinstance(app.screen, OrganismMenuScreen)
             menu = app.screen.query_one(OptionList)
             ids = [option.id for option in menu.options]
-            assert ids == ["rename", "cancel"]
+            assert ids == ["rename", "group", "cancel"]
 
     asyncio.run(check())
 
@@ -337,5 +337,174 @@ def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
             assert any("hi from fern" in t
                        for _r, t in app._group.members["fern"]
                        .store.chat_log)
+
+    asyncio.run(check())
+
+
+def test_log_narration_records_musing_in_chat_log(monkeypatch, tmp_path):
+    """Idle musings enter the chat log so later prompts — and the
+    cross-cycle repeat gate — know what the voice already said."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app._log_narration("a quiet thought about rain.")
+            assert any("a quiet thought about rain." in t
+                       for _r, t in app.org.store.chat_log)
+
+    asyncio.run(check())
+
+
+# -- nursery groups in the sidebar -------------------------------------------
+
+def test_sidebar_renders_groups_with_members(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "fern", "thinkers")
+
+    async def check():
+        async with app.run_test():
+            app._refresh_sidebar()
+            await asyncio.sleep(0.05)
+            lv = app.query_one("#sidebar-list", ListView)
+            entries = [(item.name, str(_renderable_text(item.children[0])))
+                       for item in lv.children]
+            names = [n for n, _label in entries]
+            # group header present, fern nested under it, default stays flat
+            assert "group:thinkers" in names
+            assert names.index("group:thinkers") < names.index("fern")
+            header = next(label for n, label in entries
+                          if n == "group:thinkers")
+            assert "▾ thinkers" in header
+            member = next(label for n, label in entries if n == "fern")
+            assert member.startswith("   ")  # indented under the header
+
+    asyncio.run(check())
+
+
+def test_group_header_selection_opens_group_menu(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    from tui import GroupMenuScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    nursery_mod.create_group(app.root, "thinkers")
+
+    async def check():
+        async with app.run_test():
+            app._refresh_sidebar()
+            await asyncio.sleep(0.05)
+            lv = app.query_one("#sidebar-list", ListView)
+            header = next(item for item in lv.children
+                          if item.name == "group:thinkers")
+            event = type("Selected", (), {"item": header})()
+            app.on_list_view_selected(event)
+            await asyncio.sleep(0.05)
+            assert isinstance(app.screen, GroupMenuScreen)
+
+    asyncio.run(check())
+
+
+def test_rename_group_flow_updates_disk_and_sidebar(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "fern", "thinkers")
+
+    async def check():
+        async with app.run_test():
+            app._prompt_rename_group("thinkers")
+            await asyncio.sleep(0.05)
+            app.screen.dismiss("dreamers")
+            await asyncio.sleep(0.05)
+            assert nursery_mod.load_groups(app.root) == {"dreamers": ["fern"]}
+            lv = app.query_one("#sidebar-list", ListView)
+            names = [item.name for item in lv.children]
+            assert "group:dreamers" in names
+            assert "group:thinkers" not in names
+
+    asyncio.run(check())
+
+
+def test_organism_menu_move_to_group_assigns(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+
+    async def check():
+        async with app.run_test():
+            app._open_org_menu("fern")
+            await asyncio.sleep(0.05)
+            app.screen.dismiss(("group", "fern"))
+            await asyncio.sleep(0.05)
+            from tui import GroupPickScreen
+            assert isinstance(app.screen, GroupPickScreen)
+            app.screen.dismiss("thinkers")
+            await asyncio.sleep(0.05)
+            assert nursery_mod.group_of(app.root, "fern") == "thinkers"
+
+    asyncio.run(check())
+
+
+def test_group_pick_new_group_creates_and_assigns(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app._pick_group_for("fern")
+            await asyncio.sleep(0.05)
+            app.screen.dismiss("new")
+            await asyncio.sleep(0.05)
+            from tui import NamePromptScreen
+            assert isinstance(app.screen, NamePromptScreen)
+            app.screen.dismiss("fresh group")
+            await asyncio.sleep(0.05)
+            assert nursery_mod.group_of(app.root, "fern") == "fresh group"
+
+    asyncio.run(check())
+
+
+def test_right_click_group_header_opens_rename_prompt(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    from tui import NamePromptScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    nursery_mod.create_group(app.root, "thinkers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            lv = app.query_one("#sidebar-list", ListView)
+            header = next(item for item in lv.children
+                          if item.name == "group:thinkers")
+            # right-click the header row (offset is screen-relative here:
+            # no widget selector, so pilot aims at the screen itself)
+            await pilot.click(None,
+                              offset=(header.region.x + 2,
+                                      header.region.y),
+                              button=3)
+            await pilot.pause()
+            assert isinstance(app.screen, NamePromptScreen)
+
+    asyncio.run(check())
+
+
+def test_right_click_empty_sidebar_opens_new_group_prompt(monkeypatch,
+                                                          tmp_path):
+    from tui import NamePromptScreen
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            # below the single organism row = empty sidebar space
+            await pilot.click("#sidebar-list", offset=(2, 6), button=3)
+            await pilot.pause()
+            assert isinstance(app.screen, NamePromptScreen)
 
     asyncio.run(check())
