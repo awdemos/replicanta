@@ -1,4 +1,4 @@
-# Scallop Organism
+# Replicanta
 
 A self-learning digital organism whose mind is a probabilistic Scallop program.
 It wakes, asks itself questions, sleeps, dreams, learns from you, and grows in
@@ -6,10 +6,15 @@ consciousness (measured as belief-network complexity).
 
 ## Run
 
-    make init-venv
-    .env/bin/pip install maturin textual pytest
-    RUSTUP_TOOLCHAIN=nightly-2026-05-24 VIRTUAL_ENV=.env .env/bin/maturin develop --release --manifest-path etc/scallopy/Cargo.toml
-    .env/bin/python experiments/organism/tui.py
+Requires Python 3.14 and a Rust toolchain (for the scallopy native module,
+built from a sibling checkout of the scallop repo):
+
+    python3.14 -m venv .venv
+    .venv/bin/pip install -e . maturin pytest ruff
+    RUSTUP_TOOLCHAIN=nightly-2026-05-24 VIRTUAL_ENV=.venv \
+        .venv/bin/maturin build --release --manifest-path ../scallop/etc/scallopy/Cargo.toml
+    .venv/bin/pip install ../scallop/target/wheels/scallopy-*-cp314-*.whl
+    .venv/bin/replicanta
 
 ## Interact
 
@@ -56,7 +61,8 @@ you say.
 ## Mind
 
 - **Senses**: it perceives the host machine (CPU, memory, disk, temperature,
-  battery, clock) as symbolic beliefs — a straining host distresses it.
+  battery, clock — and the host's identity via the `uname` shell command)
+  as symbolic beliefs — a straining host distresses it.
 - **Mood**: derived from stress and how you treat it (calm / hurt / anxious /
   grateful / curious), written back as a belief and fed to its inner voice.
 - **Memory**: notable episodes (birth, lessons, dreams, harsh and kind
@@ -68,7 +74,7 @@ you say.
   musings and self-talk until it completes it (learn-goals by growing what
   it knows about you, others by patient pursuit).
 - **Artifacts**: every ten wake cycles it writes a diary entry to
-  `experiments/organism/artifacts/diary.md` — a body of work that outlives
+  `artifacts/diary.md` — a body of work that outlives
   the chat, stamped by cycle and date.
 - **Skills**: it has procedural memory (Hermes-style). Every thirty wake
   cycles — and whenever it completes a goal — it reflects on recent
@@ -99,8 +105,8 @@ The organism's genome (`organism.scl`) is human-readable and evolves on disk;
 
 ## Develop
 
-    PYTHONPATH=etc/scallopy python3 -m pytest experiments/organism/tests -q
-    ruff check experiments/organism/
+    .venv/bin/python -m pytest tests -q
+    .venv/bin/ruff check .
 
 The engine (`Organism.tick(dt)`) is pure and event-driven — the TUI only
 renders events — so behavior is testable without a terminal.
