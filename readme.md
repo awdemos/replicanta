@@ -238,6 +238,61 @@ you say.
   `en_US-lessac-medium`; `REPLICANTA_VOICE_MODEL` points at a different
   starting model if you prefer.
 
+## How it thinks and responds
+
+Every reply, musing, question, goal, diary entry or reflection follows the
+same pipeline — the organism does not just call a model, it holds an inner
+debate over its own state:
+
+1. **Sense and absorb** — Your message (typed or transcribed) goes through
+   `hear()`: facts are extracted (`"my name is Sam"`, `"i like rain"`),
+   beliefs are added or updated, the chat log is trimmed, and the tone
+   touches the body (harsh words raise stress and set mood *hurt*, kind
+   words lower stress and set mood *grateful*). Host metrics are also
+   folded into beliefs on every sense tick.
+
+2. **Snapshot the mind** — `state_snapshot()` builds a compact, prompt-ready
+   view: top beliefs, committed rules, attention window, memories, the
+   active goal with progress and strategy, recent surprises from
+   contradictions, self-model beliefs, attention rationale, relevant skills,
+   recent chat, and an **activity digest** summarizing the last ~30 cycles.
+
+3. **Build the prompt** — `build_prompt()` turns that snapshot into a
+   first-person instruction: how the organism feels right now, what it is
+   trying to do, what it has learned lately, what surprised it, what it
+   knows about itself, where its attention is, and the concrete task
+   (reply, ask the user, self-question, form a goal, reflect, etc.).
+
+4. **Inner arena** — `ThoughtArena` does not trust a single model call.
+   Two proposers independently draft candidates, an adversarial critic
+   attacks both, and two voters pick a winner; a deadlocked vote is broken
+   by the critic's preference or a random draw. High chaos injects a rogue
+   thought into free-form speech (never into structured tasks like
+   reflections, whose format must stay intact). If ollama is unreachable,
+   the arena falls back to deterministic text instead of stalling.
+
+5. **Deliver and measure** — The winning utterance is recorded, the
+   grounding proxy checks whether it reused content from its seed, and
+   relevant skills get a use/outcome update. Token counts from ollama are
+   added to the activity meter exactly as reported by the API.
+
+6. **Reflect and evolve** — Every thirty wake cycles, on goal completion,
+   or when triggered (recovering from insanity, a run of discarded dreams,
+   a burst of new beliefs, a surprise, or a stalled goal), the organism
+   reflects. It can distill a new skill, patch an existing one, propose an
+   executable extension, or say *nothing*. Skills are stored under
+   `artifacts/skills/` and injected back into future prompts; low-
+   effectiveness skills are eventually archived.
+
+7. **Dream** — During sleep the `DreamEngine` recombines belief pairs into
+   candidate rules, validates them against the Scallop reasoner on wake,
+   and promotes the supported ones while discarding the rest. Contradicted
+   beliefs are recorded as surprises.
+
+The result is a voice that is not reading a static prompt: it is speaking
+from a moving mind that remembers, wants, notices, and occasionally changes
+its own mind.
+
 ## Lifecycle
 
 - **Wake**: self-questioning loop (chaos-governed), attention window narrows
