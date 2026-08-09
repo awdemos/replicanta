@@ -377,11 +377,12 @@ class OrganismApp(App):
         self._arm_hard_exit()
         self.exit()
 
-    def _arm_hard_exit(self, delay=2.0):
+    def _arm_hard_exit(self, delay=0.75):
         """Force os._exit(0) after a grace period if the interpreter is
-        still alive (stuck joining LLM worker threads). State is already
-        flushed by the caller, and file writes are atomic, so dying
-        mid-flight cannot corrupt the organism."""
+        still alive (stuck joining LLM worker threads). The grace only
+        needs to cover Textual's terminal restore (~0.1s); state is
+        already flushed by the caller, and file writes are atomic, so
+        dying mid-flight cannot corrupt the organism."""
         def killer():
             time.sleep(delay)
             os._exit(0)
