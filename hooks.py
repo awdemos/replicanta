@@ -2,7 +2,8 @@
 `scripts/*.lua` (at the nursery root, or beside the organism for
 standalone dirs) define event functions — on_birth, on_cycle, on_learned,
 on_utterance, on_fade — and the engine calls them at the corresponding
-moments. Each receives a ctx table:
+moments. MUD sessions fire on_mud_turn, on_mud_win and on_mud_end (with
+ctx.text set to a short event summary). Each receives a ctx table:
 
     ctx.event, ctx.text        -- what happened (+ the words, when any)
     ctx.state, ctx.cycle       -- wake/sleep/dead, lifecycle cycle
@@ -29,7 +30,8 @@ to "lua"."""
 import threading
 from pathlib import Path
 
-EVENTS = ("birth", "cycle", "learned", "utterance", "fade")
+EVENTS = ("birth", "cycle", "learned", "utterance", "fade",
+          "mud_turn", "mud_win", "mud_end")
 
 _BLOCKED_GLOBALS = ("os", "io", "load", "loadstring", "require", "dofile")
 

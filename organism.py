@@ -197,11 +197,35 @@ class BeliefStore:
     # -- episodic memory ----------------------------------------------------
     def remember(self, kind, text):
         """Record one notable episode (cycle-stamped), capped at
-        MEMORY_LIMIT with oldest-first eviction."""
+        MEMORY_LIMIT with oldest-first eviction. `kind` is a free-form
+        tag; MUD events are recorded with kind "mud" by the TUI."""
         self.memory.append({"cycle": self.cycle, "kind": kind, "text": text})
         if len(self.memory) > MEMORY_LIMIT:
             del self.memory[:len(self.memory) - MEMORY_LIMIT]
         self.dirty = True
+
+    # -- MUD session --------------------------------------------------------
+    @property
+    def mud_state_path(self):
+        return self.dir_path / "artifacts" / "mud_state.json"
+
+    def save_mud_session(self, session):
+        """Persist a mud.MudSession to artifacts/mud_state.json (atomic)."""
+        self.mud_state_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(self.mud_state_path,
+                          json.dumps(session.to_json(), indent=2))
+
+    def load_mud_session(self):
+        """Load the persisted mud.MudSession, or None when the file is
+        missing or corrupt. Imports mud lazily to avoid a circular import."""
+        if not self.mud_state_path.exists():
+            return None
+        try:
+            import mud
+            return mud.MudSession.from_json(
+                json.loads(self.mud_state_path.read_text()))
+        except Exception:  # noqa: BLE001 — a corrupt save must never kill the organism
+            return None
 
     # -- rendering + persistence -------------------------------------------
     def render_scl(self):

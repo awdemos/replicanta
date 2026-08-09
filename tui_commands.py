@@ -23,7 +23,8 @@ COMMANDS = [
     ("/look", "/look", "grab a camera frame and see it (F6)"),
     ("/camera", "/camera [list|use dev]",
      "camera status, list devices, choose one"),
-    ("/mud", "/mud", "toggle the organism's dungeon crawl (text adventure)"),
+    ("/mud", "/mud [map|story|quest|pause|resume|step|reset|scenario d…]",
+     "toggle or control the dungeon crawl (text adventure)"),
     ("/approve", "/approve", "apply the organism's pending genome patch"),
     ("/reject", "/reject", "discard the pending genome patch"),
     ("/revert", "/revert", "undo the last applied genome patch"),
@@ -33,6 +34,7 @@ COMMANDS = [
     ("/reload", "/reload", "re-read the lua hook scripts"),
     ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand"),
     ("/help", "/help", "this help screen"),
+    ("/quit", "/quit", "save and quit (same as F10)"),
 ]
 
 COMMAND_NAMES = [c[0] for c in COMMANDS]
@@ -118,7 +120,13 @@ def help_text():
         "F7      inner tab (mental state, perpetuation loop)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
-        "ctrl+q  quit",
+        "F10     quit (ctrl+q too, but terminals may eat it via flow control)",
+        "",
+        "mud: /mud toggles; while it runs, type moves directly",
+        "(go north, take torch, look, inventory) or prose as a hint.",
+        "/mud map|story|quest show the world; /mud pause|resume|step",
+        "control auto-turns; /mud scenario <description> dreams up a new",
+        "adventure; /mud reset restarts the current one.",
         "",
         "scripting: drop .lua files in scripts/ (see scripts/example.lua);",
         "they get on_birth/on_cycle/on_learned/on_utterance/on_fade(ctx)",

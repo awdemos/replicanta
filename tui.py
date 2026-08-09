@@ -1,3 +1,4 @@
+import json
 import random
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from textual.widgets import (
 import activity
 import camera
 import extensions
+import fileutil
 import listen
 import mud
 import narration
@@ -117,6 +119,7 @@ class OrganismApp(App):
         Binding("f6", "look", "look through the camera"),
         Binding("f7", "show_tab('inner-pane')", "inner"),
         Binding("ctrl+q", "quit", "quit"),
+        Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
     ]
 
     CSS = """
@@ -174,6 +177,8 @@ class OrganismApp(App):
         self.camera = camera.Camera()
         self._mud_game = None
         self._mud_hint = None   # one-shot user nudge for the next move
+        self._mud_paused = False
+        self._mud_thinking = False   # a move-choice worker is in flight
         self._mind_text = ""
         self._memory_text = ""
         self._inner_text = ""
@@ -360,54 +365,296 @@ class OrganismApp(App):
         self.call_from_thread(self._set_sight, sight)
 
     # -- mud mode ------------------------------------------------------------
+    def _mud_command(self, args):
+        """Dispatch /mud subcommands: bare toggles, the rest control or
+        inspect the running game."""
+        if not args:
+            self._toggle_mud()
+            return
+        sub = args[0]
+        if sub in ("map", "story", "quest"):
+            game = self._mud_game
+            if game is None:
+                self._append_log(
+                    f"/mud {sub}: no game running (start with /mud)",
+                    STYLE_DIM)
+                return
+            render = {"map": mud.render_map, "story": mud.render_story,
+                      "quest": mud.render_quest}[sub]
+            self._append_log(render(game), STYLE_DREAM)
+        elif sub == "pause":
+            if self._mud_game is None:
+                self._append_log("/mud pause: no game running.", STYLE_DIM)
+            elif self._mud_paused:
+                self._append_log("mud: already paused (/mud resume)",
+                                 STYLE_DIM)
+            else:
+                self._mud_paused = True
+                self._append_log(
+                    "— the dungeon holds its breath (paused; /mud resume, "
+                    "/mud step, or type a command) —", STYLE_DIM, stamp=True)
+                self.refresh_status()
+        elif sub == "resume":
+            if self._mud_game is None:
+                self._append_log("/mud resume: no game running.", STYLE_DIM)
+            elif not self._mud_paused:
+                self._append_log("mud: not paused.", STYLE_DIM)
+            else:
+                self._mud_paused = False
+                self._append_log("— the dungeon stirs again —", STYLE_DIM,
+                                 stamp=True)
+                self.refresh_status()
+                self._mud_next()
+        elif sub == "step":
+            self._mud_step()
+        elif sub == "reset":
+            self._mud_reset()
+        elif sub == "scenario":
+            description = " ".join(args[1:]).strip()
+            if not description:
+                self._append_log(
+                    "/mud scenario needs a description, e.g. "
+                    "/mud scenario a haunted space station", STYLE_DIM)
+                return
+            self._mud_scenario(description)
+        else:
+            self._append_log(
+                "/mud [map|story|quest|pause|resume|step|reset|"
+                "scenario <description>]", STYLE_DIM)
+
     def _toggle_mud(self):
         """/mud: start or stop the organism's dungeon crawl. The world is
         deterministic; the voice picks the moves (wanderer fallback)."""
         if self._mud_game is not None:
-            game, self._mud_game = self._mud_game, None
-            self._append_log(
-                f"— the dungeon fades (stopped after {game.turns} turns) —",
-                STYLE_DIM, stamp=True)
-            self.org.store.remember(
-                "mud", f"left the dungeon after {game.turns} turns")
-            self.refresh_status()
+            self._mud_stop()
             return
-        self._mud_game = mud.MudGame()
-        self._append_log(
-            "— the organism descends into the dungeon —",
-            STYLE_DREAM, stamp=True)
-        self._append_log(self._mud_game.look(), STYLE_DREAM)
+        self._mud_start()
+
+    def _mud_start(self, scenario=None, fresh=False):
+        """Begin a game: with the given scenario, else resuming the saved
+        session when one exists, else the default dungeon."""
+        session = None
+        if scenario is None and not fresh:
+            scenario, session = self._mud_restore()
+        game = mud.MudGame(scenario)
+        if session is not None:
+            # the session tracks map/story but not room/inventory: replay
+            # the logged commands to bring back the exact game state
+            for actor, command, _turn in session.command_log:
+                game.act_event(command, actor=actor)
+            game.session = session
+        self._mud_game = game
+        self._mud_paused = False
+        if session is not None:
+            self._append_log(
+                f"— the organism returns to {game.scenario.title} "
+                f"(turn {game.turns}) —", STYLE_DREAM, stamp=True)
+        else:
+            self._append_log(
+                "— the organism descends into the dungeon —",
+                STYLE_DREAM, stamp=True)
+            self._append_log(mud.build_premise(self.org, game.scenario),
+                             STYLE_DREAM)
+        self._append_log(game.look(), STYLE_DREAM)
+        self.org.store.remember("mud", f"started {game.scenario.title}")
+        self._mud_save_session(game)
         self.refresh_status()
+        self._mud_next()
+
+    def _mud_stop(self):
+        """End the current game, persisting its session for a later resume."""
+        game, self._mud_game = self._mud_game, None
+        self._mud_paused = False
+        self._mud_save_session(game)
+        self._append_log(
+            f"— the dungeon fades (stopped after {game.turns} turns) —",
+            STYLE_DIM, stamp=True)
+        self.org.store.remember(
+            "mud", f"left {game.scenario.title} after {game.turns} turns")
+        self.refresh_status()
+
+    def _mud_reset(self):
+        """Restart the current scenario fresh, discarding the session."""
+        game = self._mud_game
+        if game is None:
+            self._append_log("/mud reset: no game running.", STYLE_DIM)
+            return
+        scenario = game.scenario
+        self._mud_game = None
+        self._mud_paused = False
+        self._append_log("— the dungeon resets —", STYLE_DIM, stamp=True)
+        self._mud_start(scenario=scenario, fresh=True)
+
+    def _mud_step(self):
+        """/mud step: exactly one organism turn while paused."""
+        if self._mud_game is None:
+            self._append_log("/mud step: no game running.", STYLE_DIM)
+            return
+        if not self._mud_paused:
+            self._append_log(
+                "auto-turns are running — /mud pause first", STYLE_DIM)
+            return
+        if self._mud_thinking:
+            return                      # a move is already being chosen
+        self._mud_thinking = True
         self._mud_turn()
 
+    def _mud_scenario(self, description):
+        """/mud scenario <description>: stop the current game and dream up
+        a new scenario with the voice (off the UI thread)."""
+        if self._mud_game is not None:
+            self._mud_stop()
+        self._append_log(f"dreaming up a scenario: {description}…", STYLE_DIM)
+        self._mud_scenario_worker(description)
+
+    @work(thread=True)
+    def _mud_scenario_worker(self, description):
+        try:
+            scenario = mud.generate_scenario(description, self.org)
+        except Exception as exc:  # noqa: BLE001 — voice offline etc.
+            self.call_from_thread(
+                self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN)
+            return
+        self.call_from_thread(self._mud_start_scenario, scenario)
+
+    def _mud_start_scenario(self, scenario):
+        self._mud_save_scenario(scenario)
+        self._append_log(f"new scenario: {scenario.title}", STYLE_LEARNED,
+                         stamp=True)
+        self._mud_start(scenario=scenario, fresh=True)
+
+    # -- mud persistence ------------------------------------------------------
+    def _mud_artifacts_dir(self):
+        return self.org.dir_path / "artifacts"
+
+    def _mud_state_path(self):
+        return self._mud_artifacts_dir() / "mud_state.json"
+
+    def _mud_save_session(self, game=None):
+        """Persist the session after every turn and on stop. Prefers the
+        BeliefStore method (organism side); until that lands, write
+        artifacts/mud_state.json directly."""
+        game = game or self._mud_game
+        if game is None:
+            return
+        save = getattr(self.org.store, "save_mud_session", None)
+        if callable(save):
+            try:
+                save(game.session)
+                return
+            except Exception:  # noqa: BLE001, S110 — direct-write fallback
+                pass
+        try:
+            self._mud_artifacts_dir().mkdir(parents=True, exist_ok=True)
+            fileutil.atomic_write_text(
+                self._mud_state_path(),
+                json.dumps(game.session.to_json(), indent=1))
+        except OSError as exc:
+            self._append_log(f"mud: couldn't save session ({exc})", STYLE_WARN)
+
+    def _mud_load_session(self):
+        load = getattr(self.org.store, "load_mud_session", None)
+        if callable(load):
+            try:
+                return load()
+            except Exception:  # noqa: BLE001, S110 — direct-read fallback
+                pass
+        path = self._mud_state_path()
+        if not path.exists():
+            return None
+        try:
+            return mud.MudSession.from_json(json.loads(path.read_text()))
+        except (OSError, ValueError, KeyError):
+            return None
+
+    def _mud_restore(self):
+        """(scenario, session) from disk for resume, or (None, None) to
+        start fresh: a finished or scenario-less session is not resumed."""
+        session = self._mud_load_session()
+        if session is None or session.outcome is not None:
+            return None, None
+        scenario = self._mud_load_scenario(session.scenario_id)
+        if scenario is None:
+            return None, None
+        return scenario, session
+
+    def _mud_load_scenario(self, slug):
+        """A saved generated scenario by slug, or the built-in default."""
+        path = (self._mud_artifacts_dir() / "mud" / "scenarios"
+                / f"{slug}.json")
+        try:
+            if path.exists():
+                return mud.scenario_from_json(json.loads(path.read_text()))
+        except (OSError, ValueError):
+            pass
+        default = mud.default_scenario()
+        if mud._slug(default.title) == slug:
+            return default
+        return None
+
+    def _mud_save_scenario(self, scenario):
+        """Save a generated scenario to artifacts/mud/scenarios/<slug>.json."""
+        try:
+            directory = self._mud_artifacts_dir() / "mud" / "scenarios"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{mud._slug(scenario.title)}.json"
+            fileutil.atomic_write_text(
+                path, json.dumps(mud.scenario_to_json(scenario), indent=1))
+            self._append_log(f"scenario saved: artifacts/mud/scenarios/"
+                             f"{path.name}", STYLE_DIM)
+        except OSError as exc:
+            self._append_log(f"mud: couldn't save scenario ({exc})",
+                             STYLE_WARN)
+
+    # -- mud turns -------------------------------------------------------------
     @work(thread=True)
     def _mud_turn(self):
         game = self._mud_game
         if game is None:
+            self._mud_thinking = False
             return
         hint, self._mud_hint = self._mud_hint, None
-        command = mud.choose_action(game, hint=hint, rng=self._rng)
-        self.call_from_thread(self._mud_apply, game, command)
+        command = mud.choose_action(game, hint=hint, rng=self._rng,
+                                    org=self.org)
+        self.call_from_thread(self._mud_apply, game, command, "organism")
 
-    def _mud_apply(self, game, command):
+    def _mud_apply(self, game, command, actor="organism"):
+        if actor == "organism":
+            self._mud_thinking = False
         if self._mud_game is not game:
             return                      # stopped (or restarted) meanwhile
         self._append_log(f"> {command}", STYLE_SELF)
-        result = game.act(command)
-        self._append_log(result, STYLE_DREAM)
+        result = game.act_event(command, actor=actor)
+        self._append_log(result.text, STYLE_DREAM)
+        if result.plot:
+            self._append_log(result.plot, STYLE_LEARNED)
         if game.finished:
+            outcome = "won" if game.won else "lost"
             self._append_log(
-                f"— the dungeon is won in {game.turns} turns —",
-                STYLE_LEARNED, stamp=True)
+                f"— {game.scenario.title} is {outcome} in {game.turns} "
+                "turns —", STYLE_LEARNED, stamp=True)
             self.org.store.remember(
-                "mud", f"won the dungeon in {game.turns} turns")
+                "mud", f"{outcome} {game.scenario.title} in "
+                       f"{game.turns} turns")
+            self._mud_save_session(game)
             self._mud_game = None
+            self._mud_paused = False
             self.refresh_status()
             return
-        self.set_timer(MUD_TURN_DELAY, self._mud_next)
+        self._mud_save_session(game)
+        if actor == "organism":
+            # the organism's heartbeat: user commands execute instantly and
+            # never schedule (a timer is pending, or the game is paused)
+            self._mud_schedule()
+
+    def _mud_schedule(self):
+        if not self._mud_paused:
+            self.set_timer(MUD_TURN_DELAY, self._mud_next)
 
     def _mud_next(self):
-        if self._mud_game is not None:
+        if (self._mud_game is not None and not self._mud_paused
+                and not self._mud_thinking):
+            self._mud_thinking = True
             self._mud_turn()
 
     def _set_sight(self, sight):
@@ -698,7 +945,10 @@ class OrganismApp(App):
                 if self._busy() else "")
         spoken = " · speech on" if speech.enabled else ""
         mic = " · 🎙 listening" if self.listener.recording else ""
-        playing = " · 🗡 mud" if self._mud_game is not None else ""
+        if self._mud_game is not None:
+            playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
+        else:
+            playing = ""
         s = self.org.store
         mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
@@ -707,7 +957,8 @@ class OrganismApp(App):
             f"{m.rule_count} rules · inner voice "
             f"{narration.voice_status()}{spoken}{mic}{playing} · "
             f"{self.org.probe.clock_utc()}{busy}  │  "
-            "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit")
+            "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit "
+            "(or F10, /quit)")
         self._status_text = self._bottombar_text
         try:
             self.query_one("#bottombar", Static).update(self._bottombar_text)
@@ -1048,7 +1299,7 @@ class OrganismApp(App):
         elif name == "/camera":
             self._camera(parts[1:])
         elif name == "/mud":
-            self._toggle_mud()
+            self._mud_command(parts[1:])
         elif name == "/reload":
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)
@@ -1179,6 +1430,8 @@ class OrganismApp(App):
             else:
                 self._append_log("/revert: no applied patches yet.",
                                  STYLE_DIM)
+        elif name == "/quit":
+            self.action_quit()
         elif name == "/help":
             self.action_help()
         else:
@@ -1187,6 +1440,11 @@ class OrganismApp(App):
     def handle_chat(self, text):
         self._log_chat("user", text)
         if self._mud_game is not None:
+            command = mud.parse_player_command(text)
+            if command is not None:
+                # a direct move: execute now, not a hint, not chat
+                self._mud_apply(self._mud_game, command, actor="user")
+                return
             self._mud_hint = text      # shout a nudge into the next move
         for event in self.org.hear(text):
             self._render_event(event)
