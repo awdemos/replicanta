@@ -65,6 +65,9 @@ you say.
   says (replies, musings, questions, self-talk) is also spoken aloud via
   local piper TTS. `/voice list` / `/voice use name` / `/voice get name`
   manage the voices themselves (see Voice)
+- `/listen` (or F5) — push-to-talk: start the mic, talk, press again and
+  your words are transcribed locally (faster-whisper) and heard by the
+  organism exactly like a typed line
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
 - **Self-patches**: during reflection it may propose an executable patch
@@ -137,13 +140,22 @@ you say.
   model, missing package or audio failure just means silence, never
   a crash. Only the organism's own speech is spoken, never yours or the
   system lines.
+- **Heard voice**: `/listen` or F5 is push-to-talk — press once to open
+  the mic (status bar shows 🎙 listening), speak, press again; the capture
+  is transcribed by a local faster-whisper model and fed to the organism
+  through the very same `hear()` path as typed chat, so tone, learning
+  and mood all work on spoken words too. Needs the `listen` extra
+  (`pip install -e .[listen]`); the whisper model downloads from
+  HuggingFace on first use. Defaults are CPU-friendly
+  (`REPLICANTA_STT_MODEL=base`, `REPLICANTA_STT_DEVICE=cpu`,
+  `REPLICANTA_STT_COMPUTE=int8`) because the GPU is usually busy
+  narrating — point them at cuda when it isn't.
 - **Any piper voice**: voices live in `voices/` as `<name>.onnx` +
   `<name>.onnx.json` pairs. `/voice list` shows downloaded ones (`*` =
   active), `/voice use en_GB-alan-low` switches, and `/voice get
   en_US-libritts_r-medium` downloads any voice straight from
   [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices)
-  (about a hundred: `en_US-amy-medium`, `en_GB-alan-low`, …) and adopts
-  it. Names follow `locale-speaker-quality`. The default is
+  (about a hundred: `en_US-amy-medium`, `en_GB-alan-low`, …) and adopts  it. Names follow `locale-speaker-quality`. The default is
   `en_US-lessac-medium`; `REPLICANTA_VOICE_MODEL` points at a different
   starting model if you prefer.
 

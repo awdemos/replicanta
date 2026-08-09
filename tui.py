@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import extensions
 import activity
+import listen
 import narration
 import nursery
 import speech
@@ -106,6 +107,7 @@ class OrganismApp(App):
         Binding("f4", "show_tab('memory-pane')", "memory"),
         Binding("ctrl+s", "save_now", "save"),
         Binding("ctrl+t", "think_now", "think"),
+        Binding("f5", "talk", "talk (push-to-talk)"),
     ]
 
     CSS = """
@@ -145,6 +147,7 @@ class OrganismApp(App):
         self._pending_visible = False
         self._busy_frame = 0
         self._status_text = ""
+        self.listener = listen.Listener()
         self._mind_text = ""
         self._memory_text = ""
 
@@ -228,6 +231,37 @@ class OrganismApp(App):
 
     def action_think_now(self):
         self._maybe_narrate()
+
+    def action_talk(self):
+        self._toggle_listen()
+
+    # -- heard voice (push-to-talk) -----------------------------------------
+    def _toggle_listen(self):
+        """Push-to-talk: first F5//listen starts the mic, second stops it
+        and transcribes; the text goes to the organism like a typed line."""
+        if self.listener.recording:
+            audio = self.listener.stop()
+            self._append_log("transcribing…", STYLE_DIM)
+            self._transcribe_then_say(audio)
+        else:
+            self.listener.start()
+            if self.listener.recording:
+                self._append_log(
+                    "listening… (F5 or /listen again to stop)", STYLE_DIM)
+            else:
+                self._append_log(
+                    "no microphone (device missing or busy?)", STYLE_WARN)
+        self.refresh_status()
+
+    @work(thread=True)
+    def _transcribe_then_say(self, audio):
+        text = self.listener.transcribe(audio)
+        if text:
+            self.call_from_thread(self.handle_chat, text)
+        else:
+            self.call_from_thread(
+                self._append_log, "(heard nothing)", STYLE_DIM)
+        self.call_from_thread(self.refresh_status)
 
     # -- keys ------------------------------------------------------------
     def on_key(self, event):
@@ -413,13 +447,14 @@ class OrganismApp(App):
         busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
                 if self._busy() else "")
         spoken = " · speech on" if speech.enabled else ""
+        mic = " · 🎙 listening" if self.listener.recording else ""
         s = self.org.store
         mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
         self._status_text = (
             f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
             f"{m.rule_count} rules · inner voice "
-            f"{narration.voice_status()}{spoken} · "
+            f"{narration.voice_status()}{spoken}{mic} · "
             f"{self.org.probe.clock_utc()}{busy}")
         try:
             self.query_one("#status", Static).update(self._status_text)
@@ -751,6 +786,8 @@ class OrganismApp(App):
             self.action_save_now()
         elif name == "/think":
             self.action_think_now()
+        elif name == "/listen":
+            self._toggle_listen()
         elif name == "/reload":
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)

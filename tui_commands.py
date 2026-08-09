@@ -17,6 +17,7 @@ COMMANDS = [
     ("/self-talk", "/self-talk", "let the organism speak to itself"),
     ("/voice", "/voice [on|off|list|use|get]",
      "spoken voice: toggle, list, switch, download piper voices"),
+    ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)"),
     ("/approve", "/approve", "apply the organism's pending genome patch"),
     ("/reject", "/reject", "discard the pending genome patch"),
     ("/revert", "/revert", "undo the last applied genome patch"),

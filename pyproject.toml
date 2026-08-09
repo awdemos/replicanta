@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
+listen = ["faster-whisper>=1.0"]
 
 [project.scripts]
 replicanta = "tui:main"
@@ -31,6 +32,7 @@ py-modules = [
     "fileutil",
     "hooks",
     "learning",
+    "listen",
     "narration",
     "nursery",
     "organism",
