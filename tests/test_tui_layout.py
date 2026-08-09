@@ -508,3 +508,102 @@ def test_right_click_empty_sidebar_opens_new_group_prompt(monkeypatch,
             assert isinstance(app.screen, NamePromptScreen)
 
     asyncio.run(check())
+
+
+# -- drag and drop into groups ------------------------------------------------
+
+def _sidebar_regions(app):
+    lv = app.query_one("#sidebar-list", ListView)
+    return {item.name: item.region for item in lv.children}
+
+
+def test_drag_organism_onto_group_header_assigns(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            regions = _sidebar_regions(app)
+            src = regions["fern"]
+            dst = regions["group:thinkers"]
+            await pilot.mouse_down(None, offset=(src.x + 2, src.y))
+            await pilot.hover(None, offset=(dst.x + 2, dst.y))
+            await pilot.mouse_up(None, offset=(dst.x + 2, dst.y))
+            await pilot.pause()
+            assert nursery_mod.group_of(app.root, "fern") == "thinkers"
+
+    asyncio.run(check())
+
+
+def test_drag_organism_onto_group_member_assigns(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "default", "thinkers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            regions = _sidebar_regions(app)
+            src = regions["fern"]
+            dst = regions["default"]  # already a member of thinkers
+            await pilot.mouse_down(None, offset=(src.x + 2, src.y))
+            await pilot.hover(None, offset=(dst.x + 2, dst.y))
+            await pilot.mouse_up(None, offset=(dst.x + 2, dst.y))
+            await pilot.pause()
+            assert nursery_mod.group_of(app.root, "fern") == "thinkers"
+
+    asyncio.run(check())
+
+
+def test_drag_member_onto_empty_space_ungroups(monkeypatch, tmp_path):
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "fern", "thinkers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            regions = _sidebar_regions(app)
+            src = regions["fern"]
+            lv = app.query_one("#sidebar-list", ListView)
+            empty_y = lv.region.y + 8   # below every row
+            await pilot.mouse_down(None, offset=(src.x + 2, src.y))
+            await pilot.hover(None, offset=(2, empty_y))
+            await pilot.mouse_up(None, offset=(2, empty_y))
+            await pilot.pause()
+            assert nursery_mod.group_of(app.root, "fern") is None
+
+    asyncio.run(check())
+
+
+def test_plain_click_does_not_become_a_drag(monkeypatch, tmp_path):
+    """A left click without movement still opens the action menu and
+    never assigns anything."""
+    import nursery as nursery_mod
+    from tui import OrganismMenuScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            regions = _sidebar_regions(app)
+            src = regions["fern"]
+            await pilot.click(None, offset=(src.x + 2, src.y))
+            await pilot.pause()
+            assert isinstance(app.screen, OrganismMenuScreen)
+            assert nursery_mod.group_of(app.root, "fern") is None
+
+    asyncio.run(check())

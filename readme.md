@@ -146,8 +146,9 @@ bar shows state, mood, belief/rule counts, and voice status.
   `organisms/<name>/` with its own
   state and artifacts. Launch with `python tui.py --org fern`.
 - Nursery groups organize the sidebar: right-click empty sidebar space to
-  create one (custom names, spaces allowed), assign organisms from their
-  menu (`move to group…`), right-click a group header to rename it. Groups
+  create one (custom names, spaces allowed), **drag organisms onto a group**
+  (or use their menu's `move to group…`; drag to empty space to ungroup),
+  right-click a group header to rename it. Groups
   are pure metadata (`groups.json`) — they don't touch the organisms'
   directories, and they're unrelated to `/group` chat sessions.
 - `/group start fern willow` (or `all`) — group chat: everything you type is

@@ -284,6 +284,10 @@ class OrganismApp(App):
     #sidebar-list > ListItem { padding: 0 1; }
     #sidebar-list > ListItem.--highlight { background: $primary;
                                             color: $text; }
+    #sidebar-list > ListItem.group-header { color: $text-muted;
+                                             text-style: bold; }
+    #sidebar.-dragging #sidebar-list > ListItem.group-header {
+        background: $boost; color: $text; text-style: bold underline; }
     #content { width: 1fr; height: 1fr; }
     TabbedContent { height: 1fr; }
     #dreams { height: 1fr; padding: 0 1; }
@@ -318,6 +322,10 @@ class OrganismApp(App):
         # button of the most recent click anywhere; lets the sidebar tell a
         # right-click (context menu) apart from a left-click selection
         self._last_click_button = None
+        # sidebar drag-and-drop: (name, x, y) of a left-press on an
+        # organism, then the dragged organism's name once it moves
+        self._drag_candidate = None
+        self._dragging = None
         # active group chat (GroupChat) and its reply worker flag
         self._group = None
         self._group_responding = False
@@ -528,7 +536,8 @@ class OrganismApp(App):
             marker = "● " if name == current else "  "
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
         for gname in sorted(groups):
-            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
+            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}",
+                                   classes="group-header"))
             for member in groups[gname]:
                 marker = "● " if member == current else "  "
                 lv.append(ListItem(Label(f"  {marker}{member}"),
@@ -550,27 +559,38 @@ class OrganismApp(App):
         else:
             self._open_org_menu(event.item.name)
 
-    def on_mouse_down(self, event):
-        """Right-click in the sidebar: a group header opens its rename
-        prompt, an organism its action menu, empty space the new-group
-        prompt. (Textual's Click message is left-button only, so this
-        handles button 3 directly.)"""
-        if event.button != 3:
-            return
-        widget, _region = self.screen.get_widget_at(event.screen_x,
-                                                    event.screen_y)
-        item = None
-        in_sidebar = False
+    def _sidebar_item_at(self, screen_x, screen_y):
+        """(item, in_sidebar) for a screen position: the sidebar ListItem
+        under it (None over chrome/empty space); in_sidebar is False when
+        the position is outside the sidebar entirely."""
+        widget, _region = self.screen.get_widget_at(screen_x, screen_y)
         node = widget
         while node is not None:
             if isinstance(node, ListItem) and node.name:
-                item = node
-                in_sidebar = True
-                break
+                return node, True
             if getattr(node, "id", None) == "sidebar":
-                in_sidebar = True
-                break
+                return None, True
             node = node.parent
+        return None, False
+
+    def on_mouse_down(self, event):
+        """Left button over a sidebar organism may start a drag into a
+        group (a plain click never moves far enough to become one).
+        Right-click in the sidebar: a group header opens its rename
+        prompt, an organism its action menu, empty space the new-group
+        prompt. (Textual's Click message is left-button only, so button 3
+        is handled directly here.)"""
+        if event.button == 1:
+            item, _in_sidebar = self._sidebar_item_at(event.screen_x,
+                                                      event.screen_y)
+            if item is not None and not item.name.startswith("group:"):
+                self._drag_candidate = (item.name, event.screen_x,
+                                        event.screen_y)
+            return
+        if event.button != 3:
+            return
+        item, in_sidebar = self._sidebar_item_at(event.screen_x,
+                                                 event.screen_y)
         if not in_sidebar:
             return
         if item is None:
@@ -579,6 +599,51 @@ class OrganismApp(App):
             self._prompt_rename_group(item.name[6:])
         else:
             self._open_org_menu(item.name)
+
+    def on_mouse_move(self, event):
+        """A left-press that travels far enough becomes a drag: group
+        headers light up as drop targets."""
+        if self._drag_candidate is None or self._dragging is not None:
+            return
+        name, x0, y0 = self._drag_candidate
+        if abs(event.screen_y - y0) < 1 and abs(event.screen_x - x0) < 3:
+            return
+        self._drag_candidate = None
+        self._dragging = name
+        try:
+            self.query_one("#sidebar", Vertical).set_class(True, "-dragging")
+        except NoMatches:
+            pass
+        self._pending_show(f"dragging {name} — drop on a group")
+
+    def on_mouse_up(self, event):
+        """Drop: onto a group header or one of its members assigns the
+        dragged organism to that group; onto empty sidebar space ungroups
+        it; outside the sidebar cancels."""
+        self._drag_candidate = None
+        if self._dragging is None:
+            return
+        name, self._dragging = self._dragging, None
+        try:
+            self.query_one("#sidebar", Vertical).set_class(False,
+                                                           "-dragging")
+        except NoMatches:
+            pass
+        self._pending_hide()
+        item, in_sidebar = self._sidebar_item_at(event.screen_x,
+                                                 event.screen_y)
+        if not in_sidebar:
+            return
+        if item is None:
+            target_group = None
+        elif item.name == name:
+            return
+        elif item.name.startswith("group:"):
+            target_group = item.name[6:]
+        else:
+            target_group = nursery.group_of(self.root, item.name)
+        if target_group != nursery.group_of(self.root, name):
+            self._assign_to_group(name, target_group)
 
     def on_click(self, event):
         """Left-click a neural-memory cell (F8 grid) to inspect what kind

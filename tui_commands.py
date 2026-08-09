@@ -126,6 +126,7 @@ def help_text():
         "up/down recall previous chat lines",
         "click   a sidebar organism for its menu (swap / rename / move",
         "        to group); click a group header for the group menu",
+        "drag    a sidebar organism onto a group (empty space ungroups)",
         "rclick  a group header to rename it; right-click empty sidebar",
         "        space to create a group",
         "F10     quit (ctrl+q too, but terminals may eat it via flow control;",
