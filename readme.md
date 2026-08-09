@@ -6,15 +6,21 @@ consciousness (measured as belief-network complexity).
 
 ## Run
 
-Requires Python 3.14 and a Rust toolchain (for the scallopy native module,
-built from a sibling checkout of the scallop repo):
+Requires Python 3.14, a Rust toolchain, and ollama (the inner voice;
+`qwen3:14b` by default). The one native dependency is **scallopy** 0.2.5,
+the Scallop↔Python binding — it is not on PyPI, so build it from the
+companion repo:
 
     python3.14 -m venv .venv
     .venv/bin/pip install -e . maturin pytest ruff
+    git clone https://github.com/awdemos/scallop ../scallop
     RUSTUP_TOOLCHAIN=nightly-2026-05-24 VIRTUAL_ENV=.venv \
         .venv/bin/maturin build --release --manifest-path ../scallop/etc/scallopy/Cargo.toml
     .venv/bin/pip install ../scallop/target/wheels/scallopy-*-cp314-*.whl
     .venv/bin/replicanta
+
+(the scallopy build needs the pinned nightly above; the PEP 604 fix in
+scallop@master is required — older checkouts will not work.)
 
 ## Interact
 
