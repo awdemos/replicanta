@@ -46,6 +46,9 @@ class BeliefStore:
         self.attention = set()   # (attr, val) pairs in the window
         self.chat_log = []       # list of [role, text], capped by CHAT_LOG_LIMIT
         self.memory = []         # episodes: {"cycle", "kind", "text"}
+        self.goals = []          # {"text","created_cycle","done_cycle","marker"}
+        self.last_goal_cycle = 0
+        self.last_diary_cycle = 0
         self.on_adverse = None   # callback(amount) fired on contradiction
         self.dirty = False        # any state changed since last save()
         self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
@@ -129,6 +132,25 @@ class BeliefStore:
         self.dirty = True
         self.genome_dirty = True
 
+    # -- goals ---------------------------------------------------------------
+    def add_goal(self, text, marker=0):
+        """Form a new intention: one active goal at a time, cycle-stamped.
+        `marker` records the progress baseline (e.g. user-fact count at
+        formation) so the engine can tell when the goal is achieved."""
+        self.goals.append({"text": text, "created_cycle": self.cycle,
+                           "done_cycle": None, "marker": marker})
+        self.dirty = True
+
+    def active_goal(self):
+        return next((g for g in self.goals if g["done_cycle"] is None), None)
+
+    def complete_active_goal(self):
+        goal = self.active_goal()
+        if goal is not None:
+            goal["done_cycle"] = self.cycle
+            self.dirty = True
+        return goal
+
     # -- episodic memory ----------------------------------------------------
     def remember(self, kind, text):
         """Record one notable episode (cycle-stamped), capped at
@@ -164,6 +186,9 @@ class BeliefStore:
             "attention": [list(p) for p in self.attention],
             "chat": self.chat_log,
             "memory": self.memory,
+            "goals": self.goals,
+            "last_goal_cycle": self.last_goal_cycle,
+            "last_diary_cycle": self.last_diary_cycle,
         }
         self.state_path.write_text(json.dumps(state, indent=2))
         self.dirty = False
@@ -183,6 +208,9 @@ class BeliefStore:
         self.attention = {tuple(p) for p in state.get("attention", [])}
         self.chat_log = [list(c) for c in state.get("chat", [])]
         self.memory = [dict(m) for m in state.get("memory", [])]
+        self.goals = [dict(g) for g in state.get("goals", [])]
+        self.last_goal_cycle = state.get("last_goal_cycle", 0)
+        self.last_diary_cycle = state.get("last_diary_cycle", 0)
 
 
 class Mind:
@@ -537,6 +565,10 @@ class Organism:
     STRESS_BANDS = (0.5, 0.9)  # crossing one upward emits a stress event
     RECENT_SENTIMENT_SECONDS = 120.0  # how long a harsh/kind tone lingers
     MOOD_CONF = 0.9         # confidence of the (self, mood, X) belief
+    GOAL_COOLDOWN = 20      # cycles between goal completions/formations
+    GOAL_PURSUIT_CYCLES = 30  # a generic goal is "pursued enough" after this
+    GOAL_LEARN_GROWTH = 2   # learn-goals complete after this many new facts
+    DIARY_INTERVAL = 10     # wake cycles between diary entries
 
     def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5,
                  probe=None):
@@ -649,10 +681,50 @@ class Organism:
             if band > self._last_stress_band and band > 0:
                 events.append({"kind": "stress", "band": band})
             self._last_stress_band = band
+        if self.lifecycle.state == "wake":
+            events.extend(self._goals_tick())
         self._since_save += dt
         if self._since_save >= self.SAVE_INTERVAL:
             self._since_save = 0.0
             self.flush()
+        return events
+
+    # -- goals ---------------------------------------------------------------
+    def add_goal(self, text):
+        """Give the organism an intention (formed by its voice, or a
+        fallback). Records the user-fact count as the progress marker for
+        learn-goals and remembers the moment as an episode."""
+        marker = sum(1 for (o, _a, _v) in self.store.beliefs() if o == "user")
+        self.store.add_goal(text, marker=marker)
+        self.store.remember("goal", f"new goal: {text}")
+
+    def _goals_tick(self):
+        """Goal lifecycle per wake tick: complete the active goal when its
+        heuristic is met; otherwise ask the voice for a new one when the
+        cooldown has passed. Emits {"kind": "goal"|"want_goal"} events."""
+        events = []
+        goal = self.store.active_goal()
+        if goal is not None:
+            done = False
+            text = goal["text"].lower()
+            if any(w in text for w in ("learn", "user", "know")):
+                facts = sum(1 for (o, _a, _v) in self.store.beliefs()
+                            if o == "user")
+                done = facts >= goal["marker"] + self.GOAL_LEARN_GROWTH
+            else:
+                done = (self.store.cycle - goal["created_cycle"]
+                        >= self.GOAL_PURSUIT_CYCLES)
+            if done:
+                finished = self.store.complete_active_goal()
+                self.store.remember(
+                    "goal", f"completed: {finished['text']}")
+                events.append({"kind": "goal", "text": finished["text"],
+                               "done": True})
+        elif (self.store.cycle > 0
+                and self.store.cycle - self.store.last_goal_cycle
+                >= self.GOAL_COOLDOWN):
+            self.store.last_goal_cycle = self.store.cycle  # stamp: fire once
+            events.append({"kind": "want_goal"})
         return events
 
     def _stress_band(self):

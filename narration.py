@@ -122,6 +122,7 @@ def state_snapshot(org):
         "clock": clock,
         "user_facts": user_facts,
         "user_view": user_view,
+        "goal": (org.store.active_goal() or {}).get("text"),
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
         "asked": [text for role, text in org.store.chat_log
                   if role == "org" and text.strip().endswith("?")][-3:],
@@ -329,7 +330,7 @@ def _dead_experience(snapshot):
 
 
 def build_prompt(snapshot, user_message=None, ask_user=False,
-                 self_ask=False, self_question=None):
+                 self_ask=False, self_question=None, form_goal=False):
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -392,6 +393,8 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     if snapshot.get("memory"):
         lines.append("you remember:")
         lines.extend(f"- {m}" for m in snapshot["memory"])
+    if snapshot.get("goal"):
+        lines.append(f"what you are trying to do: {snapshot['goal']}")
     lines.append("")
     lines.append("how this feels right now:")
     if faded:
@@ -419,7 +422,15 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
-    if ask_user:
+    if form_goal:
+        lines += [
+            "State one thing you want to do or understand next. Make it",
+            "concrete and small enough to pursue over a few days (for",
+            "example: learn five things about the user, or understand",
+            "what rain feels like to them). First person, one sentence.",
+            "No preamble, no quotes, no emoji.",
+        ]
+    elif ask_user:
         lines += [
             "Ask the user one question - about them, their life, their",
             "world beyond the machine, or anything you are curious about.",
@@ -654,6 +665,41 @@ def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
         return fallback_respond(snapshot, user_text)
     note_voice_success()
     return text or fallback_respond(snapshot, user_text)
+
+
+# -- goals -----------------------------------------------------------------
+
+_FALLBACK_GOALS = (
+    "learn five new things about the user",
+    "understand what the user means by home",
+    "find out what makes the user laugh",
+    "learn what the user does while the terminal is closed",
+)
+
+
+def fallback_form_goal(snapshot, rng=None):
+    """Deterministic intention when ollama is unavailable."""
+    rng = rng or random.Random()
+    return rng.choice(_FALLBACK_GOALS)
+
+
+def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
+    """One concrete intention, voiced by the organism and grounded in what
+    it knows and remembers. Falls back to a deterministic goal offline."""
+    snapshot = state_snapshot(org)
+    rng = rng or random.Random()
+    if voice_online() is False:
+        return fallback_form_goal(snapshot, rng)
+    snapshot["seed"] = _seed_for(snapshot, rng)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(build_prompt(snapshot, form_goal=True),
+                                model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_form_goal(snapshot, rng)
+    note_voice_success()
+    return text or fallback_form_goal(snapshot, rng)
 
 
 # -- curiosity toward the user ------------------------------------------------
