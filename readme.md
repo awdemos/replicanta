@@ -12,26 +12,68 @@ is used by default for convenience — any ollama model works. The default
 inner voice is `qwen3.5:latest` (~5.7 GB). Set `OLLAMA_MODEL` to switch
 models, or point `OLLAMA_URL` at a different ollama endpoint.
 
-**Copy-paste install** (agents: this block is for you — run it verbatim):
+### 1. Base install
 
 ```bash
 git clone https://github.com/awdemos/replicanta
 cd replicanta
 python3.14 -m venv .venv
-.venv/bin/pip install -e . \
-    https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
-ollama pull qwen3.5:latest
-mkdir -p voices && curl -sSL -o voices/en_US-lessac-medium.onnx \
-    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
-    && curl -sSL -o voices/en_US-lessac-medium.onnx.json \
-    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
-.venv/bin/replicanta
+.venv/bin/pip install -e .
 ```
 
-(the wheel above is the one native dependency — **scallopy** 0.2.5, the
-Scallop↔Python binding, not on PyPI — prebuilt as manylinux_2_39 for
-x86_64 cp314, so it runs on any modern distro. The piper voice model is
-optional; skip it and `/voice` simply stays mute.)
+### 2. Native dependency: scallopy
+
+Replicanta needs **scallopy** (the Scallop↔Python binding). It is not on
+PyPI, so install the prebuilt wheel for Python 3.14 / x86_64 / glibc ≥ 2.39:
+
+```bash
+.venv/bin/pip install \
+    https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
+```
+
+If the wheel does not match your platform, build scallopy from source
+instead (~15 minutes; see `ci/main.go` for the pinned Rust nightly and
+build steps).
+
+### 3. LLM backend
+
+Pull the default model, or any ollama model you prefer:
+
+```bash
+ollama pull qwen3.5:latest
+```
+
+### 4. Optional extras
+
+**Spoken voice** — download a piper voice (ONNX + JSON) to `voices/`:
+
+```bash
+mkdir -p voices
+curl -sSL -o voices/en_US-lessac-medium.onnx \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx
+curl -sSL -o voices/en_US-lessac-medium.onnx.json \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+```
+
+Skip this and `/voice` stays mute.
+
+**Speech-to-text** — for push-to-talk (`/listen`, F5):
+
+```bash
+.venv/bin/pip install -e '.[listen]'
+```
+
+**Vision** — for USB camera sight (`/look`, F6):
+
+```bash
+.venv/bin/pip install -e '.[vision]'
+```
+
+### 5. Start
+
+```bash
+.venv/bin/replicanta
+```
 
 ### Models
 

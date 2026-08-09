@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "replicanta"
 version = "0.0.1"
-description = "A self-improving digital organism whose mind is a probabilistic Scallop program"
+description = "A neurosymbolic organism implementation coupling Scallop with an LLM backend"
 readme = "readme.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
     "textual>=1.0",
