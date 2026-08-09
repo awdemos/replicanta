@@ -10,6 +10,7 @@ from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Footer,
@@ -163,6 +164,8 @@ class OrganismApp(App):
         self._mind_text = ""
         self._memory_text = ""
         self._inner_text = ""
+        self._topbar_text = ""
+        self._bottombar_text = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -214,6 +217,8 @@ class OrganismApp(App):
             self._log_chat(role, line, stamp=False)
         self.org.hooks.emit = \
             lambda msg: self._append_log(f"lua · {msg}", STYLE_DIM, stamp=True)
+        self.refresh_top_bar()
+        self._refresh_sidebar()
         self.refresh_status()
         self._refresh_views()
 
@@ -253,6 +258,50 @@ class OrganismApp(App):
         """Quit cleanly: persist organism state before exiting."""
         self.action_save_now()
         super().action_quit()
+
+    def refresh_top_bar(self):
+        """Render the custom top bar: app wordmark, organism identity,
+        mood/mental state, and voice/mic/clock indicators."""
+        lc = self.org.lifecycle
+        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(
+            lc.state, "🧠")
+        word = {"wake": "awake", "sleep": "asleep",
+                "dead": "faded"}.get(lc.state, lc.state)
+        mood = next(
+            (v for (o, a, v) in self.org.store.beliefs()
+             if (o, a) == ("self", "mood")), "calm")
+        s = self.org.store
+        mental = (f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
+                  f"{s.irrationality:.2f}")
+        mic = " 🎙" if self.listener.recording else ""
+        spoken = " 🔊" if speech.enabled else ""
+        voice = narration.voice_status()
+        clock = self.org.probe.clock_utc()
+        text = (f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · "
+                f"{mental}  │  {voice}{mic}{spoken}  {clock}")
+        self._topbar_text = text
+        try:
+            self.query_one("#topbar", Static).update(text)
+        except (ScreenStackError, NoMatches):
+            pass
+
+    def _refresh_sidebar(self):
+        """Rebuild the nursery sidebar, highlighting the current organism."""
+        try:
+            sidebar = self.query_one("#sidebar-list", Static)
+        except (ScreenStackError, NoMatches):
+            return
+        current = self.org.dir_path.name
+        names = nursery.list_organisms(self.root)
+        if not names:
+            text = "nursery\n  (no organisms)"
+        else:
+            lines = ["nursery"]
+            for name in names:
+                marker = "● " if name == current else "  "
+                lines.append(f"{marker}{name}")
+            text = "\n".join(lines)
+        sidebar.update(text)
 
     def action_think_now(self):
         self._maybe_narrate()
@@ -631,14 +680,16 @@ class OrganismApp(App):
         s = self.org.store
         mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
-        self._status_text = (
+        self._bottombar_text = (
             f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
             f"{m.rule_count} rules · inner voice "
             f"{narration.voice_status()}{spoken}{mic}{playing} · "
-            f"{self.org.probe.clock_utc()}{busy}")
+            f"{self.org.probe.clock_utc()}{busy}  │  "
+            "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit")
+        self._status_text = self._bottombar_text
         try:
-            self.query_one("#status", Static).update(self._status_text)
-        except ScreenStackError:
+            self.query_one("#bottombar", Static).update(self._bottombar_text)
+        except (ScreenStackError, NoMatches):
             pass  # not mounted: unit tests drive handlers without a screen
 
     # -- log ---------------------------------------------------------------
