@@ -33,6 +33,7 @@ import activity
 import camera
 import extensions
 import fileutil
+import groupchat
 import listen
 import mud
 import narration
@@ -242,6 +243,9 @@ class OrganismApp(App):
         self._spawn = dict(spawn or {})
         # metadata grid behind the cells tab, for click-to-inspect
         self._cells_grid = []
+        # active group chat (GroupChat) and its reply worker flag
+        self._group = None
+        self._group_responding = False
         self.chat_input = None
         self._narrating = False
         self._responding = False
@@ -366,6 +370,10 @@ class OrganismApp(App):
 
     def action_save_now(self):
         self.org.flush(force=True)
+        if self._group is not None:
+            for org in self._group.members.values():
+                if org is not self.org:
+                    org.flush(force=True)
 
     def action_quit(self):
         """Quit cleanly: persist organism state, tear down the UI, then
@@ -1028,7 +1036,8 @@ class OrganismApp(App):
         self.refresh_status()
 
     def _busy(self):
-        return (self._narrating or self._responding or self._self_talking)
+        return (self._narrating or self._responding or self._self_talking
+                or self._group_responding)
 
     def _refresh_views(self):
         self._mind_text = tui_views.mind_view(self.org)
@@ -1120,6 +1129,8 @@ class OrganismApp(App):
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
         else:
             playing = ""
+        if self._group is not None:
+            playing += f" · 👥 group ({len(self._group.names())})"
         s = self.org.store
         mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
@@ -1493,6 +1504,8 @@ class OrganismApp(App):
                                 for n in names) or "(none)"
             self._append_log(f"organisms: {listing}  (* = current)",
                              STYLE_DIM)
+        elif name == "/group":
+            self._group_command(parts[1:])
         elif name == "/new":
             new_name = (parts[1] if len(parts) == 2
                         else nursery.next_name(self.root))
@@ -1617,6 +1630,16 @@ class OrganismApp(App):
                 self._mud_apply(self._mud_game, command, actor="user")
                 return
             self._mud_hint = text      # shout a nudge into the next move
+        if self._group is not None:
+            # everyone in the group heard the line; beliefs form per
+            # member, but only the current organism's events render
+            for org in self._group.members.values():
+                events = org.hear(text)
+                if org is self.org:
+                    for event in events:
+                        self._render_event(event)
+            self._maybe_group_respond(text)
+            return
         for event in self.org.hear(text):
             self._render_event(event)
         self._maybe_respond(text)
@@ -1643,6 +1666,110 @@ class OrganismApp(App):
             self._responding = False
         if reply is not None and org is self.org:
             self.call_from_thread(self._set_reply, reply)
+
+    # -- group chat -------------------------------------------------------
+    GROUP_STYLES: ClassVar[list[str]] = [
+        "green", "yellow", "magenta", "cyan",
+        "bright_blue", "bright_magenta"]
+
+    def _group_style(self, name):
+        """Stable per-member card color while the group is active."""
+        idx = self._group.names().index(name) if self._group else 0
+        return self.GROUP_STYLES[idx % len(self.GROUP_STYLES)]
+
+    def _group_command(self, args):
+        """/group start a b [c…] | /group stop | bare /group for status."""
+        if not args:
+            if self._group is None:
+                self._append_log(
+                    "no active group — /group start "
+                    + " ".join(nursery.list_organisms(self.root)),
+                    STYLE_DIM)
+            else:
+                self._append_log(
+                    f"group chat: {', '.join(self._group.names())} "
+                    f"({len(self._group.transcript)} messages)", STYLE_DIM)
+            return
+        if args[0] == "stop":
+            if self._group is None:
+                self._append_log("no active group.", STYLE_DIM)
+                return
+            names = ", ".join(self._group.names())
+            self.action_save_now()
+            self._group = None
+            self._append_log(f"— group chat ended ({names}) —",
+                             STYLE_DIM, stamp=True)
+            self.refresh_status()
+            return
+        if args[0] != "start":
+            self._append_log("usage: /group start a b [c…] | /group stop",
+                             STYLE_DIM)
+            return
+        names = args[1:]
+        if names == ["all"]:
+            names = nursery.list_organisms(self.root)
+        # the organism you live with always takes a seat in the group
+        current = self.org.dir_path.name
+        if current not in names:
+            names = [current] + list(names)
+        known = set(nursery.list_organisms(self.root))
+        missing = [n for n in names if n not in known]
+        if missing:
+            self._append_log(
+                f"/group: unknown organisms: {', '.join(missing)}",
+                STYLE_WARN)
+            return
+        members = {}
+        for n in names:
+            if n == self.org.dir_path.name:
+                members[n] = self.org
+            else:
+                org = Organism(nursery.organism_dir(self.root, n),
+                               **self._spawn)
+                org.load()
+                members[n] = org
+        try:
+            self._group = groupchat.GroupChat(members)
+        except ValueError as exc:
+            self._append_log(f"/group: {exc}", STYLE_WARN)
+            return
+        self._append_log(
+            f"— group chat started: {', '.join(self._group.names())} — "
+            "everything you type is broadcast; address one member with "
+            "'name: …' or '@name …'; /group stop to end —",
+            STYLE_DIM, stamp=True)
+        self.refresh_status()
+
+    def _maybe_group_respond(self, text):
+        if not self._group_responding:
+            self._group_responding = True
+            self.refresh_status()
+            self._group_respond(text)
+
+    @work(thread=True)
+    def _group_respond(self, text):
+        group = self._group   # capture: /group stop mid-broadcast drops it
+        if group is None:
+            return
+        utterances = None
+        try:
+            self.call_from_thread(self._pending_show, "group is thinking")
+            utterances = group.broadcast(text)
+        except Exception as exc:  # noqa: BLE001 — workers must never die silently
+            self.call_from_thread(self._worker_error, "group reply", exc)
+        finally:
+            self._group_responding = False
+        if utterances is not None and group is self._group:
+            self.call_from_thread(self._deliver_group, utterances)
+
+    def _deliver_group(self, utterances):
+        self._pending_hide()
+        for name, reply in utterances:
+            org = self._group.members[name] if self._group else None
+            if org is not None:
+                org.store.record_chat("org", reply)
+            self._write_card(name, reply, self._group_style(name))
+        self.refresh_status()
 
     def _set_reply(self, reply):
         self._pending_hide()

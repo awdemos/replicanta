@@ -144,6 +144,10 @@ bar shows state, mood, belief/rule counts, and voice status.
   `/organisms` — list. Click an organism in the sidebar for its menu
   (swap / rename). Each organism lives in `organisms/<name>/` with its own
   state and artifacts. Launch with `python tui.py --org fern`.
+- `/group start fern willow` (or `all`) — group chat: everything you type is
+  broadcast to every member and each answers in turn (quick arena: one LLM
+  call per reply). Address one member with `fern: …` or `@fern …`;
+  `/group stop` ends it — members keep what they learned and heard.
 - `/help` (F1, ctrl+p) — full command list.
 
 ## Mind

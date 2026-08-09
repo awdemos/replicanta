@@ -96,7 +96,7 @@ class ThoughtArena:
     # -- public ----------------------------------------------------------
     def emerge(self, org, user_message=None, prompt_kwargs=None,
                fallback=None, structured=False, on_token=None,
-               model=None, timeout=None):
+               model=None, timeout=None, quick=False):
         """Run a full debate and return the winning candidate.
 
         prompt_kwargs are forwarded to narration.build_prompt to select
@@ -108,6 +108,9 @@ class ThoughtArena:
         output contract (e.g. the reflection format) survives. The
         debate itself cannot stream, so a winner is replayed through
         on_token in word chunks to keep the incremental display alive.
+        quick=True replaces the five-call debate with a single cleaned
+        generation — for many-speaker contexts (group chat) where a
+        full debate per utterance would cost minutes.
         """
         model = (model or self._model
                  or os.environ.get("OLLAMA_MODEL", narration.DEFAULT_MODEL))
@@ -131,8 +134,12 @@ class ThoughtArena:
         build = {"user_message": user_message}
         build.update(prompt_kwargs or {})
         try:
-            result = self._debate(org, snapshot, build, model,
-                                  timeout, surprise, temperature)
+            if quick:
+                result = self._quick_take(org, snapshot, build, model,
+                                          timeout, temperature)
+            else:
+                result = self._debate(org, snapshot, build, model,
+                                      timeout, surprise, temperature)
         except (urllib.error.URLError, OSError, ValueError, RuntimeError):
             narration.note_voice_failure()
             return self._fallback(org.store, snapshot, user_message, fallback)
@@ -157,6 +164,19 @@ class ThoughtArena:
         return result
 
     # -- debate ----------------------------------------------------------
+    def _quick_take(self, org, snapshot, build, model, timeout,
+                    temperature):
+        """One proposer, no debate: a single generation cleaned down to
+        the candidate. Empty or degenerate output fails the take so the
+        caller falls back, exactly like a failed debate."""
+        base = narration.build_prompt(snapshot, **build)
+        draft = self._generate(self._proposal(base, 1), model, timeout,
+                               temperature, org=org)
+        draft = _clean_candidate(draft)
+        if not draft:
+            raise ValueError("quick take produced no usable candidate")
+        return draft
+
     def _debate(self, org, snapshot, build, model, timeout,
                 surprise, temperature):
         base = narration.build_prompt(snapshot, **build)

@@ -773,18 +773,19 @@ def fallback_respond(snapshot, user_message):
 
 
 def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
-            on_token=None):
+            on_token=None, quick=False):
     """First-person reply to the user. Like everything the organism says,
     the reply runs the inner arena (two proposers draft, an adversarial
-    critic attacks, two voters pick) before it manifests. The debate
-    itself cannot stream, so the winning reply is replayed through
-    on_token in word chunks. Falls back to a deterministic reply whenever
-    ollama fails."""
+    critic attacks, two voters pick) before it manifests — or, with
+    quick=True, a single cleaned generation, for many-speaker contexts
+    like group chat. The debate itself cannot stream, so the winning
+    reply is replayed through on_token in word chunks. Falls back to a
+    deterministic reply whenever ollama fails."""
     from arena import ThoughtArena
     return ThoughtArena(rng=rng).emerge(
         org, user_message=user_text,
         fallback=lambda snap: fallback_respond(snap, user_text),
-        on_token=on_token, model=model, timeout=timeout)
+        on_token=on_token, model=model, timeout=timeout, quick=quick)
 
 
 # -- skills: reflection loop -------------------------------------------------

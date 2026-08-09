@@ -261,3 +261,81 @@ def test_cells_tab_click_on_empty_cell_does_nothing(monkeypatch, tmp_path):
             assert not isinstance(app.screen, CellDetailScreen)
 
     asyncio.run(check())
+
+
+# -- group chat (F-key-free wiring) ------------------------------------------
+
+def test_group_command_start_status_and_stop(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start fern")
+            assert app._group is not None
+            assert app._group.names() == ["default", "fern"]
+            # the current organism participates as itself
+            assert app._group.members["default"] is app.org
+            app.handle_command("/group stop")
+            assert app._group is None
+
+    asyncio.run(check())
+
+
+def test_group_command_rejects_unknown_and_solo(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start ghost")
+            assert app._group is None
+            app.handle_command("/group start default")
+            assert app._group is None  # a group needs two members
+
+    asyncio.run(check())
+
+
+def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
+    """In group mode a chat line goes to the group broadcast worker, not
+    the solo reply path."""
+    import groupchat
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start fern")
+            assert isinstance(app._group, groupchat.GroupChat)
+            calls = {"group": 0, "solo": 0}
+            monkeypatch.setattr(app, "_maybe_group_respond",
+                                lambda text: calls.__setitem__(
+                                    "group", calls["group"] + 1))
+            monkeypatch.setattr(app, "_maybe_respond",
+                                lambda text: calls.__setitem__(
+                                    "solo", calls["solo"] + 1))
+            app.handle_chat("hello everyone")
+            assert calls == {"group": 1, "solo": 0}
+            # every member heard the line
+            assert any("hello everyone" in t
+                       for _r, t in app._group.members["fern"]
+                       .store.chat_log)
+
+    asyncio.run(check())
+
+
+def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start fern")
+            app._deliver_group([("fern", "hi from fern"),
+                                ("default", "hi from default")])
+            await asyncio.sleep(0.05)
+            # replies recorded into each speaker's own chat log
+            assert any("hi from fern" in t
+                       for _r, t in app._group.members["fern"]
+                       .store.chat_log)
+
+    asyncio.run(check())
