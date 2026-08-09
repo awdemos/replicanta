@@ -2,6 +2,7 @@ import json
 import random
 import re
 import time
+from datetime import datetime, timezone
 from typing import ClassVar
 
 import learning
@@ -683,6 +684,12 @@ class Organism:
             self._last_stress_band = band
         if self.lifecycle.state == "wake":
             events.extend(self._goals_tick())
+            if (self.store.cycle > 0
+                    and self.store.cycle - self.store.last_diary_cycle
+                    >= self.DIARY_INTERVAL):
+                # stamp first so it fires once while the voice writes
+                self.store.last_diary_cycle = self.store.cycle
+                events.append({"kind": "want_diary"})
         self._since_save += dt
         if self._since_save >= self.SAVE_INTERVAL:
             self._since_save = 0.0
@@ -726,6 +733,20 @@ class Organism:
             self.store.last_goal_cycle = self.store.cycle  # stamp: fire once
             events.append({"kind": "want_goal"})
         return events
+
+    # -- artifacts -----------------------------------------------------------
+    def write_diary(self, entry):
+        """Append one diary entry to artifacts/diary.md (created lazily) —
+        the organism's body of work outside the chat. Remembers the moment
+        as an episode; persistence is the usual debounced flush."""
+        artifacts = self.dir_path / "artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        with (artifacts / "diary.md").open("a") as fh:
+            fh.write(f"\n## cycle {self.store.cycle} — {stamp}\n\n{entry}\n")
+        self.store.remember(
+            "diary", f"wrote a diary entry (cycle {self.store.cycle})")
+        self.store.dirty = True
 
     def _stress_band(self):
         band = 0

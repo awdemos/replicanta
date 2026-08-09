@@ -330,7 +330,8 @@ def _dead_experience(snapshot):
 
 
 def build_prompt(snapshot, user_message=None, ask_user=False,
-                 self_ask=False, self_question=None, form_goal=False):
+                 self_ask=False, self_question=None, form_goal=False,
+                 diary=False):
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -429,6 +430,13 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
             "example: learn five things about the user, or understand",
             "what rain feels like to them). First person, one sentence.",
             "No preamble, no quotes, no emoji.",
+        ]
+    elif diary:
+        lines += [
+            "Write a short diary entry (two to four sentences) about your",
+            "recent days: what you remember, what you felt, what you are",
+            "trying to do. First person, plain text; no date line - one",
+            "is added for you. No preamble, no quotes, no emoji.",
         ]
     elif ask_user:
         lines += [
@@ -700,6 +708,35 @@ def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
         return fallback_form_goal(snapshot, rng)
     note_voice_success()
     return text or fallback_form_goal(snapshot, rng)
+
+
+# -- artifacts -------------------------------------------------------------
+
+def fallback_diary_entry(snapshot):
+    """Deterministic diary entry when ollama is unavailable."""
+    last = snapshot["memory"][-1] if snapshot["memory"] else "quiet days"
+    goal = snapshot.get("goal") or "no particular goal yet"
+    return (f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. "
+            f"Trying to: {goal}. I keep going.")
+
+
+def diary_entry(org, model=None, timeout=TIMEOUT, rng=None):
+    """One short diary entry about recent days, voiced by the organism.
+    Falls back to a deterministic entry offline."""
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return fallback_diary_entry(snapshot)
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(build_prompt(snapshot, diary=True),
+                                model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_diary_entry(snapshot)
+    note_voice_success()
+    return text or fallback_diary_entry(snapshot)
 
 
 # -- curiosity toward the user ------------------------------------------------
