@@ -9,6 +9,11 @@ couple a [Scallop](https://github.com/scallop-lang/scallop) reasoner with a
 local LLM. Each organism wakes, senses, learns from you, reflects, dreams, and
 can propose self-patches.
 
+A project goal is to shrink the gap between model weights and autonomous
+thought and action: a local, offline AI with text-to-speech in 100+ digital
+voices, optional offline speech-to-text through your microphone, and a digital
+friend you can take on adventures in MUD mode with `/mud`.
+
 The organism(s) learns from what you tell it and can change itself: it writes
 files (genome, state, artifacts, diary), proposes edits to its own learning
 code (nothing applies without your `/approve` — read every proposal before
