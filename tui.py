@@ -18,11 +18,13 @@ from textual.widgets import (
     Label,
     ListItem,
     ListView,
+    OptionList,
     RichLog,
     Static,
     TabbedContent,
     TabPane,
 )
+from textual.widgets.option_list import Option
 
 import activity
 import camera
@@ -80,6 +82,57 @@ class HelpScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         yield Static(tui_commands.help_text(), id="help")
+
+
+class OrganismMenuScreen(ModalScreen):
+    """Left-click dropdown on a sidebar organism: swap / rename / cancel.
+    Dismisses with (action, name) or None."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close")]
+
+    def __init__(self, name, is_current):
+        super().__init__()
+        self._name = name
+        self._is_current = is_current
+
+    def compose(self) -> ComposeResult:
+        options = []
+        if not self._is_current:
+            options.append(Option(f"swap to {self._name}", id="swap"))
+        options.append(Option(f"rename {self._name}", id="rename"))
+        options.append(Option("cancel", id="cancel"))
+        yield OptionList(*options, id="org-menu")
+
+    def on_mount(self):
+        self.query_one(OptionList).focus()
+
+    def on_option_list_option_selected(self, event):
+        action = event.option.id
+        self.dismiss(None if action == "cancel" else (action, self._name))
+
+
+class RenameScreen(ModalScreen):
+    """Prompt for a new organism name. Dismisses with the typed name
+    (stripped) or None on escape."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close")]
+
+    def __init__(self, name):
+        super().__init__()
+        self._name = name
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder=f"new name for {self._name} "
+                              "(lowercase, digits, - and _)",
+                    id="rename-input")
+
+    def on_mount(self):
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event):
+        self.dismiss(event.value.strip() or None)
 
 
 # role -> log style (Rich markup); engine events get their own styles
@@ -145,6 +198,10 @@ class OrganismApp(App):
     #inner { overflow-y: auto; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
+    OrganismMenuScreen, RenameScreen { align: center middle; }
+    #org-menu { border: round $primary; width: 44; height: auto;
+                background: $surface; }
+    #rename-input { border: round $primary; width: 60; }
     #bottombar { height: 1; padding: 0 1; background: $surface;
                   color: $text-muted; }
     """
@@ -249,12 +306,14 @@ class OrganismApp(App):
         self.refresh_status()
         self._refresh_views()
 
-    def _swap_to(self, name):
+    def _swap_to(self, name, flush=True):
         """Persist the current organism and wake another one in its place.
         In-flight voice workers belong to the old organism: they finish
         against it and their deliveries are dropped by the org-identity
-        checks, so swapping is always safe."""
-        self.org.flush(force=True)
+        checks, so swapping is always safe. flush=False is for callers
+        that already persisted the organism (e.g. just renamed it)."""
+        if flush:
+            self.org.flush(force=True)
         nursery.set_current(self.root, name)
         org = Organism(nursery.organism_dir(self.root, name), **self._spawn)
         org.load()
@@ -340,10 +399,47 @@ class OrganismApp(App):
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
 
     def on_list_view_selected(self, event):
-        """Sidebar organism selection swaps to that organism."""
-        item = event.item
-        if item.name and item.name != self.org.dir_path.name:
-            self._swap_to(item.name)
+        """Sidebar organism selection opens its action dropdown (left
+        click or Enter): swap to it, rename it, or cancel."""
+        if event.item.name:
+            self._open_org_menu(event.item.name)
+
+    def _open_org_menu(self, name):
+        def on_choice(result):
+            if not result:
+                return
+            action, org_name = result
+            if action == "swap" and org_name != self.org.dir_path.name:
+                self._swap_to(org_name)
+            elif action == "rename":
+                self._prompt_rename(org_name)
+        self.push_screen(
+            OrganismMenuScreen(name, name == self.org.dir_path.name),
+            on_choice)
+
+    def _prompt_rename(self, name):
+        def on_name(new_name):
+            if not new_name or new_name == name:
+                return
+            try:
+                self._rename_org(name, new_name)
+            except ValueError as exc:
+                self.notify(str(exc), severity="error", timeout=4)
+        self.push_screen(RenameScreen(name), on_name)
+
+    def _rename_org(self, old, new):
+        """Rename an organism on disk and keep the app pointed at it. The
+        awake organism is flushed before its directory moves (otherwise
+        the next flush would resurrect the old path), then swapped to the
+        new directory; sleeping ones just need a sidebar refresh."""
+        if old == self.org.dir_path.name:
+            self.org.flush(force=True)
+            nursery.rename(self.root, old, new)
+            self._swap_to(new, flush=False)
+        else:
+            nursery.rename(self.root, old, new)
+            self._refresh_sidebar()
+        self.notify(f"renamed {old} → {new}", timeout=3)
 
     def action_think_now(self):
         self._maybe_narrate()

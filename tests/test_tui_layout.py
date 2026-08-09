@@ -67,13 +67,21 @@ def test_sidebar_lists_organisms_and_highlights_current(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_sidebar_selection_swaps_organism(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def _make_fern(app):
+    """Birth a second organism 'fern' in the test nursery."""
     fern_dir = app.root / "organisms" / "fern"
     fern_dir.mkdir(parents=True)
     seed = app.root / "organism.scl"
     if seed.exists():
         (fern_dir / "organism.scl").write_text(seed.read_text())
+
+
+def test_sidebar_selection_opens_action_menu(monkeypatch, tmp_path):
+    """Left-click / Enter on a sidebar organism opens its dropdown menu
+    instead of swapping immediately."""
+    from tui import OrganismMenuScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
 
     async def check():
         async with app.run_test():
@@ -85,7 +93,80 @@ def test_sidebar_selection_swaps_organism(monkeypatch, tmp_path):
                 if "fern" in str(_renderable_text(item.children[0])))
             event = type("Selected", (), {"item": fern_item})()
             app.on_list_view_selected(event)
+            await asyncio.sleep(0.05)
+            assert isinstance(app.screen, OrganismMenuScreen)
+            assert app.org.dir_path.name == "default"  # not swapped yet
+
+    asyncio.run(check())
+
+
+def test_sidebar_menu_swap_choice_swaps_organism(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app._refresh_sidebar()
+            await asyncio.sleep(0.05)
+            app._open_org_menu("fern")
+            await asyncio.sleep(0.05)
+            app.screen.dismiss(("swap", "fern"))
+            await asyncio.sleep(0.05)
             assert app.org.dir_path.name == "fern"
+
+    asyncio.run(check())
+
+
+def test_rename_sleeping_organism_refreshes_sidebar(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app._rename_org("fern", "willow")
+            await asyncio.sleep(0.05)
+            assert (app.root / "organisms" / "willow").is_dir()
+            assert app.org.dir_path.name == "default"
+            lv = app.query_one("#sidebar-list", ListView)
+            labels = [str(_renderable_text(item.children[0]))
+                      for item in lv.children]
+            assert any("willow" in label for label in labels)
+            assert not any("fern" in label for label in labels)
+
+    asyncio.run(check())
+
+
+def test_rename_awake_organism_swaps_to_new_path(monkeypatch, tmp_path):
+    """Renaming the awake organism moves its directory and keeps the app
+    living with it — the old path must not be resurrected by a flush."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app._rename_org("default", "willow")
+            await asyncio.sleep(0.05)
+            assert app.org.dir_path.name == "willow"
+            assert not (app.root / "organisms" / "default").exists()
+            assert (app.root / "organisms" / "willow").is_dir()
+            import nursery as nursery_mod
+            assert nursery_mod.current(app.root) == "willow"
+
+    asyncio.run(check())
+
+
+def test_menu_for_awake_organism_has_no_swap_option(monkeypatch, tmp_path):
+    from textual.widgets import OptionList
+    from tui import OrganismMenuScreen
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app._open_org_menu("default")
+            await asyncio.sleep(0.05)
+            assert isinstance(app.screen, OrganismMenuScreen)
+            menu = app.screen.query_one(OptionList)
+            ids = [option.id for option in menu.options]
+            assert ids == ["rename", "cancel"]
 
     asyncio.run(check())
 

@@ -121,6 +121,7 @@ def help_text():
         "F8      cells tab (top-down neural memory grid)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
+        "click   a sidebar organism for its menu (swap / rename)",
         "F10     quit (ctrl+q too, but terminals may eat it via flow control;",
         "        ctrl+c twice also works)",
         "",

@@ -63,6 +63,27 @@ def next_name(root):
     return f"{AUTO_NAME_PREFIX}-{n}"
 
 
+def rename(root, old, new):
+    """Rename an organism: move its whole directory and repoint `current`
+    when the renamed one is the awake organism. ValueError on an invalid
+    or taken new name, or when the old organism does not exist. Returns
+    the new directory. Callers holding a live Organism must flush it
+    before the move and reopen it from the new path afterwards."""
+    _validate(new)
+    src = organism_dir(root, old)
+    if not src.is_dir():
+        raise ValueError(f"no organism named {old!r}")
+    if new == old:
+        return src
+    dest = organism_dir(root, new)
+    if dest.exists():
+        raise ValueError(f"organism {new!r} already exists")
+    src.rename(dest)
+    if current(root) == old:
+        set_current(root, new)
+    return dest
+
+
 def current(root):
     """The active organism's name ('default' when never set)."""
     pointer = Path(root) / CURRENT_FILE

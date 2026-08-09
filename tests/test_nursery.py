@@ -83,3 +83,52 @@ def test_migrate_noop_without_state_or_when_default_exists(tmp_path):
     nursery.create(root, "default", root / "organism.scl")
     assert nursery.migrate(root) is False          # default already there
     assert (root / "state.json").exists()          # untouched
+
+
+# -- rename -----------------------------------------------------------------
+
+def test_rename_moves_directory(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    dest = nursery.rename(root, "fern", "willow")
+    assert dest == root / "organisms" / "willow"
+    assert (dest / "organism.scl").read_text() == SEED_SCL
+    assert nursery.list_organisms(root) == ["willow"]
+
+
+def test_rename_repoints_current_pointer(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    nursery.set_current(root, "fern")
+    nursery.rename(root, "fern", "willow")
+    assert nursery.current(root) == "willow"
+
+
+def test_rename_leaves_current_pointer_alone_for_sleepers(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    nursery.create(root, "moss", root / "organism.scl")
+    nursery.set_current(root, "moss")
+    nursery.rename(root, "fern", "willow")
+    assert nursery.current(root) == "moss"
+
+
+def test_rename_rejects_bad_names_and_missing_or_taken(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    nursery.create(root, "moss", root / "organism.scl")
+    with pytest.raises(ValueError, match="invalid organism name"):
+        nursery.rename(root, "fern", "Willow")
+    with pytest.raises(ValueError, match="no organism named"):
+        nursery.rename(root, "ghost", "willow")
+    with pytest.raises(ValueError, match="already exists"):
+        nursery.rename(root, "fern", "moss")
+    # failed renames leave the nursery untouched
+    assert nursery.list_organisms(root) == ["fern", "moss"]
+
+
+def test_rename_same_name_is_a_noop(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    assert nursery.rename(root, "fern", "fern") == root / "organisms" / "fern"
+    assert nursery.list_organisms(root) == ["fern"]

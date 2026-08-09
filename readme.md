@@ -141,7 +141,8 @@ bar shows state, mood, belief/rule counts, and voice status.
   `/reject`, and `/revert` gate them; nothing applies without you.
 - `/reload` — re-read Lua hook scripts. `/lua name.lua` — run one on demand.
 - `/new fern` — create an organism; `/swap default` — switch;
-  `/organisms` — list. Each organism lives in `organisms/<name>/` with its own
+  `/organisms` — list. Click an organism in the sidebar for its menu
+  (swap / rename). Each organism lives in `organisms/<name>/` with its own
   state and artifacts. Launch with `python tui.py --org fern`.
 - `/help` (F1, ctrl+p) — full command list.
 
