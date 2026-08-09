@@ -9,3 +9,5 @@ __pycache__/
 # runtime state — the living organism's body, not its code
 state.json
 artifacts/
+organisms/
+current

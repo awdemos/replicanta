@@ -1,11 +1,14 @@
 import random
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import ClassVar
 
 import extensions
 import narration
+import nursery
 import tui_commands
 import tui_views
+from organism import Organism
 from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
@@ -80,11 +83,13 @@ ASK_USER_ODDS = 0.35      # chance an idle wake utterance asks the user instead
 
 
 class OrganismApp(App):
-    """Terminal front-end for the Scallop organism, conversation-first: one
-    dominant styled log (chat, dreams, learned facts, lifecycle events), a
-    one-line status bar, and a command line with tab completion. Commands:
+    """Replicanta's terminal front-end, conversation-first: one dominant
+    styled log (chat, dreams, learned facts, lifecycle events), a one-line
+    status bar, and a command line with tab completion. Commands:
     /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
-    /help (or ctrl+p / F1)."""
+    /new, /swap, /organisms, /help (or ctrl+p / F1)."""
+
+    TITLE = "Replicanta"
 
     COMMANDS: ClassVar[set] = App.COMMANDS | {SlashCommands}
     BINDINGS: ClassVar[list[Binding]] = [
@@ -107,9 +112,15 @@ class OrganismApp(App):
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     """
 
-    def __init__(self, organism):
+    def __init__(self, organism, root=None, spawn=None):
         super().__init__()
         self.org = organism
+        # nursery root for /new, /swap, /organisms; when the organism was
+        # born in a nursery (organisms/<name>/), the root is two levels up
+        self.root = (Path(root) if root is not None
+                     else organism.dir_path.parent.parent)
+        # kwargs for Organism() when birthing/swapping (wake/sleep/chaos)
+        self._spawn = dict(spawn or {})
         self.chat_input = None
         self._narrating = False
         self._responding = False
@@ -152,17 +163,7 @@ class OrganismApp(App):
         yield Footer()
 
     def on_mount(self):
-        self._chat_history = [line for role, line in self.org.store.chat_log
-                              if role == "user"]
-        if not self.org.store.chat_log and self.org.store.cycle == 0:
-            self._append_log(
-                "a tiny organism wakes up inside your machine.", STYLE_DIM)
-            self._append_log(
-                "talk to it — it learns from you. /help (or F1) for commands.",
-                STYLE_DIM)
-        for role, line in self.org.store.chat_log[-100:]:
-            self._log_chat(role, line, stamp=False)
-        self.refresh_status()
+        self._show_org()
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
@@ -170,6 +171,36 @@ class OrganismApp(App):
         self._maybe_narrate()
         # start with the cursor in the chat line, not the scrollable log
         self.chat_input.focus()
+
+    def _show_org(self):
+        """(Re)render everything that reflects the current organism: chat
+        history, status bar, mind/memory tabs. Used on mount and after a
+        swap."""
+        self._chat_history = [line for role, line in self.org.store.chat_log
+                              if role == "user"]
+        if not self.org.store.chat_log and self.org.store.cycle == 0:
+            self._append_log(
+                "a tiny replicanta wakes up inside your machine.", STYLE_DIM)
+            self._append_log(
+                "talk to it — it learns from you. /help (or F1) for commands.",
+                STYLE_DIM)
+        for role, line in self.org.store.chat_log[-100:]:
+            self._log_chat(role, line, stamp=False)
+        self.refresh_status()
+        self._refresh_views()
+
+    def _swap_to(self, name):
+        """Persist the current organism and wake another one in its place."""
+        self.org.flush(force=True)
+        nursery.set_current(self.root, name)
+        org = Organism(nursery.organism_dir(self.root, name), **self._spawn)
+        org.load()
+        self.org = org
+        self.query_one("#dreams", RichLog).clear()
+        self._pending_hide()
+        self._show_org()
+        self._append_log(f"— now living with {name} —", STYLE_DIM,
+                         stamp=True)
 
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
@@ -357,10 +388,11 @@ class OrganismApp(App):
 
     def _org_name(self):
         """Card title for the organism: its learned name (the user can give
-        it one with 'your name is …'), or 'organism' until then."""
+        it one with 'your name is …'), else its nursery dir name."""
         return next(
             (v for (o, a, v) in self.org.store.beliefs()
-             if (o, a) == ("self", "name")), "organism")
+             if (o, a) == ("self", "name")),
+            self.org.dir_path.name or "replicanta")
 
     def _log_chat(self, role, text, stamp=True):
         if role == "user":
@@ -623,6 +655,46 @@ class OrganismApp(App):
             self.action_save_now()
         elif name == "/think":
             self.action_think_now()
+        elif name == "/organisms":
+            names = nursery.list_organisms(self.root)
+            current = self.org.dir_path.name
+            listing = ", ".join(f"*{n}" if n == current else n
+                                for n in names) or "(none)"
+            self._append_log(f"organisms: {listing}  (* = current)",
+                             STYLE_DIM)
+        elif name == "/new":
+            if self._busy():
+                self._append_log(
+                    "the organism is mid-thought — try again in a moment.",
+                    STYLE_DIM)
+                return
+            new_name = (parts[1] if len(parts) == 2
+                        else nursery.next_name(self.root))
+            try:
+                nursery.create(self.root, new_name,
+                               Path(self.root) / "organism.scl")
+            except (ValueError, OSError) as exc:
+                self._append_log(f"/new: {exc}", STYLE_WARN)
+            else:
+                self._swap_to(new_name)
+        elif name == "/swap":
+            if len(parts) != 2:
+                self._append_log("/swap needs a name — /organisms to list.",
+                                 STYLE_DIM)
+                return
+            if parts[1] not in nursery.list_organisms(self.root):
+                names = ", ".join(nursery.list_organisms(self.root)) \
+                    or "(none)"
+                self._append_log(
+                    f"/swap: no organism {parts[1]!r} — have: {names}",
+                    STYLE_WARN)
+                return
+            if self._busy():
+                self._append_log(
+                    "the organism is mid-thought — try again in a moment.",
+                    STYLE_DIM)
+                return
+            self._swap_to(parts[1])
         elif name == "/self-talk":
             self._self_talk_on = not self._self_talk_on
             if self._self_talk_on:
@@ -707,19 +779,26 @@ class OrganismApp(App):
 
 def main():
     import argparse
-    from pathlib import Path
 
-    from organism import Organism
-    parser = argparse.ArgumentParser(description="Scallop Organism TUI")
+    parser = argparse.ArgumentParser(description="Replicanta TUI")
     parser.add_argument("--dir", default=str(Path(__file__).parent))
+    parser.add_argument("--org", default=None,
+                        help="organism name in the nursery")
     parser.add_argument("--wake", type=int, default=180)
     parser.add_argument("--sleep", type=int, default=60)
     parser.add_argument("--chaos", type=float, default=0.5)
     args = parser.parse_args()
-    org = Organism(Path(args.dir), wake_seconds=args.wake,
-                   sleep_seconds=args.sleep, chaos=args.chaos)
+    root = Path(args.dir)
+    nursery.migrate(root)
+    name = args.org or nursery.current(root)
+    org_dir = nursery.organism_dir(root, name)
+    if not org_dir.exists():
+        nursery.create(root, name, root / "organism.scl")
+    spawn = {"wake_seconds": args.wake, "sleep_seconds": args.sleep,
+             "chaos": args.chaos}
+    org = Organism(org_dir, **spawn)
     org.load()
-    OrganismApp(org).run()
+    OrganismApp(org, root, spawn).run()
 
 
 if __name__ == "__main__":

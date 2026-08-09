@@ -644,10 +644,10 @@ def test_tui_events_stay_flat_lines(monkeypatch, tmp_path):
     assert not [w for w in written if isinstance(w, Panel)]
 
 
-def test_tui_org_card_titled_organism_by_default(monkeypatch, tmp_path):
+def test_tui_org_card_titled_by_dir_name_by_default(monkeypatch, tmp_path):
     from organism import Organism
     from rich.panel import Panel
-    org = Organism(tmp_path)
+    org = Organism(tmp_path / "organisms" / "fern")
     org.load()
     app = OrganismApp(org)
     written = []
@@ -662,7 +662,7 @@ def test_tui_org_card_titled_organism_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
     app._log_chat("org", "hi")
     panels = [w for w in written if isinstance(w, Panel)]
-    assert "organism" in str(panels[0].title)
+    assert "fern" in str(panels[0].title)
 
 
 def test_tui_org_card_uses_learned_name(monkeypatch, tmp_path):
@@ -889,3 +889,87 @@ def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
     app.handle_command("/revert")
     assert ext_mod.active_entries("pattern") == []
     assert any("reverted" in line for line in logged)
+
+
+# -- nursery: /new, /swap, /organisms -----------------------------------------
+
+
+def _nursery_app(monkeypatch, tmp_path):
+    """An app whose organism lives in a real nursery: tmp_path is the root
+    (with the seed genome), the organism at organisms/default/."""
+    import nursery
+    from organism import Organism
+    root = tmp_path
+    (root / "organism.scl").write_text(
+        'type bel(x: String, a: String, v: String)\n')
+    nursery.create(root, "default", root / "organism.scl")
+    org = Organism(nursery.organism_dir(root, "default"))
+    org.load()
+    app = OrganismApp(org, root)
+    logged = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+        def clear(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.notify = lambda *a, **k: None
+    return app, root, logged
+
+
+def test_tui_new_births_and_swaps(monkeypatch, tmp_path):
+    import nursery
+    app, root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/new fern")
+    assert app.org.dir_path == nursery.organism_dir(root, "fern")
+    assert (root / "organisms" / "fern" / "organism.scl").exists()
+    assert nursery.current(root) == "fern"
+    assert any("now living with fern" in line for line in logged)
+
+
+def test_tui_new_bare_autonames(monkeypatch, tmp_path):
+    app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/new")
+    assert app.org.dir_path.name == "replicanta-2"
+
+
+def test_tui_new_rejects_duplicate(monkeypatch, tmp_path):
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/new default")
+    assert app.org.dir_path.name == "default"  # stayed put
+    assert any("already exists" in line for line in logged)
+
+
+def test_tui_organisms_lists_with_current_marked(monkeypatch, tmp_path):
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/new fern")
+    logged.clear()
+    app.handle_command("/organisms")
+    assert any("*fern" in line and "default" in line for line in logged)
+
+
+def test_tui_swap_roundtrip_and_unknown(monkeypatch, tmp_path):
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/new fern")
+    app.handle_command("/swap default")
+    assert app.org.dir_path.name == "default"
+    logged.clear()
+    app.handle_command("/swap nope")
+    assert app.org.dir_path.name == "default"
+    assert any("no organism 'nope'" in line for line in logged)
+
+
+def test_tui_swap_refused_while_busy(monkeypatch, tmp_path):
+    app, root, logged = _nursery_app(monkeypatch, tmp_path)
+    app._responding = True
+    app.handle_command("/new fern")
+    assert app.org.dir_path.name == "default"       # no swap
+    assert not (root / "organisms" / "fern").exists()  # not even born
+    assert any("mid-thought" in line for line in logged)

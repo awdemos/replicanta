@@ -1,0 +1,85 @@
+"""Nursery feature: organisms live in organisms/<name>/ subdirectories,
+a `current` pointer file remembers who is awake, /new births from the
+seed genome, and a legacy root-level organism migrates into
+organisms/default/."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import pytest
+
+import nursery
+
+SEED_SCL = 'type bel(x: String, a: String, v: String)\n'
+
+
+def _root(tmp_path):
+    (tmp_path / "organism.scl").write_text(SEED_SCL)
+    return tmp_path
+
+
+def test_create_births_from_template(tmp_path):
+    root = _root(tmp_path)
+    dest = nursery.create(root, "fern", root / "organism.scl")
+    assert dest == root / "organisms" / "fern"
+    assert (dest / "organism.scl").read_text() == SEED_SCL
+    assert nursery.list_organisms(root) == ["fern"]
+
+
+def test_create_rejects_duplicate_and_invalid_names(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    with pytest.raises(ValueError, match="already exists"):
+        nursery.create(root, "fern", root / "organism.scl")
+    for bad in ("Fern", "has space", "a/b", ""):
+        with pytest.raises(ValueError, match="invalid organism name"):
+            nursery.create(root, bad, root / "organism.scl")
+
+
+def test_list_organisms_empty_and_sorted(tmp_path):
+    root = _root(tmp_path)
+    assert nursery.list_organisms(root) == []
+    for name in ("zoe", "amy", "fern"):
+        nursery.create(root, name, root / "organism.scl")
+    assert nursery.list_organisms(root) == ["amy", "fern", "zoe"]
+
+
+def test_next_name_skips_taken(tmp_path):
+    root = _root(tmp_path)
+    assert nursery.next_name(root) == "replicanta-2"
+    nursery.create(root, "replicanta-2", root / "organism.scl")
+    assert nursery.next_name(root) == "replicanta-3"
+
+
+def test_current_defaults_and_persists(tmp_path):
+    root = _root(tmp_path)
+    assert nursery.current(root) == "default"
+    nursery.set_current(root, "fern")
+    assert nursery.current(root) == "fern"
+
+
+def test_migrate_moves_legacy_root_organism(tmp_path):
+    root = _root(tmp_path)
+    (root / "state.json").write_text('{"cycle": 42}')
+    (root / "artifacts").mkdir()
+    (root / "artifacts" / "diary.md").write_text("dear diary")
+    assert nursery.migrate(root) is True
+    dest = root / "organisms" / "default"
+    assert (dest / "state.json").read_text() == '{"cycle": 42}'
+    assert (dest / "artifacts" / "diary.md").read_text() == "dear diary"
+    assert (dest / "organism.scl").read_text() == SEED_SCL
+    assert not (root / "state.json").exists()      # moved, not copied
+    assert not (root / "artifacts").exists()
+    assert (root / "organism.scl").exists()        # template stays
+    assert nursery.current(root) == "default"
+
+
+def test_migrate_noop_without_state_or_when_default_exists(tmp_path):
+    root = _root(tmp_path)
+    assert nursery.migrate(root) is False          # nothing to migrate
+    (root / "state.json").write_text("{}")
+    nursery.create(root, "default", root / "organism.scl")
+    assert nursery.migrate(root) is False          # default already there
+    assert (root / "state.json").exists()          # untouched

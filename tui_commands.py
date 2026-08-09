@@ -18,6 +18,9 @@ COMMANDS = [
     ("/approve", "/approve", "apply the organism's pending genome patch"),
     ("/reject", "/reject", "discard the pending genome patch"),
     ("/revert", "/revert", "undo the last applied genome patch"),
+    ("/new", "/new [name]", "birth a new organism and swap to it"),
+    ("/swap", "/swap name", "swap to another organism"),
+    ("/organisms", "/organisms", "list all organisms"),
     ("/help", "/help", "this help screen"),
 ]
 
@@ -89,7 +92,7 @@ def sparkline(values):
 
 
 def help_text():
-    lines = ["ORGANISM — type / in the chat line; tab completes.", ""]
+    lines = ["REPLICANTA — type / in the chat line; tab completes.", ""]
     lines += [f"{usage:<14} {desc}" for _name, usage, desc in COMMANDS]
     lines += [
         "",

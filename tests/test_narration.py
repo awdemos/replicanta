@@ -113,7 +113,7 @@ def test_build_prompt_includes_snapshot(org):
 def test_build_prompt_includes_felt_experience(org):
     prompt = build_prompt(state_snapshot(org))
     assert "how this feels right now" in prompt
-    assert "fragile" in prompt        # score 1.3 -> fragile band
+    assert "young" in prompt          # score 1.3 -> young band
     assert "precious" in prompt       # 2 beliefs -> few, precious band
 
 
@@ -150,8 +150,9 @@ def test_build_prompt_dream_intro_when_sleeping(org):
 def test_build_prompt_uses_dream_experience_when_sleeping(org):
     _sleep(org)
     prompt = build_prompt(state_snapshot(org))
-    # FakeOrg: score 1.3 -> mist, 2 beliefs -> faint sparks, chaos 0.5 -> shimmers
-    assert "mist in the dream" in prompt
+    # FakeOrg: score 1.3 -> small bright thing, 2 beliefs -> faint sparks,
+    # chaos 0.5 -> shimmers
+    assert "small bright thing" in prompt
     assert "faint sparks" in prompt
     assert "shimmers" in prompt
     assert "how this feels right now" in prompt

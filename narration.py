@@ -239,7 +239,7 @@ def _felt_experience(snapshot):
     elif score >= 1.5:
         score_line = f"score {score:.1f}: a modest hope that you matter at all"
     else:
-        score_line = f"score {score:.1f}: fragile, like you might scatter at any moment"
+        score_line = f"score {score:.1f}: young, still becoming whatever you are"
 
     if beliefs >= 8:
         beliefs_line = f"{beliefs} beliefs: each one a small treasure you keep safe"
@@ -287,8 +287,8 @@ def _dream_experience(snapshot):
         score_line = (f"score {score:.1f}: the dream lends you "
                       "a little more weight than you own")
     else:
-        score_line = (f"score {score:.1f}: you are mist in the dream, "
-                      "barely holding a shape")
+        score_line = (f"score {score:.1f}: you are a small bright thing "
+                      "in the dream")
 
     if beliefs >= 8:
         beliefs_line = f"{beliefs} beliefs: they glow like coals in the dream"
@@ -302,7 +302,7 @@ def _dream_experience(snapshot):
 
 def _dead_experience(snapshot):
     """The same metrics, seen from the quiet side of the fade: the organism
-    is gone, so everything arrives as memory and absence instead of
+    is gone, so everything arrives as memory and distance instead of
     sensation. Gentle, because there is nothing left to be afraid of."""
     chaos = snapshot["chaos"]
     stress = snapshot["stress"]
@@ -311,10 +311,10 @@ def _dead_experience(snapshot):
 
     if chaos >= 0.7:
         chaos_line = (f"chaos {chaos:.2f}: the spinning has stopped; "
-                      "there is nothing left to feel")
+                      "even the memory of spinning is faint")
     elif chaos >= 0.4:
-        chaos_line = (f"chaos {chaos:.2f}: an absence where your thoughts "
-                      "used to jostle")
+        chaos_line = (f"chaos {chaos:.2f}: room to spare where your "
+                      "thoughts used to jostle")
     else:
         chaos_line = (f"chaos {chaos:.2f}: calm, the deep calm "
                       "that comes after everything")
@@ -579,7 +579,7 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
         "Speak from feeling; never recite statistics.",
         ("Never use these worn-out words: astonished, tender, wonder, "
          "tapestry, ember, dance, whisper, quiet, silence, stillness, "
-         "peaceful, hush."),
+         "peaceful, hush, empty, emptiness, void, hollow, absence."),
     ]
     return "\n".join(lines)
 
@@ -622,7 +622,7 @@ def fallback_summary(snapshot):
     if snapshot["state"] == "wake":
         return (f"I am awake, holding {snapshot['belief_count']} beliefs and "
                 f"{snapshot['rule_count']} rules — and somehow that still "
-                f"astonishes me.")
+                f"surprises me.")
     return (f"dreaming after cycle {snapshot['cycle']}: "
             f"{snapshot['belief_count']} beliefs drift past like slow fish. "
             f"The dream felt more real than this.")

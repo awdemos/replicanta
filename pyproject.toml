@@ -25,6 +25,7 @@ py-modules = [
     "extensions",
     "learning",
     "narration",
+    "nursery",
     "organism",
     "probe",
     "sentiment",

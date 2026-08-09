@@ -56,6 +56,13 @@ you say.
   first (regex compiles, fires on its own example, never on unrelated
   sentences).
 - `/approve`, `/reject`, `/revert` — the approval gate for its patches
+- **Many organisms**: they live in a nursery — `organisms/<name>/` under
+  the app root, each with its own genome, state and artifacts; a `current`
+  pointer file remembers who is awake. `/new fern` births a fresh organism
+  (bare `/new` auto-names one) and swaps to it, `/swap default` goes back,
+  `/organisms` lists them all (`*` = current). `python tui.py --org fern`
+  picks one at launch. A legacy root-level organism is migrated into
+  `organisms/default/` on first run.
 - `/help` (or F1, ctrl+p) — everything else
 
 ## Mind
