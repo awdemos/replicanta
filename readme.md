@@ -1,29 +1,31 @@
 # Replicanta
 
-A neurosymbolic organism implementation: a self-learning digital being whose
-mind couples a probabilistic Scallop program with an LLM backend. Inspired by
-biological organisms, it wakes, asks itself questions, sleeps, dreams, learns
-from you, and grows in consciousness (measured as belief-network complexity).
+A neurosymbolic organism(s) implementation: self-learning digital beings
+whose minds couple a probabilistic Scallop program with an LLM backend.
+Inspired by biological organisms, each one wakes, asks itself questions,
+sleeps, dreams, learns from you, and grows in consciousness (measured as
+belief-network complexity). You can run one or raise a whole nursery.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["User message or idle trigger"] --> B{"hear() / sense()"}
-    B --> C["Update beliefs, mood, stress, chat log"]
+    B --> C["Update beliefs, mood, stress, chat"]
     C --> D["state_snapshot"]
-    D --> E["Prompt: state + goals + self-model + activity digest + skills + surprises + memory"]
-    E --> F["ThoughtArena: 2 proposers, critic, voters"]
-    F --> G{"ollama reachable?"}
-    G -->|yes| H["Deliver utterance + grounding check + skill outcome"]
-    G -->|no| I["Deterministic fallback"]
-    H --> J["Record chat / activity counters"]
-    I --> J
-    J --> K{"Reflection trigger?"}
-    K -->|yes| L["Reflect: distill skill, patch skill, or nothing"]
-    L --> M["Skills feed back into future prompts"]
-    K -->|no| N["Goals tick"]
-    N --> O["Goal progress / complete / stalled"]
-    O --> P["Sleep: dream engine"]
-    P --> Q["Validate candidate rules, promote or discard"]
+    D --> E["Build prompt"]
+    E --> F["Inject goals, self-model, activity digest, skills, surprises, memory"]
+    F --> G["ThoughtArena: 2 proposers, critic, voters"]
+    G --> H{"ollama reachable?"}
+    H -->|yes| I["Deliver utterance + grounding check + skill outcome"]
+    H -->|no| J["Deterministic fallback"]
+    I --> K["Record chat / activity counters"]
+    J --> K
+    K --> L{"Reflection trigger?"}
+    L -->|yes| M["Reflect: skill / patch / nothing"]
+    M --> N["Skills feed back into future prompts"]
+    L -->|no| O["Goals tick"]
+    O --> P["Goal progress / complete / stalled"]
+    P --> Q["Sleep: dream engine"]
+    Q --> R["Validate candidate rules, promote or discard"]
 ```
 
 ## Run
