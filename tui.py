@@ -10,11 +10,10 @@ from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
-    Footer,
-    Header,
     Input,
     RichLog,
     Static,
@@ -120,14 +119,23 @@ class OrganismApp(App):
     ]
 
     CSS = """
-    #status { height: 1; padding: 0 1; background: $surface; }
+    #topbar { height: 1; padding: 0 1; background: $surface; color: $text; }
+    #main { height: 1fr; }
+    #sidebar { width: 24; background: $surface; color: $text;
+               border-right: solid $primary; }
+    #sidebar-header { height: 1; padding: 0 1; background: $surface;
+                      color: $text-muted; text-style: bold; }
+    #sidebar-list { padding: 0 1; }
+    #content { width: 1fr; height: 1fr; }
     TabbedContent { height: 1fr; }
     #dreams { height: 1fr; padding: 0 1; }
-    #pending { height: auto; max-height: 4; padding: 0 1; color: green; }
+    #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
     #mind, #memory, #inner { padding: 1 2; }
     #inner { overflow-y: auto; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
+    #bottombar { height: 1; padding: 0 1; background: $surface;
+                  color: $text-muted; }
     """
 
     def __init__(self, organism, root=None, spawn=None):
@@ -168,28 +176,31 @@ class OrganismApp(App):
         self._bottombar_text = ""
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Static("", id="status")
-        with TabbedContent(initial="chat-pane"):
-            with TabPane("chat", id="chat-pane"):
-                dreams = RichLog(
-                    id="dreams", max_lines=1000, wrap=True, markup=True,
-                    highlight=False)
-                dreams.can_focus = False
-                yield dreams
-                yield Static("", id="pending", markup=False)
-            with TabPane("mind", id="mind-pane"):
-                yield Static("", id="mind", markup=False)
-            with TabPane("memory", id="memory-pane"):
-                yield Static("", id="memory", markup=False)
-            with TabPane("inner", id="inner-pane"):
-                yield Static("", id="inner", markup=False)
+        yield Static("", id="topbar")
+        with Horizontal(id="main"):
+            with Vertical(id="sidebar"):
+                yield Static("nursery", id="sidebar-header")
+                yield Static("", id="sidebar-list")
+            with Vertical(id="content"), TabbedContent(initial="chat-pane"):
+                with TabPane("chat", id="chat-pane"):
+                    dreams = RichLog(
+                        id="dreams", max_lines=1000, wrap=True,
+                        markup=True, highlight=False)
+                    dreams.can_focus = False
+                    yield dreams
+                    yield Static("", id="pending", markup=False)
+                with TabPane("mind", id="mind-pane"), VerticalScroll():
+                    yield Static("", id="mind", markup=False)
+                with TabPane("memory", id="memory-pane"), VerticalScroll():
+                    yield Static("", id="memory", markup=False)
+                with TabPane("inner", id="inner-pane"), VerticalScroll():
+                    yield Static("", id="inner", markup=False)
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
                         "F2 chat · F3 mind · F4 memory · F7 inner)",
             id="chat")
         yield self.chat_input
-        yield Footer()
+        yield Static("", id="bottombar")
 
     def on_mount(self):
         self._show_org()
