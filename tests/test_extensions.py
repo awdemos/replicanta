@@ -122,10 +122,14 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
     import narration
     from organism import BeliefStore, Lifecycle, Metrics
 
+    class FakeWindow:
+        pairs = set()
+
     class FakeOrg:
         def __init__(self, tmp_path):
             self.store = BeliefStore(tmp_path)
             self.lifecycle = Lifecycle(self.store)
+            self.window = FakeWindow()
 
         def metrics(self):
             return Metrics(self.store)
