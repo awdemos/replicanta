@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 
 import learning
+from skills import Skill
 
 DEFAULT_MODEL = "qwen3:14b"
 OLLAMA_URL = os.environ.get(
@@ -106,6 +107,19 @@ def state_snapshot(org):
     user_view = next((v for (o, a, v) in beliefs
                       if (o, a) == ("self", "described_as")), None)
     memory = getattr(org.store, "memory", [])
+    goal = (org.store.active_goal() or {}).get("text")
+    skill_names = []
+    skill_lines = []
+    skill_store = getattr(org, "skills", None)
+    if skill_store is not None:
+        skill_names = [s.name for s in skill_store.list()]
+        context = " ".join(
+            ([goal] if goal else [])
+            + [t for _r, t in org.store.chat_log[-4:]]
+            + user_facts)
+        for s in skill_store.relevant(context, limit=3):
+            skill_store.record_use(s.name, cycle=org.store.cycle)
+            skill_lines.append(f"{s.name} (when {s.when}): {s.how}")
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -122,7 +136,9 @@ def state_snapshot(org):
         "clock": clock,
         "user_facts": user_facts,
         "user_view": user_view,
-        "goal": (org.store.active_goal() or {}).get("text"),
+        "goal": goal,
+        "skill_names": skill_names,
+        "skills": skill_lines,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
         "asked": [text for role, text in org.store.chat_log
                   if role == "org" and text.strip().endswith("?")][-3:],
@@ -331,7 +347,7 @@ def _dead_experience(snapshot):
 
 def build_prompt(snapshot, user_message=None, ask_user=False,
                  self_ask=False, self_question=None, form_goal=False,
-                 diary=False):
+                 diary=False, reflect=False):
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -396,6 +412,12 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
         lines.extend(f"- {m}" for m in snapshot["memory"])
     if snapshot.get("goal"):
         lines.append(f"what you are trying to do: {snapshot['goal']}")
+    if snapshot.get("skill_names"):
+        lines.append("skills you already have: "
+                     + ", ".join(snapshot["skill_names"]))
+    if snapshot.get("skills"):
+        lines.append("what you have learned how to do:")
+        lines.extend(f"- {s}" for s in snapshot["skills"])
     lines.append("")
     lines.append("how this feels right now:")
     if faded:
@@ -430,6 +452,22 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
             "example: learn five things about the user, or understand",
             "what rain feels like to them). First person, one sentence.",
             "No preamble, no quotes, no emoji.",
+        ]
+    elif reflect:
+        lines += [
+            "Reflect on your recent experience: what technique did you",
+            "discover or improve? Answer in EXACTLY one of these three",
+            "formats and nothing else:",
+            "",
+            "skill: <short name>    - a new technique worth keeping",
+            "when: <the situation it applies to>",
+            "how: <the technique, one line>",
+            "",
+            "patch: <name of a skill you already have>  - improve it",
+            "when: <the situation it applies to>",
+            "how: <the improved technique, one line>",
+            "",
+            "nothing    - if there is no technique worth keeping yet.",
         ]
     elif diary:
         lines += [
@@ -673,6 +711,71 @@ def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
         return fallback_respond(snapshot, user_text)
     note_voice_success()
     return text or fallback_respond(snapshot, user_text)
+
+
+# -- skills: reflection loop -------------------------------------------------
+
+def parse_reflect(text):
+    """Parse the voice's reflection answer: 'skill:'/'patch:' with when/how
+    fields, or 'nothing'. Returns a dict with at least {'action': ...},
+    or None for unparseable output."""
+    lines = [line.strip() for line in text.strip().splitlines()
+             if line.strip()]
+    if not lines:
+        return None
+    head = lines[0].lower()
+    if head.startswith("nothing"):
+        return {"action": "none"}
+    action = None
+    if head.startswith("skill:"):
+        action = "created"
+    elif head.startswith("patch:"):
+        action = "patched"
+    if action is None or ":" not in lines[0]:
+        return None
+    name = lines[0].split(":", 1)[1].strip()
+    fields = {}
+    for line in lines[1:]:
+        if ":" in line:
+            key, value = line.split(":", 1)
+            fields[key.strip().lower()] = value.strip()
+    if not name or not fields.get("when") or not fields.get("how"):
+        return None
+    return {"action": action, "name": name,
+            "when": fields["when"], "how": fields["how"]}
+
+
+def reflect(org, model=None, timeout=TIMEOUT, rng=None):
+    """One reflection cycle: the voice reviews recent experience and
+    distills a skill (or patches one, or says 'nothing'). Applies the
+    result to the organism's skill store. Offline (or unparseable) is a
+    quiet no-op — never a fake skill."""
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return {"action": "none"}
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(build_prompt(snapshot, reflect=True),
+                                model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return {"action": "none"}
+    note_voice_success()
+    result = parse_reflect(text)
+    if result is None or result["action"] == "none":
+        return {"action": "none"}
+    store = getattr(org, "skills", None)
+    if store is None:
+        return {"action": "none"}
+    if result["action"] == "patched" and store.get(result["name"]) is None:
+        result["action"] = "created"
+    cycle = org.store.cycle
+    store.save(Skill(name=result["name"], when=result["when"],
+                     how=result["how"], created_cycle=cycle,
+                     updated_cycle=cycle))
+    return result
 
 
 # -- goals -----------------------------------------------------------------

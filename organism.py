@@ -9,6 +9,7 @@ import learning
 import scallopy
 import sentiment
 from probe import SystemProbe
+from skills import SkillStore
 
 BEL = "bel"
 PROVENANCE = "minmaxprob"
@@ -582,6 +583,7 @@ class Organism:
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.meter = StressMeter(self.store)
         self.probe = probe if probe is not None else SystemProbe()
+        self.skills = SkillStore(dir_path / "artifacts" / "skills")
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
         self.questioner.stress = self.meter

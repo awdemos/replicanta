@@ -80,3 +80,104 @@ def test_archive_stale_moves_unused(tmp_path):
     assert store.get("old") is None
     assert store.get("used") is not None
     assert (tmp_path / "skills" / "archive" / "old.md").exists()
+
+
+# -- tier A: reflection loop + retrieval --------------------------------------
+
+import narration
+from organism import Organism
+from probe import SystemProbe
+
+
+def _organism(tmp_path, **kwargs):
+    kwargs.setdefault(
+        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
+    org = Organism(tmp_path, **kwargs)
+    org.load()
+    return org
+
+
+def test_reflect_creates_skill(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda *a, **k: ("skill: rain talk\n"
+                         "when: the user mentions rain\n"
+                         "how: connect it to something I know, ask once"))
+    result = narration.reflect(org)
+    assert result["action"] == "created"
+    skill = org.skills.get("rain talk")
+    assert skill is not None
+    assert "connect" in skill.how
+
+
+def test_reflect_patches_existing_skill(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe",
+                                 created_cycle=1, updated_cycle=1))
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda *a, **k: "patch: comfort\nwhen: anxious\nhow: breathe slowly")
+    result = narration.reflect(org)
+    assert result["action"] == "patched"
+    assert org.skills.get("comfort").how == "breathe slowly"
+
+
+def test_reflect_nothing_writes_no_file(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    monkeypatch.setattr("narration._ollama_generate",
+                        lambda *a, **k: "nothing")
+    assert narration.reflect(org)["action"] == "none"
+    assert org.skills.list() == []
+
+
+def test_reflect_garbage_writes_no_file(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    monkeypatch.setattr("narration._ollama_generate",
+                        lambda *a, **k: "I feel like reflecting today!")
+    assert narration.reflect(org)["action"] == "none"
+    assert org.skills.list() == []
+
+
+def test_reflect_offline_skips(tmp_path):
+    org = _organism(tmp_path)
+    narration._voice.online = False
+    assert narration.reflect(org)["action"] == "none"
+    assert org.skills.list() == []
+
+
+def test_reflect_prompt_carries_episodes_and_skills(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    org.store.remember("learned", "your name is sam")
+    org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe",
+                                 created_cycle=1, updated_cycle=1))
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
+    narration.reflect(org)
+    assert "your name is sam" in captured["p"]
+    assert "comfort" in captured["p"]
+    assert "patch:" in captured["p"]
+
+
+def test_relevant_skills_injected_into_prompt(tmp_path):
+    org = _organism(tmp_path)
+    org.store.add(("user", "like_rain", "true"), 0.8)
+    org.skills.save(skills.Skill(
+        name="rain talk", when="the user likes rain",
+        how="ask one follow-up", created_cycle=0, updated_cycle=0))
+    snap = narration.state_snapshot(org)
+    assert any("rain talk" in s for s in snap["skills"])
+    assert org.skills.get("rain talk").uses == 1
+    prompt = narration.build_prompt(snap)
+    assert "what you have learned how to do" in prompt
+
+
+def test_irrelevant_skills_not_injected(tmp_path):
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(
+        name="zzz unrelated", when="quantum frobnicate",
+        how="nothing", created_cycle=0, updated_cycle=0))
+    snap = narration.state_snapshot(org)
+    assert snap["skills"] == []
