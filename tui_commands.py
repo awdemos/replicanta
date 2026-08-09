@@ -118,7 +118,7 @@ def help_text():
         "F7      inner tab (mental state, perpetuation loop)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
-        "q       quit",
+        "ctrl+q  quit",
         "",
         "scripting: drop .lua files in scripts/ (see scripts/example.lua);",
         "they get on_birth/on_cycle/on_learned/on_utterance/on_fade(ctx)",

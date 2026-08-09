@@ -118,3 +118,31 @@ def test_f7_switches_to_inner_pane(monkeypatch, tmp_path):
             assert inp.has_focus, "Tab after F7 moved focus off the chat input"
 
     asyncio.run(check())
+
+
+def test_ctrl_q_binding_exists_and_saves_before_quit(monkeypatch, tmp_path):
+    """ctrl+q must be bound to quit and action_quit must flush the organism
+    before delegating to the default quit behavior."""
+
+    app = _headless_app(monkeypatch, tmp_path)
+    keys = list(app._bindings.key_to_bindings.keys())
+    assert "ctrl+q" in keys, "ctrl+q quit binding missing"
+
+    flushed = {"called": False}
+    original_flush = app.org.flush
+
+    def tracking_flush(*args, **kwargs):
+        flushed["called"] = True
+        return original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(app.org, "flush", tracking_flush)
+
+    quit_called = {"called": False}
+
+    def fake_super_quit(_self):
+        quit_called["called"] = True
+
+    monkeypatch.setattr(OrganismApp.__bases__[0], "action_quit", fake_super_quit)
+    app.action_quit()
+    assert flushed["called"], "action_quit did not flush organism state"
+    assert quit_called["called"], "action_quit did not delegate to App.action_quit"

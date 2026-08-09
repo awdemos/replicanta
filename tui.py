@@ -115,6 +115,7 @@ class OrganismApp(App):
         Binding("f5", "talk", "talk (push-to-talk)"),
         Binding("f6", "look", "look through the camera"),
         Binding("f7", "show_tab('inner-pane')", "inner"),
+        Binding("ctrl+q", "quit", "quit"),
     ]
 
     CSS = """
@@ -247,6 +248,11 @@ class OrganismApp(App):
 
     def action_save_now(self):
         self.org.flush(force=True)
+
+    def action_quit(self):
+        """Quit cleanly: persist organism state before exiting."""
+        self.action_save_now()
+        super().action_quit()
 
     def action_think_now(self):
         self._maybe_narrate()
