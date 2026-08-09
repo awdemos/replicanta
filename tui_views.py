@@ -388,10 +388,19 @@ def cells_layout(org):
                 text.append("  ", style=f"on {_cell_color(
                     cell['kind'], cell['confidence'])}")
         text.append("\n")
-    text.append(
-        "legend: beliefs cyan · self pink · rules green · memory amber · "
-        "goals magenta · click a cell to inspect it",
-        style="#94a3b8")
+    # legend: real swatches in the exact colors the grid uses — each kind
+    # shows its weak->strong endpoints, because brightness is confidence
+    legend = Text()
+    legend.append("legend: ", style="#94a3b8")
+    for kind, label in (("belief", "beliefs"), ("self", "self"),
+                        ("rule", "rules"), ("memory", "memory"),
+                        ("goal", "goals")):
+        legend.append("  ", style=f"on {_cell_color(kind, 0.15)}")
+        legend.append("  ", style=f"on {_cell_color(kind, 1.0)}")
+        legend.append(f" {label} · ", style="#94a3b8")
+    legend.append("dim→bright = weak→strong · click a cell to inspect it",
+                  style="#94a3b8")
+    text.append(legend)
     return text, grid
 
 

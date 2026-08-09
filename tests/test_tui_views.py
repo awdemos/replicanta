@@ -267,3 +267,18 @@ def test_cell_detail_text_describes_each_kind(org):
     goal = tui_views.cell_detail_text(occupied["goal"])
     assert "kind: goal" in goal and "created cycle: 3" in goal
     assert "learn the user's name" in goal
+
+
+def test_cells_legend_uses_the_exact_cell_colors(org):
+    """The legend shows real swatches in the precise colors the grid
+    uses (weak and strong endpoints per kind), not just color names."""
+    text, _grid = tui_views.cells_layout(org)
+    styles = {str(span.style) for span in text.spans}
+    for kind in ("belief", "self", "rule", "memory", "goal"):
+        weak = tui_views._cell_color(kind, 0.15)
+        strong = tui_views._cell_color(kind, 1.0)
+        assert f"on {weak}" in styles, kind
+        assert f"on {strong}" in styles, kind
+    rendered = _render(text)
+    assert "beliefs" in rendered and "goals" in rendered
+    assert "weak→strong" in rendered
