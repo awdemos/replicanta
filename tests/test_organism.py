@@ -1020,7 +1020,48 @@ def test_tui_voice_rejects_bad_arg(monkeypatch, tmp_path):
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice loudly")
     assert speech.enabled is False
-    assert any("on or off" in line for line in logged)
+    assert any("/voice list" in line for line in logged)
+
+
+def test_tui_voice_list_marks_active(monkeypatch, tmp_path):
+    monkeypatch.setattr(speech, "list_voices",
+                        lambda: ["en_GB-alan-low", "en_US-lessac-medium"])
+    monkeypatch.setattr(speech, "voice_name",
+                        lambda: "en_US-lessac-medium")
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice list")
+    assert any("*en_US-lessac-medium" in line and "en_GB-alan-low" in line
+               for line in logged)
+
+
+def test_tui_voice_use_switches_and_speaks(monkeypatch, tmp_path):
+    said = []
+    monkeypatch.setattr(speech, "say", lambda text: said.append(text))
+    monkeypatch.setattr(speech, "set_voice",
+                        lambda spec: Path(f"voices/{spec}.onnx"))
+    monkeypatch.setattr(speech, "voice_name", lambda: "en_GB-alan-low")
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice use en_GB-alan-low")
+    assert any("voice: en_GB-alan-low" in line for line in logged)
+    assert said == ["This is my new voice."]
+
+
+def test_tui_voice_use_unknown_suggests_get(monkeypatch, tmp_path):
+    monkeypatch.setattr(speech, "set_voice", lambda spec: None)
+    monkeypatch.setattr(speech, "list_voices",
+                        lambda: ["en_US-lessac-medium"])
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice use en_GB-alan-low")
+    assert any("no voice 'en_GB-alan-low'" in line
+               and "/voice get en_GB-alan-low" in line for line in logged)
+
+
+def test_tui_voice_get_runs_download_worker(monkeypatch, tmp_path):
+    got = []
+    app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
+    app._voice_get = lambda name: got.append(name)
+    app.handle_command("/voice get en_GB-alan-low")
+    assert got == ["en_GB-alan-low"]
 
 
 def test_tui_reply_speaks_only_when_enabled(monkeypatch, tmp_path):

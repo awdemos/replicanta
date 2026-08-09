@@ -89,3 +89,97 @@ def test_speech_ignores_empty_text(monkeypatch):
     speech.say(None)
     assert called == []
     assert speech._queue.empty()
+
+
+# -- voice management: list / switch / download ---------------------------
+
+def _fake_voices_dir(tmp_path, monkeypatch, names=("en_US-lessac-medium",)):
+    vdir = tmp_path / "voices"
+    vdir.mkdir()
+    for n in names:
+        (vdir / f"{n}.onnx").write_text("fake")
+        (vdir / f"{n}.onnx.json").write_text("{}")
+    monkeypatch.setattr(speech, "VOICES_DIR", vdir)
+    return vdir
+
+
+def test_list_voices_scans_voices_dir(tmp_path, monkeypatch):
+    _fake_voices_dir(tmp_path, monkeypatch,
+                     ("en_US-lessac-medium", "en_GB-alan-low"))
+    assert speech.list_voices() == ["en_GB-alan-low", "en_US-lessac-medium"]
+
+
+def test_list_voices_empty_without_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(speech, "VOICES_DIR", tmp_path / "nope")
+    assert speech.list_voices() == []
+
+
+def test_set_voice_by_name_filename_and_path(tmp_path, monkeypatch):
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    assert speech.set_voice("en_GB-alan-low") == vdir / "en_GB-alan-low.onnx"
+    assert speech.voice_name() == "en_GB-alan-low"
+    assert speech.set_voice("en_GB-alan-low.onnx") is not None
+    assert speech.set_voice(str(vdir / "en_GB-alan-low.onnx")) is not None
+
+
+def test_set_voice_unknown_keeps_current(tmp_path, monkeypatch):
+    _fake_voices_dir(tmp_path, monkeypatch)
+    before = speech.MODEL_PATH
+    assert speech.set_voice("en_GB-nope-low") is None
+    assert speech.MODEL_PATH == before       # unchanged
+
+
+def test_set_voice_drops_cached_model(tmp_path, monkeypatch):
+    _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    speech._voice = object()                 # pretend a model is loaded
+    speech.set_voice("en_GB-alan-low")
+    assert speech._voice is None             # reloads on next speak
+
+
+def test_voice_urls_parses_hf_layout():
+    model, config = speech.voice_urls("en_US-lessac-medium")
+    assert model == ("https://huggingface.co/rhasspy/piper-voices/resolve/"
+                     "v1.0.0/en/en_US/lessac/medium/"
+                     "en_US-lessac-medium.onnx")
+    assert config.endswith("en_US-lessac-medium.onnx.json")
+    model, _ = speech.voice_urls("en_US-libritts_r-medium")
+    assert "/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx" in model
+
+
+def test_voice_urls_rejects_bad_names():
+    assert speech.voice_urls("lessac") is None
+    assert speech.voice_urls("../etc/passwd") is None
+    assert speech.voice_urls("EN_US-lessac-medium") is None
+
+
+def test_download_voice_invalid_name_never_calls_curl(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("curl must not run for an invalid name")
+    monkeypatch.setattr(speech.subprocess, "run", boom)
+    assert speech.download_voice("not a voice") is None
+
+
+def test_download_voice_success(tmp_path, monkeypatch):
+    _fake_voices_dir(tmp_path, monkeypatch, ())
+    written = []
+
+    def fake_run(cmd, check, timeout):
+        written.append(cmd[cmd.index("-o") + 1])
+        Path(written[-1]).write_text("fake")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    model = speech.download_voice("en_GB-alan-low")
+    assert model == tmp_path / "voices" / "en_GB-alan-low.onnx"
+    assert len(written) == 2                 # model + config
+
+
+def test_download_voice_curl_failure_cleans_up(tmp_path, monkeypatch):
+    import subprocess
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ())
+
+    def failing(cmd, check, timeout):
+        raise subprocess.CalledProcessError(22, cmd)
+
+    monkeypatch.setattr(speech.subprocess, "run", failing)
+    assert speech.download_voice("en_GB-alan-low") is None
+    assert list(vdir.glob("*.onnx")) == []   # no half-downloaded voice

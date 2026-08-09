@@ -295,6 +295,28 @@ class OrganismApp(App):
                 self.notify("inner voice online (ollama)")
         self.refresh_status()
 
+    # -- spoken voice (piper tts) ------------------------------------------
+    @work(thread=True)
+    def _voice_get(self, name):
+        """Download a piper voice from huggingface in the background, then
+        adopt it. Failure just logs — the current voice is kept."""
+        self.call_from_thread(
+            self._append_log,
+            f"downloading voice {name} (this can take a minute)…", STYLE_DIM)
+        model = speech.download_voice(name)
+        if model is None:
+            self.call_from_thread(
+                self._append_log,
+                f"/voice get: couldn't fetch {name!r} — names look like "
+                "en_US-lessac-medium, see "
+                "huggingface.co/rhasspy/piper-voices", STYLE_WARN)
+            return
+        speech.set_voice(name)
+        self.call_from_thread(
+            self._append_log, f"voice ready: {name}", STYLE_LEARNED, True)
+        if speech.enabled:
+            speech.say("This is my new voice.")
+
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
         for event in self.org.tick(1.0):
@@ -718,15 +740,16 @@ class OrganismApp(App):
                 return
             self._swap_to(parts[1])
         elif name == "/voice":
-            arg = parts[1] if len(parts) == 2 else ""
-            if arg in ("on", "off") or not arg:
-                speech.set_enabled(not speech.enabled if not arg
-                                   else arg == "on")
+            args = parts[1:]
+            if not args or args[0] in ("on", "off"):
+                speech.set_enabled(not speech.enabled if not args
+                                   else args[0] == "on")
                 state = "on" if speech.enabled else "off"
                 if speech.enabled and not speech.available():
                     self._append_log(
                         f"spoken voice {state}, but no piper model at "
-                        f"{speech.MODEL_PATH} — staying mute", STYLE_WARN)
+                        f"{speech.MODEL_PATH} — staying mute "
+                        f"(/voice get en_US-lessac-medium)", STYLE_WARN)
                 elif speech.enabled:
                     self._append_log(
                         "spoken voice on — the organism speaks aloud "
@@ -735,8 +758,30 @@ class OrganismApp(App):
                 else:
                     self._append_log("spoken voice off", STYLE_DIM)
                 self.refresh_status()
+            elif args[0] == "list":
+                voices = speech.list_voices()
+                active = speech.voice_name()
+                listing = (", ".join(f"*{v}" if v == active else v
+                                     for v in voices)
+                           or "(none — /voice get en_US-lessac-medium)")
+                self._append_log(f"voices: {listing}  (* = active)",
+                                 STYLE_DIM)
+            elif args[0] == "use" and len(args) == 2:
+                if speech.set_voice(args[1]):
+                    self._append_log(f"voice: {speech.voice_name()}",
+                                     STYLE_DIM)
+                    speech.say("This is my new voice.")
+                else:
+                    have = ", ".join(speech.list_voices()) or "(none)"
+                    self._append_log(
+                        f"/voice use: no voice {args[1]!r} — have: {have}. "
+                        f"/voice get {args[1]} downloads it", STYLE_WARN)
+            elif args[0] == "get" and len(args) == 2:
+                self._voice_get(args[1])
             else:
-                self._append_log("/voice takes on or off", STYLE_DIM)
+                self._append_log(
+                    "/voice [on|off] · /voice list · /voice use name · "
+                    "/voice get name", STYLE_DIM)
         elif name == "/self-talk":
             self._self_talk_on = not self._self_talk_on
             if self._self_talk_on:
