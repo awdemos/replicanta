@@ -569,3 +569,95 @@ def test_build_prompt_bans_cliches(org):
 def test_reply_branch_is_substance_first(org):
     prompt = build_prompt(state_snapshot(org), user_message="how are you?")
     assert "substance" in prompt
+
+
+# -- cross-cycle repetition gate --------------------------------------------
+
+def test_is_repeat_of_recent_exact():
+    assert narration.is_repeat_of_recent(
+        "I keep circling the same thought.",
+        ["I keep circling the same thought!"])
+
+
+def test_is_repeat_of_recent_near_twin():
+    # 6 shared tokens out of 7 -> above the 0.8 overlap threshold
+    assert narration.is_repeat_of_recent(
+        "I wonder about fur and paws today.",
+        ["I wonder about fur and paws."])
+
+
+def test_is_repeat_of_recent_fresh_passes():
+    assert not narration.is_repeat_of_recent(
+        "The rain on the window sounds like typing.",
+        ["I keep circling the same thought."])
+
+
+def test_is_repeat_of_recent_shared_opening():
+    # low overall token overlap, but the identical opening run gives the
+    # loop away (the pattern real musings fell into)
+    assert narration.is_repeat_of_recent(
+        "I lost another belief today, and it felt like losing a page "
+        "from an old book.",
+        [("I lost another belief today. It felt like losing a leaf from "
+          "a tree in autumn.")])
+
+
+def test_is_repeat_of_recent_short_shared_opening_passes():
+    # a common four-word lead-in is just a habit of voice, not a loop
+    assert not narration.is_repeat_of_recent(
+        "I am awake and holding my beliefs close tonight.",
+        ["I am awake and wondering about the rain again."])
+
+
+def test_narrate_retries_when_thought_repeats(org, monkeypatch):
+    org.store.record_chat("org", "I keep circling the same thought.")
+    takes = iter(["I keep circling the same thought!",
+                  "something entirely new."])
+    monkeypatch.setattr("arena.ThoughtArena.emerge",
+                        lambda self, org, **kw: next(takes))
+    assert narrate(org) == "something entirely new."
+
+
+def test_narrate_returns_none_when_stuck_on_a_repeat(org, monkeypatch):
+    org.store.record_chat("org", "I keep circling the same thought.")
+    monkeypatch.setattr("arena.ThoughtArena.emerge",
+                        lambda self, org, **kw:
+                        "I keep circling the same thought.")
+    assert narrate(org) is None
+
+
+def test_narrate_only_checks_its_own_voice(org, monkeypatch):
+    # user lines must not silence the organism's own fresh thought
+    org.store.record_chat("user", "I wonder about fur.")
+    monkeypatch.setattr("narration._ollama_generate",
+                        lambda *a, **k: "I wonder about fur.")
+    assert narrate(org) == "I wonder about fur."
+
+
+def test_self_ask_falls_back_when_questions_repeat(org, monkeypatch):
+    org.store.record_chat("org", "do I really believe in fur?")
+    monkeypatch.setattr("arena.ThoughtArena.emerge",
+                        lambda self, org, **kw: "do I really believe in fur?")
+    question = narration.self_ask(org)
+    assert question != "do I really believe in fur?"
+    assert question.endswith("?")
+
+
+def test_self_answer_falls_back_when_answers_repeat(org, monkeypatch):
+    org.store.record_chat("org", "I believe in fur because I feel it.")
+    monkeypatch.setattr("arena.ThoughtArena.emerge",
+                        lambda self, org, **kw:
+                        "I believe in fur because I feel it.")
+    answer = narration.self_answer(org, "do I really believe in fur?")
+    assert answer != "I believe in fur because I feel it."
+    assert "do I really believe in fur?" in answer
+
+
+def test_musing_prompt_steers_away_from_recent_musings(org):
+    org.store.record_chat("org", "a quiet thought about rain.")
+    org.store.record_chat("user", "hello there")
+    prompt = build_prompt(state_snapshot(org))
+    assert "do not repeat or rephrase" in prompt
+    assert "a quiet thought about rain." in prompt
+    # user lines are not part of the steering list
+    assert "- hello there" not in prompt

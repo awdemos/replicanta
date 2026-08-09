@@ -54,12 +54,28 @@ _META_TAIL_RE = re.compile(
     r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
 _INSTRUCTION_ECHO_RE = re.compile(
     r"(?im)^\s*(?:draft a candidate answer.*|then,?\s+(?:evaluate|revise)"
-    r".*|attack both candidates.*|which candidate is better\??.*)$")
+    r".*|attack both candidates.*|which candidate is better\??.*"
+    r"|draft)$")
+# fragments of the utterance prompts that chatty models echo back verbatim
+# (build_prompt instructions, group-chat context); a line containing any of
+# these is scaffolding, not speech
+_INSTRUCTION_MARKERS = (
+    "no preamble", "no quotes", "no emoji", "worn-out words",
+    "recite statistics", "one to three sentences",
+    "as the organism itself", "answer your own question",
+    "ask yourself one question", "speak from feeling",
+    "reply to the user", "ask the user one question",
+    "candidate answer", "attack both", "which candidate",
+    "you are in a group chat", "recent group conversation",
+    "reply to the group",
+)
 
 
 def _is_repetition_loop(text, threshold=3):
     """Detect degenerate repetition: a model stuck looping the same
     sentence (or a near-twin of it) until the token budget runs out.
+    Anaphora loops — sentence after sentence opening with the same words
+    ("The first was …; The first was …; The first was …") — count too.
     Such output is not a candidate, it is a stuck generator."""
     parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text)
              if p.strip()]
@@ -67,7 +83,21 @@ def _is_repetition_loop(text, threshold=3):
         return False
     norm = [re.sub(r"\W+", " ", p.lower()).strip() for p in parts]
     top = max(norm.count(n) for n in set(norm))
-    return top >= threshold
+    if top >= threshold:
+        return True
+    prefixes = [" ".join(n.split()[:3]) for n in norm
+                if len(n.split()) >= 3]
+    if len(prefixes) >= threshold:
+        return max(prefixes.count(p) for p in set(prefixes)) >= threshold
+    return False
+
+
+def _strip_instruction_echoes(text):
+    """Drop lines that are echoed prompt scaffolding rather than speech."""
+    kept = [line for line in text.splitlines()
+            if not _INSTRUCTION_ECHO_RE.match(line)
+            and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)]
+    return "\n".join(kept)
 
 
 def _clean_candidate(text):
@@ -77,7 +107,7 @@ def _clean_candidate(text):
     candidate at all. Returns the cleaned text (possibly empty)."""
     text = _META_PREFIX_RE.sub("", text.strip(), count=1)
     text = _META_TAIL_RE.sub("", text)
-    text = _INSTRUCTION_ECHO_RE.sub("", text)
+    text = _strip_instruction_echoes(text)
     text = text.strip().strip('"').strip()
     if _is_repetition_loop(text):
         return ""

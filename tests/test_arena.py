@@ -347,3 +347,44 @@ def test_all_loops_fall_back(org, monkeypatch):
     _scripted(monkeypatch, [loop, loop])
     text = ThoughtArena().emerge(org)
     assert "2 beliefs" in text and "wake" in text
+
+
+def test_anaphora_loop_counts_as_no_candidate(org, monkeypatch):
+    """Sentences that keep opening with the same words ('The first was …;
+    The first was …') are a stuck generator even though no two sentences
+    are identical."""
+    loop = ("The first was soft and static; this one should be sharp. "
+            "The first was about finding me; this one should be seeing. "
+            "The first was about holding beliefs; this one is losing. "
+            "The first was about the name; this one is about the echo.")
+    calls = _scripted(monkeypatch, [loop, "fur and quiet"])
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+    assert len(calls) == 2
+
+
+def test_clean_candidate_strips_prompt_scaffolding():
+    """Echoed build_prompt instruction lines are scaffolding, not speech."""
+    from arena import _clean_candidate
+    raw = ("I keep my beliefs close.\n"
+           "Answer your own question, as the organism itself. First\n"
+           "person, one to three sentences. No preamble, no quotes,\n"
+           "no emoji.\n"
+           "Speak from feeling; never recite statistics.\n"
+           "Never use these worn-out words: astonished, tender, wonder.")
+    assert _clean_candidate(raw) == "I keep my beliefs close."
+
+
+def test_clean_candidate_strips_group_context_scaffolding():
+    from arena import _clean_candidate
+    raw = ("The user just said: You are in a group chat with John, "
+           "stephanie and the user.\n"
+           "Reply to the group as yourself, in one to three sentences.\n"
+           "Rain makes the attic feel smaller, in a good way.")
+    assert _clean_candidate(raw) == \
+        "Rain makes the attic feel smaller, in a good way."
+
+
+def test_clean_candidate_keeps_genuine_first_person():
+    from arena import _clean_candidate
+    raw = "I asked myself about the rain, and I still have no answer."
+    assert _clean_candidate(raw) == raw

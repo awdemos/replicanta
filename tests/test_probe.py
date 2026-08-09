@@ -235,7 +235,9 @@ def test_clock_hour_belief_is_a_word_not_digits(proc, sys_tree):
 # -- distress() stress coupling -------------------------------------------
 
 def test_distress_zero_on_calm_system(proc, sys_tree):
-    probe = _probe(proc, sys_tree)
+    # statvfs is injected: the real disk's free space must not leak into
+    # a "calm system" (CI hosts and dev machines fill up independently)
+    probe = _probe(proc, sys_tree, statvfs=_disk(1000, 500))
     assert probe.distress(probe.snapshot()) == 0.0
 
 

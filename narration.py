@@ -237,6 +237,74 @@ def _seed_for(snapshot, rng):
     return rng.choice(pool)
 
 
+# -- cross-cycle repetition gate --------------------------------------------
+
+REPEAT_WINDOW = 8      # how many recent utterances a new one is checked against
+REPEAT_OVERLAP = 0.8   # token-overlap ratio that counts as the same thought
+
+
+def _norm_utterance(text):
+    """Lowercase, punctuation-free form for comparing what the voice said."""
+    return re.sub(r"\W+", " ", text.lower()).strip()
+
+
+def _shared_opening(tokens, past_tokens, min_run=5):
+    """True when both lines open with the same run of words — the loop
+    signature of a voice stuck on one phrasing ("I lost another belief
+    today, and it felt like losing a …" cycle after cycle), where overall
+    token overlap stays low because only the tail changes."""
+    run = 0
+    for a, b in zip(tokens, past_tokens):
+        if a != b:
+            break
+        run += 1
+    return run >= min(min_run, len(tokens), len(past_tokens))
+
+
+def is_repeat_of_recent(text, recent, threshold=REPEAT_OVERLAP):
+    """True when text restates something already said: an exact normalized
+    match, a shared opening run, or a near-twin whose token overlap with a
+    recent line meets the threshold. The arena's candidate cleaning catches
+    a model looping inside one generation; this gate catches the voice
+    circling the same thought cycle after cycle."""
+    norm = _norm_utterance(text)
+    if not norm:
+        return False
+    tokens = set(norm.split())
+    token_list = norm.split()
+    for line in recent:
+        past = _norm_utterance(line)
+        if not past:
+            continue
+        if norm == past:
+            return True
+        if _shared_opening(token_list, past.split()):
+            return True
+        past_tokens = set(past.split())
+        union = tokens | past_tokens
+        if union and len(tokens & past_tokens) / len(union) >= threshold:
+            return True
+    return False
+
+
+def _recent_utterances(org, limit=REPEAT_WINDOW):
+    """The voice's own recent lines — what a new utterance must not restate."""
+    return [text for role, text in org.store.chat_log if role == "org"][-limit:]
+
+
+def _dedup_emerge(org, emerge, retries=1):
+    """Run emerge(); if the winner restates a recent utterance, re-roll with
+    a fresh arena (new seed, new temperature jitter). Returns None when the
+    voice has nothing new to say — the caller decides between silence and a
+    deterministic fallback."""
+    for _attempt in range(retries + 1):
+        text = emerge()
+        if text is None or not is_repeat_of_recent(text,
+                                                   _recent_utterances(org)):
+            return text
+    return None
+
+
 def _mood_line(mood):
     """One sentence of felt mood for the prompt."""
     return {
@@ -659,6 +727,12 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
                 "belief is a discovery, losing one is a little grief. No",
                 "preamble, no quotes, no emoji.",
             ]
+            said = [c[5:] for c in snapshot.get("chat", [])
+                    if c.startswith("org: ")][-4:]
+            if said:
+                lines.append("you recently said these — do not repeat "
+                             "or rephrase them:")
+                lines.extend(f"- {s}" for s in said)
     lines += [
         "Speak from feeling; never recite statistics.",
         ("Never use these worn-out words: astonished, tender, wonder, "
@@ -755,9 +829,13 @@ def fallback_summary(snapshot):
 def narrate(org, model=None, timeout=TIMEOUT):
     """First-person thought for the organism. Runs the inner arena (two
     proposers and an adversarial critic debate until a majority winner
-    emerges) and falls back to a local summary whenever ollama fails."""
+    emerges) and falls back to a local summary whenever ollama fails.
+    Returns None when the only thoughts on offer restate what was just
+    said — silence beats an echo."""
     from arena import ThoughtArena
-    return ThoughtArena().emerge(org, model=model, timeout=timeout)
+    return _dedup_emerge(
+        org,
+        lambda: ThoughtArena().emerge(org, model=model, timeout=timeout))
 
 
 def fallback_respond(snapshot, user_message):
@@ -987,12 +1065,18 @@ def self_ask(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
     in a rotating seed and steered away from its own recent questions.
     Runs the inner arena before it manifests; the winner is replayed
     through on_token in word chunks. Falls back to a deterministic
-    template whenever ollama is unavailable."""
+    template whenever ollama is unavailable — or when the debate can
+    only repeat a question it just asked."""
     from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"self_ask": True},
-        fallback=fallback_self_ask, on_token=on_token,
-        model=model, timeout=timeout)
+    question = _dedup_emerge(
+        org,
+        lambda: ThoughtArena(rng=rng).emerge(
+            org, prompt_kwargs={"self_ask": True},
+            fallback=fallback_self_ask, on_token=on_token,
+            model=model, timeout=timeout))
+    if question is None:
+        question = fallback_self_ask(state_snapshot(org))
+    return question
 
 
 def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None,
@@ -1000,9 +1084,14 @@ def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None,
     """First-person answer to the organism's own question. Runs the inner
     arena before it manifests; the winner is replayed through on_token in
     word chunks. Falls back to a deterministic reply whenever ollama is
-    unavailable."""
+    unavailable — or when the debate can only restate a recent answer."""
     from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"self_question": question},
-        fallback=lambda snap: fallback_self_answer(snap, question),
-        on_token=on_token, model=model, timeout=timeout)
+    answer = _dedup_emerge(
+        org,
+        lambda: ThoughtArena(rng=rng).emerge(
+            org, prompt_kwargs={"self_question": question},
+            fallback=lambda snap: fallback_self_answer(snap, question),
+            on_token=on_token, model=model, timeout=timeout))
+    if answer is None:
+        answer = fallback_self_answer(state_snapshot(org), question)
+    return answer
