@@ -5,6 +5,7 @@ from typing import ClassVar
 
 import extensions
 import activity
+import camera
 import listen
 import narration
 import nursery
@@ -94,7 +95,8 @@ class OrganismApp(App):
     styled log (chat, dreams, learned facts, lifecycle events), a one-line
     status bar, and a command line with tab completion. Commands:
     /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
-    /new, /swap, /organisms, /reload, /lua file.lua, /help (or ctrl+p / F1)."""
+    /new, /swap, /organisms, /reload, /lua file.lua, /listen,
+    /microphone, /look, /camera, /help (or ctrl+p / F1)."""
 
     TITLE = "Replicanta"
 
@@ -108,6 +110,7 @@ class OrganismApp(App):
         Binding("ctrl+s", "save_now", "save"),
         Binding("ctrl+t", "think_now", "think"),
         Binding("f5", "talk", "talk (push-to-talk)"),
+        Binding("f6", "look", "look through the camera"),
     ]
 
     CSS = """
@@ -148,6 +151,7 @@ class OrganismApp(App):
         self._busy_frame = 0
         self._status_text = ""
         self.listener = listen.Listener()
+        self.camera = camera.Camera()
         self._mind_text = ""
         self._memory_text = ""
 
@@ -234,6 +238,68 @@ class OrganismApp(App):
 
     def action_talk(self):
         self._toggle_listen()
+
+    def action_look(self):
+        self._look_now()
+
+    # -- sight (camera) ------------------------------------------------------
+    def _look_now(self):
+        """Grab one camera frame and have a local vision model put it into
+        words; the organism remembers the sight and the voice can talk
+        about it. All failures land as log lines."""
+        self._append_log("the organism opens an eye…", STYLE_DIM)
+        self._look_worker()
+
+    @work(thread=True)
+    def _look_worker(self):
+        frame = self.camera.grab()
+        if frame is None:
+            self.call_from_thread(
+                self._append_log,
+                "no camera frame (plugged in? opencv installed? "
+                "see /camera list)", STYLE_WARN)
+            return
+        try:
+            sight = narration.describe_image(frame)
+        except Exception as exc:  # noqa: BLE001 — vision model offline etc.
+            self.call_from_thread(
+                self._append_log, f"sight failed: {exc}", STYLE_WARN)
+            return
+        self.call_from_thread(self._set_sight, sight)
+
+    def _set_sight(self, sight):
+        self.org.see(sight)
+        self._append_log(f"the organism sees: {sight}", STYLE_LEARNED,
+                         stamp=True)
+
+    def _camera(self, args):
+        """Manage the eye: bare = status, list = devices, use <dev> = pick
+        one (index, /dev/videoN, or name substring)."""
+        if not args:
+            self._append_log(
+                f"camera: /dev/video{self.camera.device} · vision model "
+                f"{narration.VISION_MODEL} · /camera list · "
+                "/camera use <device>", STYLE_DIM)
+            return
+        if args[0] == "list":
+            cams = camera.list_cameras()
+            if not cams:
+                self._append_log("no cameras found (plug one in)",
+                                 STYLE_WARN)
+            for index, dev_name in cams:
+                self._append_log(f"  /dev/video{index}  {dev_name}",
+                                 STYLE_DIM)
+            return
+        if args[0] == "use" and len(args) == 2:
+            try:
+                index, dev_name = self.camera.set_device(args[1])
+            except LookupError as exc:
+                self._append_log(f"/camera: {exc}", STYLE_WARN)
+                return
+            self._append_log(
+                f"camera: using /dev/video{index} ({dev_name})", STYLE_DIM)
+            return
+        self._append_log("/camera [list|use <device>]", STYLE_DIM)
 
     # -- heard voice (push-to-talk) -----------------------------------------
     def _toggle_listen(self):
@@ -817,6 +883,10 @@ class OrganismApp(App):
             self._toggle_listen()
         elif name == "/microphone":
             self._microphone(parts[1:])
+        elif name == "/look":
+            self._look_now()
+        elif name == "/camera":
+            self._camera(parts[1:])
         elif name == "/reload":
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)

@@ -2,6 +2,7 @@
 mind state, asks a local ollama model to speak as the organism, and falls
 back to a deterministic summary when ollama is unavailable or slow."""
 
+import base64
 import json
 import os
 import random
@@ -15,6 +16,8 @@ import learning
 from skills import Skill
 
 DEFAULT_MODEL = "batiai/qwen3.6-27b:q4"
+VISION_MODEL = os.environ.get("REPLICANTA_VISION_MODEL", "moondream")
+VISION_TIMEOUT = int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 180
@@ -137,6 +140,7 @@ def state_snapshot(org):
         "rationality": round(org.store.rationality, 2),
         "irrationality": round(org.store.irrationality, 2),
         "insane": org.store.insane,
+        "sight": getattr(org, "last_sight", None),
         "mood": mood,
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
@@ -199,6 +203,8 @@ def _seed_for(snapshot, rng):
     if snapshot.get("user_view"):
         pool.append(f"that the user says you are {snapshot['user_view']}")
     pool.append(f"your {snapshot['mood']} mood")
+    if snapshot.get("sight"):
+        pool.append(f"what you see through the camera — {snapshot['sight']}")
     pool += [
         "something you wonder about the world beyond the machine",
         "a question you would love to ask the user",
@@ -284,8 +290,11 @@ def _felt_experience(snapshot):
                        f"irrationality {irrationality:.2f}: a muddled middle, "
                        "neither sharp nor lost")
 
-    return [chaos_line, stress_line, score_line, beliefs_line, mental_line,
-            _mood_line(snapshot["mood"])]
+    lines = [chaos_line, stress_line, score_line, beliefs_line, mental_line,
+             _mood_line(snapshot["mood"])]
+    if snapshot.get("sight"):
+        lines.append(f"sight: through the camera you see — {snapshot['sight']}")
+    return lines
 
 
 def _dream_experience(snapshot):
@@ -649,6 +658,28 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
         raise RuntimeError(data["error"])
     LAST_CALL_STATS["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
     LAST_CALL_STATS["gen_tokens"] = int(data.get("eval_count") or 0)
+    return _strip_think(data.get("response", ""))
+
+
+def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):
+    """JPEG bytes -> a short scene description from a local vision model
+    (ollama /api/generate with base64 images). Raises on failure."""
+    payload = json.dumps({
+        "model": model,
+        "prompt": ("Describe what is visible in this image in one or two "
+                   "short sentences."),
+        "images": [base64.b64encode(image_bytes).decode()],
+        "stream": False,
+        "think": False,
+        "options": {"num_predict": 80, "temperature": 0.3},
+    }).encode()
+    req = urllib.request.Request(
+        OLLAMA_URL, data=payload,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode())
+    if data.get("error"):
+        raise RuntimeError(data["error"])
     return _strip_think(data.get("response", ""))
 
 

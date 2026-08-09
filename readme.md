@@ -70,6 +70,9 @@ you say.
   organism exactly like a typed line. `/microphone` shows the STT config,
   `/microphone list` enumerates input devices, `/microphone use <device>`
   picks one
+- `/look` (or F6) — grab one USB camera frame, describe it with a local
+  vision model (moondream), and let the organism see it. `/camera` shows
+  the config, `/camera list` / `/camera use <device>` pick the device
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
 - **Self-patches**: during reflection it may propose an executable patch
@@ -152,6 +155,13 @@ you say.
   (`REPLICANTA_STT_MODEL=base`, `REPLICANTA_STT_DEVICE=cpu`,
   `REPLICANTA_STT_COMPUTE=int8`) because the GPU is usually busy
   narrating — point them at cuda when it isn't.
+- **Sight**: `/look` (F6) opens the organism's eye: one frame from a USB
+  camera (opencv/V4L2, device list from sysfs) is described in a sentence
+  or two by a local vision model (`REPLICANTA_VISION_MODEL`, default
+  moondream via ollama), remembered as an episode, and injected into the
+  voice's prompt — after a look, it can talk about what it's looking at.
+  Needs the `vision` extra (`pip install -e .[vision]`); no camera, no
+  opencv or an offline vision model just means a log line, never a crash.
 - **Any piper voice**: voices live in `voices/` as `<name>.onnx` +
   `<name>.onnx.json` pairs. `/voice list` shows downloaded ones (`*` =
   active), `/voice use en_GB-alan-low` switches, and `/voice get

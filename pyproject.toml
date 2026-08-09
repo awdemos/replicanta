@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
 listen = ["faster-whisper>=1.0"]
+vision = ["opencv-python-headless>=4.8"]
 
 [project.scripts]
 replicanta = "tui:main"
@@ -28,6 +29,7 @@ replicanta = "tui:main"
 py-modules = [
     "activity",
     "arena",
+    "camera",
     "extensions",
     "fileutil",
     "hooks",

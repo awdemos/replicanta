@@ -696,6 +696,7 @@ class Organism:
         self._last_stress_band = 0
         self._sentiment = None   # (tone, timestamp): "harsh" | "kind" | "learn"
         self._mood = None
+        self.last_sight = None   # latest camera scene description (transient)
 
     def load(self):
         # First boot = no state.json yet: the .scl genome is the source of
@@ -917,6 +918,15 @@ class Organism:
         if mood is not None:
             events.append({"kind": "mood", "mood": mood})
         return events
+
+    # -- sight -------------------------------------------------------------
+    def see(self, sight):
+        """A camera glance landed (USB camera -> vision model -> words).
+        Remembered as an episode and kept as `last_sight` for the voice's
+        prompt, so the organism can talk about what it is looking at."""
+        self.last_sight = sight
+        self.store.remember("sight", f"saw: {sight[:80]}")
+        self.store.dirty = True
 
     def _recent_tone(self):
         if self._sentiment is None:
