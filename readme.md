@@ -67,7 +67,9 @@ you say.
   manage the voices themselves (see Voice)
 - `/listen` (or F5) — push-to-talk: start the mic, talk, press again and
   your words are transcribed locally (faster-whisper) and heard by the
-  organism exactly like a typed line
+  organism exactly like a typed line. `/microphone` shows the STT config,
+  `/microphone list` enumerates input devices, `/microphone use <device>`
+  picks one
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
 - **Self-patches**: during reflection it may propose an executable patch

@@ -24,6 +24,30 @@ COMPUTE = os.environ.get("REPLICANTA_STT_COMPUTE", "int8")
 MIN_SECONDS = 0.25   # shorter captures are treated as accidental taps
 
 
+def match_microphone(mics, spec):
+    """The first mic whose id equals spec exactly, else the first whose
+    name contains it (case-insensitive); None when nothing matches."""
+    for mic in mics:
+        if mic.id == spec:
+            return mic
+    needle = spec.lower()
+    for mic in mics:
+        if needle in mic.name.lower():
+            return mic
+    return None
+
+
+def list_microphones():
+    """[(id, name)] of the host's input devices; [] when soundcard or the
+    sound server is unavailable."""
+    try:
+        import soundcard as sc
+        return [(m.id, m.name)
+                for m in sc.all_microphones(include_loopback=False)]
+    except Exception:  # noqa: BLE001 — listing must never kill anything
+        return []
+
+
 def _mono(frames):
     """soundcard frames ((n, channels) float32) -> mono 1-D float32."""
     import numpy as np
@@ -44,6 +68,7 @@ class Listener:
     def __init__(self, transcriber=None, mic_factory=None):
         self._transcriber = transcriber
         self._mic_factory = mic_factory
+        self.mic_spec = None     # chosen input device (id or name substring)
         self._thread = None
         self._chunks = []
         self._stop = threading.Event()
@@ -73,7 +98,28 @@ class Listener:
         if self._mic_factory is not None:
             return self._mic_factory()
         import soundcard as sc
-        return sc.default_microphone()
+        if self.mic_spec is None:
+            return sc.default_microphone()
+        mic = match_microphone(
+            sc.all_microphones(include_loopback=False), self.mic_spec)
+        if mic is None:
+            raise LookupError(f"no microphone matching {self.mic_spec!r}")
+        return mic
+
+    def set_mic(self, spec):
+        """Choose the input device for future captures (exact id or name
+        substring). Returns the matched device name; raises LookupError
+        when nothing matches."""
+        if self._mic_factory is not None:
+            self.mic_spec = spec
+            return spec
+        import soundcard as sc
+        mic = match_microphone(
+            sc.all_microphones(include_loopback=False), spec)
+        if mic is None:
+            raise LookupError(f"no microphone matching {spec!r}")
+        self.mic_spec = spec
+        return mic.name
 
     def stop(self):
         """End the capture; returns the recorded float32 mono audio at

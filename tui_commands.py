@@ -18,6 +18,8 @@ COMMANDS = [
     ("/voice", "/voice [on|off|list|use|get]",
      "spoken voice: toggle, list, switch, download piper voices"),
     ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)"),
+    ("/microphone", "/microphone [list|use dev]",
+     "mic status, list input devices, choose one"),
     ("/approve", "/approve", "apply the organism's pending genome patch"),
     ("/reject", "/reject", "discard the pending genome patch"),
     ("/revert", "/revert", "undo the last applied genome patch"),
@@ -107,8 +109,14 @@ def help_text():
         "F2/F3/F4 chat / mind / memory tabs",
         "ctrl+s  save now",
         "ctrl+t  think now",
+        "F5      push-to-talk (same as /listen)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
         "q       quit",
+        "",
+        "scripting: drop .lua files in scripts/ (see scripts/example.lua);",
+        "they get on_birth/on_cycle/on_learned/on_utterance/on_fade(ctx)",
+        "called at those moments — /reload re-reads them, /lua name.lua",
+        "runs one's main(ctx) on demand.",
     ]
     return "\n".join(lines)

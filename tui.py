@@ -263,6 +263,33 @@ class OrganismApp(App):
                 self._append_log, "(heard nothing)", STYLE_DIM)
         self.call_from_thread(self.refresh_status)
 
+    def _microphone(self, args):
+        """Manage the heard voice: bare = status, list = input devices,
+        use <id|name> = choose the device for future recordings."""
+        if not args:
+            mic = self.listener.mic_spec or "default"
+            self._append_log(
+                f"microphone: {mic} · stt {listen.MODEL_NAME} "
+                f"({listen.DEVICE}/{listen.COMPUTE}) · "
+                "/microphone list · /microphone use <device>", STYLE_DIM)
+            return
+        if args[0] == "list":
+            mics = listen.list_microphones()
+            if not mics:
+                self._append_log("no input devices found", STYLE_WARN)
+            for dev_id, dev_name in mics:
+                self._append_log(f"  {dev_name}  [{dev_id}]", STYLE_DIM)
+            return
+        if args[0] == "use" and len(args) == 2:
+            try:
+                matched = self.listener.set_mic(args[1])
+            except (LookupError, OSError) as exc:
+                self._append_log(f"/microphone: {exc}", STYLE_WARN)
+                return
+            self._append_log(f"microphone: using {matched}", STYLE_DIM)
+            return
+        self._append_log("/microphone [list|use <device>]", STYLE_DIM)
+
     # -- keys ------------------------------------------------------------
     def on_key(self, event):
         if self.chat_input is None or not self.chat_input.has_focus:
@@ -788,6 +815,8 @@ class OrganismApp(App):
             self.action_think_now()
         elif name == "/listen":
             self._toggle_listen()
+        elif name == "/microphone":
+            self._microphone(parts[1:])
         elif name == "/reload":
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)

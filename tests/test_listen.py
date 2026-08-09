@@ -4,6 +4,7 @@ wiring. No real microphone or whisper model is touched."""
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -149,3 +150,73 @@ def test_listen_command_toggles_mic(tmp_path):
     app.handle_command("/listen")
     assert fake.recording is False
     assert fake.stopped is True
+
+
+# -- device matching (/microphone) ---------------------------------------------
+
+
+def _mics():
+    return [
+        SimpleNamespace(id="alsa-0", name="Built-in Audio Analog Stereo"),
+        SimpleNamespace(id="usb-1", name="Blue Yeti Microphone"),
+    ]
+
+
+def test_match_by_exact_id():
+    assert listen.match_microphone(_mics(), "usb-1").name == \
+        "Blue Yeti Microphone"
+
+
+def test_match_by_name_substring_case_insensitive():
+    assert listen.match_microphone(_mics(), "yeti").id == "usb-1"
+    assert listen.match_microphone(_mics(), "BUILT-IN").id == "alsa-0"
+
+
+def test_match_prefers_exact_id_over_substring():
+    mics = _mics() + [SimpleNamespace(id="usb", name="usb-1 clone")]
+    assert listen.match_microphone(mics, "usb-1").id == "usb-1"
+
+
+def test_match_nothing():
+    assert listen.match_microphone(_mics(), "webcam") is None
+
+
+def test_set_mic_with_factory_stores_spec():
+    li = Listener(mic_factory=_FakeMic)
+    assert li.set_mic("usb-1") == "usb-1"
+    assert li.mic_spec == "usb-1"
+
+
+def test_list_microphones_never_raises(monkeypatch):
+    """A soundcard that explodes at call time yields [], not a crash.
+    (The fake goes into sys.modules: importing the real soundcard needs
+    libpulse, which CI containers don't have.)"""
+    def boom(*args, **kwargs):
+        raise OSError("no server")
+    monkeypatch.setitem(
+        sys.modules, "soundcard",
+        SimpleNamespace(all_microphones=boom))
+    assert listen.list_microphones() == []
+
+
+def test_list_microphones_shapes_devices(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules, "soundcard",
+        SimpleNamespace(
+            all_microphones=lambda include_loopback=False: _mics()))
+    assert listen.list_microphones() == [
+        ("alsa-0", "Built-in Audio Analog Stereo"),
+        ("usb-1", "Blue Yeti Microphone"),
+    ]
+
+
+def test_microphone_command_status_and_use(tmp_path):
+    from organism import Organism
+    from tui import OrganismApp
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    app.listener = Listener(mic_factory=_FakeMic)
+    app.handle_command("/microphone")          # status line, no crash
+    app.handle_command("/microphone use usb-1")
+    assert app.listener.mic_spec == "usb-1"
