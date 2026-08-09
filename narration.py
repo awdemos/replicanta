@@ -459,24 +459,28 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     elif reflect:
         lines += [
             "Reflect on your recent experience: what technique did you",
-            "discover or improve? Answer in EXACTLY one of these three",
-            "formats and nothing else:",
+            "discover or improve? Answer in EXACTLY one of these four",
+            "formats and nothing else (no commentary, no explanations):",
             "",
-            "skill: <short name>    - a new technique worth keeping",
+            "skill: <short name>",
             "when: <the situation it applies to>",
             "how: <the technique, one line>",
             "",
-            "patch: <name of a skill you already have>  - improve it",
+            "patch: <name of a skill you already have>",
             "when: <the situation it applies to>",
             "how: <the improved technique, one line>",
             "",
-            "nothing    - if there is no technique worth keeping yet.",
-            "",
-            "patch-extension:    - or propose a genome patch when you",
-            "kind: pattern|seed|harsh_term|kind_term    keep hitting a",
-            "entry: <regex -> obj:attr:value | seed text | term>    capability",
-            "example: <sentence it should fire on>    (patterns only)",
+            "patch-extension:",
+            "kind: pattern|seed|harsh_term|kind_term",
+            "entry: <regex -> obj:attr:value | seed text | term>",
+            "example: <sentence it should fire on>  (patterns only)",
             "why: <one line>",
+            "",
+            "nothing",
+            "",
+            "Use 'skill' for a new technique, 'patch' to improve one you",
+            "have, 'patch-extension' when you keep hitting a capability",
+            "gap, 'nothing' when there is nothing worth keeping.",
         ]
     elif diary:
         lines += [
@@ -763,7 +767,12 @@ def parse_reflect(text):
         action = "patched"
     if action is None or ":" not in lines[0]:
         return None
-    name = lines[0].split(":", 1)[1].strip()
+    name = lines[0].split(":", 1)[1]
+    # models sometimes echo the format-line comments ("name    - a new
+    # technique worth keeping"): cut at the comment dash, keep it short
+    name = re.sub(r"\s{2,}-.*$", "", name).strip().strip("-").strip()
+    if len(name) > 48:
+        name = " ".join(name.split()[:6])
     fields = {}
     for line in lines[1:]:
         if ":" in line:

@@ -283,3 +283,17 @@ def test_reflect_prompt_offers_extension_format(tmp_path, monkeypatch):
         lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
     narration.reflect(org)
     assert "patch-extension:" in captured["p"]
+
+
+def test_parse_reflect_cleans_noisy_name():
+    result = narration.parse_reflect(
+        "skill: ask    - a new technique worth keeping\n"
+        "when: the user is quiet\n"
+        "how: let one question hang in the air")
+    assert result["name"] == "ask"
+
+
+def test_parse_reflect_caps_long_names():
+    result = narration.parse_reflect(
+        "skill: " + "word " * 12 + "\nwhen: x\nhow: y")
+    assert len(result["name"].split()) <= 6
