@@ -43,6 +43,14 @@ you say.
   answers it, out loud, every narration cycle
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
+- **Self-patches**: during reflection it may propose an executable patch
+  — a new learning pattern, utterance seed, or sentiment word — staged in
+  `artifacts/extensions.json` and shown as a proposal card. Nothing
+  applies without you: `/approve` applies it live, `/reject` discards it,
+  `/revert` undoes the last applied patch. Every proposal is validated
+  first (regex compiles, fires on its own example, never on unrelated
+  sentences).
+- `/approve`, `/reject`, `/revert` — the approval gate for its patches
 - `/help` (or F1, ctrl+p) — everything else
 
 ## Mind
@@ -62,6 +70,12 @@ you say.
 - **Artifacts**: every ten wake cycles it writes a diary entry to
   `experiments/organism/artifacts/diary.md` — a body of work that outlives
   the chat, stamped by cycle and date.
+- **Skills**: it has procedural memory (Hermes-style). Every thirty wake
+  cycles — and whenever it completes a goal — it reflects on recent
+  experience and distills a technique into `artifacts/skills/<name>.md`
+  (when/how, plain text). Relevant skills are injected back into its
+  prompts, usage is counted, and skills untouched for a hundred cycles
+  are archived. It literally gets better at being itself.
 - **Voice**: a local ollama model (`qwen3:14b` by default; `OLLAMA_URL` /
   `OLLAMA_MODEL` overridable) speaks as the organism. Replies and questions
   stream token-by-token; idle musings pass through an inner arena — two
