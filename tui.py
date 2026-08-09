@@ -1,19 +1,8 @@
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
-import extensions
-import activity
-import camera
-import listen
-import mud
-import narration
-import nursery
-import speech
-import tui_commands
-import tui_views
-from organism import Organism
 from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
@@ -31,6 +20,18 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+
+import activity
+import camera
+import extensions
+import listen
+import mud
+import narration
+import nursery
+import speech
+import tui_commands
+import tui_views
+from organism import Organism
 
 
 class SlashCommands(Provider):
@@ -113,6 +114,7 @@ class OrganismApp(App):
         Binding("ctrl+t", "think_now", "think"),
         Binding("f5", "talk", "talk (push-to-talk)"),
         Binding("f6", "look", "look through the camera"),
+        Binding("f7", "show_tab('inner-pane')", "inner"),
     ]
 
     CSS = """
@@ -120,7 +122,8 @@ class OrganismApp(App):
     TabbedContent { height: 1fr; }
     #dreams { height: 1fr; padding: 0 1; }
     #pending { height: auto; max-height: 4; padding: 0 1; color: green; }
-    #mind, #memory { padding: 1 2; }
+    #mind, #memory, #inner { padding: 1 2; }
+    #inner { overflow-y: auto; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     """
@@ -158,23 +161,28 @@ class OrganismApp(App):
         self._mud_hint = None   # one-shot user nudge for the next move
         self._mind_text = ""
         self._memory_text = ""
+        self._inner_text = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("", id="status")
         with TabbedContent(initial="chat-pane"):
             with TabPane("chat", id="chat-pane"):
-                yield RichLog(
+                dreams = RichLog(
                     id="dreams", max_lines=1000, wrap=True, markup=True,
                     highlight=False)
+                dreams.can_focus = False
+                yield dreams
                 yield Static("", id="pending", markup=False)
             with TabPane("mind", id="mind-pane"):
                 yield Static("", id="mind", markup=False)
             with TabPane("memory", id="memory-pane"):
                 yield Static("", id="memory", markup=False)
+            with TabPane("inner", id="inner-pane"):
+                yield Static("", id="inner", markup=False)
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
-                        "F2 chat · F3 mind · F4 memory)",
+                        "F2 chat · F3 mind · F4 memory · F7 inner)",
             id="chat")
         yield self.chat_input
         yield Footer()
@@ -230,6 +238,9 @@ class OrganismApp(App):
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
         self.query_one(TabbedContent).active = pane
+        # keep typing in the chat line, never stranded by a pane switch
+        if self.chat_input is not None:
+            self.chat_input.focus()
 
     def action_help(self):
         self.push_screen(HelpScreen())
@@ -413,20 +424,31 @@ class OrganismApp(App):
 
     # -- keys ------------------------------------------------------------
     def on_key(self, event):
-        if self.chat_input is None or not self.chat_input.has_focus:
-            return
         if event.key == "tab":
-            value = self.chat_input.value
-            new_value, self._completion_index = tui_commands.complete_command(
-                value, self._completion_index)
-            if new_value != value:
-                self._set_chat_value(new_value)
+            if self.chat_input is None:
+                return
+            if not self.chat_input.has_focus:
+                # Tab lands in the chat line: never let Textual's default
+                # focus cycling strand typing on an invisible widget.
+                self.chat_input.focus()
+            else:
+                value = self.chat_input.value
+                new_value, self._completion_index = (
+                    tui_commands.complete_command(value, self._completion_index))
+                if new_value != value:
+                    self._set_chat_value(new_value)
+            # without prevent_default, App._on_key still runs focus_next
+            # (MRO dispatch ignores event.stop) and steals focus from the input
+            event.prevent_default()
             event.stop()
         elif event.key in ("up", "down"):
+            if self.chat_input is None or not self.chat_input.has_focus:
+                return
             delta = -1 if event.key == "up" else 1
             value = self._browse_history(delta)
             if value is not None and value != self.chat_input.value:
                 self._set_chat_value(value)
+            event.prevent_default()
             event.stop()
 
     def _set_chat_value(self, text):
@@ -518,8 +540,11 @@ class OrganismApp(App):
     def _refresh_views(self):
         self._mind_text = tui_views.mind_view(self.org)
         self._memory_text = tui_views.memory_view(self.org)
+        self._inner_text = tui_views.inner_view(self.org)
         self.query_one("#mind", Static).update(self._mind_text)
         self.query_one("#memory", Static).update(self._memory_text)
+        self.query_one("#inner", Static).update(
+            tui_views.inner_renderable(self.org))
 
     def _render_event(self, event):
         """Render one engine event into the log."""
@@ -612,7 +637,7 @@ class OrganismApp(App):
 
     # -- log ---------------------------------------------------------------
     def _stamp(self):
-        return datetime.now(timezone.utc).astimezone().strftime("%H:%M")
+        return datetime.now(UTC).astimezone().strftime("%H:%M")
 
     def _append_log(self, text, style=None, stamp=False):
         """Append one styled line to the scrollable log (markup-escaped),

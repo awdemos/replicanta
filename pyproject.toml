@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "replicanta"
-version = "0.1.0"
+version = "0.0.1"
 description = "A self-improving digital organism whose mind is a probabilistic Scallop program"
 readme = "readme.md"
 requires-python = ">=3.12"

@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from rich.console import Console
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -96,3 +97,114 @@ def test_memory_view_lists_artifacts(org, tmp_path):
 
 def test_memory_view_without_artifacts_dir(org):
     assert "artifacts" not in tui_views.memory_view(org)
+
+
+# -- inner tab -----------------------------------------------------------------
+
+
+def test_inner_view_shows_mental_state(org):
+    org.store.arousal = 0.8
+    org.store.add(("self", "mood", "curious"), 0.9)
+    view = tui_views.inner_view(org)
+    assert "mental state" in view
+    assert "arousal" in view
+    assert "mood: curious" in view
+
+
+def test_inner_view_without_mental_state(org):
+    # BeliefStore ships scalar defaults (arousal 0.3, stress 0.05,
+    # rationality 0.5, irrationality 0.2) — they must render.
+    view = tui_views.inner_view(org)
+    assert "mental state" in view
+    for label in ("arousal", "stress", "rationality", "irrationality"):
+        assert label in view
+    assert "mood" not in view  # mood only appears once believed
+
+
+def test_inner_view_shows_loop_and_arena(org):
+    org.store.activity = {
+        "rules_tried": 4, "derivations": 2, "rules_committed": 1,
+        "dreams_promoted": 3, "dreams_discarded": 1,
+        "llm_calls": 5, "prompt_tokens": 100, "gen_tokens": 50,
+        "utterances": 2, "fallbacks": 0,
+    }
+    view = tui_views.inner_view(org)
+    assert "perpetuation loop" in view
+    assert "4 questions → 2 derivations" in view
+    assert "3 dreams promoted / 1 discarded" in view
+    assert "thought arena" in view
+    assert "5 llm calls" in view
+
+
+def test_inner_view_without_activity(org):
+    view = tui_views.inner_view(org)
+    assert "(no activity yet)" in view
+
+
+def test_inner_view_shows_pending_proposal(org, tmp_path):
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "extensions.json").write_text(
+        '{"version": 0, "entries": [], "pending": '
+        '{"kind": "seed", "text": "what if the rain is curious"}}')
+    view = tui_views.inner_view(org)
+    assert "pending proposal" in view
+    assert "seed: what if the rain is curious" in view
+    assert "/approve to apply" in view
+
+
+def test_inner_view_without_pending_proposal(org):
+    view = tui_views.inner_view(org)
+    assert "pending proposal" not in view
+
+
+# -- inner renderable ---------------------------------------------------------
+
+
+def _render(renderable, width=80):
+    console = Console(width=width, force_terminal=False, color_system=None,
+                      record=True)
+    console.print(renderable)
+    return console.export_text()
+
+
+def test_inner_renderable_shows_mental_state(org):
+    org.store.arousal = 0.8
+    org.store.add(("self", "mood", "curious"), 0.9)
+    text = _render(tui_views.inner_renderable(org))
+    assert "mental state" in text
+    assert "arousal" in text
+    assert "curious" in text
+
+
+def test_inner_renderable_shows_loop_and_arena(org):
+    org.store.activity = {
+        "rules_tried": 4, "derivations": 2, "rules_committed": 1,
+        "dreams_promoted": 3, "dreams_discarded": 1,
+        "llm_calls": 5, "prompt_tokens": 100, "gen_tokens": 50,
+        "utterances": 2, "fallbacks": 0,
+    }
+    text = _render(tui_views.inner_renderable(org))
+    assert "perpetuation loop" in text
+    assert "4 questions" in text
+    assert "2 derivations" in text
+    assert "thought arena" in text
+    assert "5 llm calls" in text
+
+
+def test_inner_renderable_shows_pending_proposal(org, tmp_path):
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "extensions.json").write_text(
+        '{"version": 0, "entries": [], "pending": '
+        '{"kind": "seed", "text": "what if the rain is curious"}}')
+    text = _render(tui_views.inner_renderable(org))
+    assert "pending proposal" in text
+    assert "seed" in text
+    assert "what if the rain is curious" in text
+
+
+def test_inner_renderable_without_activity_still_shows_state(org):
+    text = _render(tui_views.inner_renderable(org))
+    assert "mental state" in text
+    assert "perpetuation loop" not in text

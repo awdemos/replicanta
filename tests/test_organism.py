@@ -512,7 +512,7 @@ def _headless_app(monkeypatch, tmp_path):
     return app
 
 
-def test_tui_has_three_tabs(monkeypatch, tmp_path):
+def test_tui_has_four_tabs(monkeypatch, tmp_path):
     import asyncio
 
     from textual.widgets import TabbedContent, TabPane
@@ -522,7 +522,7 @@ def test_tui_has_three_tabs(monkeypatch, tmp_path):
         async with app.run_test():
             tabs = app.query_one(TabbedContent)
             assert {p.id for p in tabs.query(TabPane)} == {
-                "chat-pane", "mind-pane", "memory-pane"}
+                "chat-pane", "mind-pane", "memory-pane", "inner-pane"}
 
     asyncio.run(check())
 

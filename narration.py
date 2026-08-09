@@ -15,7 +15,7 @@ import extensions
 import learning
 from skills import Skill
 
-DEFAULT_MODEL = "batiai/qwen3.6-27b:q4"
+DEFAULT_MODEL = "qwen3.5:latest"
 VISION_MODEL = os.environ.get("REPLICANTA_VISION_MODEL", "moondream")
 VISION_TIMEOUT = int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
 OLLAMA_URL = os.environ.get(

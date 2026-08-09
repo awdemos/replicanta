@@ -115,6 +115,7 @@ def help_text():
         "ctrl+t  think now",
         "F5      push-to-talk (same as /listen)",
         "F6      look through the camera (same as /look)",
+        "F7      inner tab (mental state, perpetuation loop)",
         "tab     complete a slash command",
         "up/down recall previous chat lines",
         "q       quit",

@@ -77,7 +77,7 @@ def test_help_text_lists_all_commands_and_keys():
     text = help_text()
     for name in COMMAND_NAMES:
         assert name in text
-    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "tab", "up/down"):
+    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "F7", "tab", "up/down"):
         assert key in text
 
 

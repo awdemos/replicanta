@@ -24,6 +24,29 @@ COMPUTE = os.environ.get("REPLICANTA_STT_COMPUTE", "int8")
 MIN_SECONDS = 0.25   # shorter captures are treated as accidental taps
 
 
+def _prime_resource_tracker():
+    """Start multiprocessing's resource tracker on the main thread.
+
+    faster-whisper's model load renders a tqdm progress bar (even for
+    cached models); tqdm lazily creates a multiprocessing.RLock, which
+    spawns the resource tracker subprocess via fork_exec. Inside the TUI
+    that first spawn happens on a worker thread, where it can fail with
+    "ValueError: bad value(s) in fds_to_keep" and transcription silently
+    returns ''. Creating a throwaway RLock here, on the main thread at
+    import time, leaves the tracker running, so the later worker-thread
+    lock is a plain pipe write instead of a spawn.
+    """
+    try:
+        import multiprocessing
+
+        multiprocessing.RLock()
+    except Exception:  # noqa: BLE001, S110 — priming must never break import
+        pass
+
+
+_prime_resource_tracker()
+
+
 def match_microphone(mics, spec):
     """The first mic whose id equals spec exactly, else the first whose
     name contains it (case-insensitive); None when nothing matches."""
