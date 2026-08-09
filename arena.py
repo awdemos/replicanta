@@ -41,6 +41,48 @@ ROGUE_THOUGHT = ("Draft a rogue thought of your own, spun from nowhere - "
 TEMP_MIN = 0.7      # lower bound for the per-round temperature jitter
 TEMP_MAX = 0.85     # upper bound
 
+# chatty models love to narrate their own process ("Here is a draft of a
+# candidate answer: …", "Here is the evaluation: …") instead of just
+# answering; these patterns unwrap the real candidate from that preamble
+# and cut any trailing self-evaluation before it leaks into an utterance
+_META_PREFIX_RE = re.compile(
+    r"(?is)^.*?(?:here\s+(?:is|'s)\s+(?:a|the|my)?\s*"
+    r"(?:draft|candidate|answer|response|reply|possible answer)[^:\n]*:|"
+    r"draft(?:\s+of\s+a\s+candidate\s+answer)?:)\s*")
+_META_TAIL_RE = re.compile(
+    r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
+    r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
+_INSTRUCTION_ECHO_RE = re.compile(
+    r"(?im)^\s*(?:draft a candidate answer.*|then,?\s+(?:evaluate|revise)"
+    r".*|attack both candidates.*|which candidate is better\??.*)$")
+
+
+def _is_repetition_loop(text, threshold=3):
+    """Detect degenerate repetition: a model stuck looping the same
+    sentence (or a near-twin of it) until the token budget runs out.
+    Such output is not a candidate, it is a stuck generator."""
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text)
+             if p.strip()]
+    if len(parts) < threshold:
+        return False
+    norm = [re.sub(r"\W+", " ", p.lower()).strip() for p in parts]
+    top = max(norm.count(n) for n in set(norm))
+    return top >= threshold
+
+
+def _clean_candidate(text):
+    """Unwrap a proposer's raw output down to the answer itself: strip
+    meta preambles ("Here is the draft:"), trailing self-evaluations, and
+    echoed instructions. A degenerate repetition loop counts as no
+    candidate at all. Returns the cleaned text (possibly empty)."""
+    text = _META_PREFIX_RE.sub("", text.strip(), count=1)
+    text = _META_TAIL_RE.sub("", text)
+    text = _INSTRUCTION_ECHO_RE.sub("", text)
+    text = text.strip().strip('"').strip()
+    if _is_repetition_loop(text):
+        return ""
+    return text
+
 
 class ThoughtArena:
     """One debate per utterance. Stateless apart from a per-call RNG, so
@@ -128,6 +170,16 @@ class ThoughtArena:
         else:
             drafts.append(self._generate(self._proposal(base, 2), model,
                                          timeout, temperature, org=org))
+        # a proposer that only managed meta-narration or special-token
+        # loops has no candidate to offer; unwrap what is usable and let
+        # a single surviving draft win outright (saving the critique and
+        # vote rounds), or fail the debate so the caller falls back
+        drafts = [_clean_candidate(d) for d in drafts]
+        drafts = [d for d in drafts if d]
+        if not drafts:
+            raise ValueError("debate produced no usable candidate")
+        if len(drafts) == 1:
+            return drafts[0]
         critique = self._generate(
             self._critique(base, drafts), model, timeout, temperature,
             org=org)

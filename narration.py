@@ -670,6 +670,11 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPEN_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+_SPECIAL_RE = re.compile(r"<\|[^|]*\|>")
+
+# chat-template control tokens that reasoning models sometimes emit (and
+# then loop on); stopping at them keeps generation from running away
+_STOP_TOKENS = ["<|im_start|>", "<|im_end|>", "<|endoftext|>"]
 
 
 def _strip_think(text):
@@ -679,6 +684,16 @@ def _strip_think(text):
     return _THINK_OPEN_RE.sub("", _THINK_RE.sub("", text)).strip()
 
 
+def _strip_special(text):
+    """Cut everything from the first chat-template control token on
+    (<|im_start|>, <|endoftext|>, …); models that miss their stop token
+    otherwise loop those tokens until the token budget is gone."""
+    m = _SPECIAL_RE.search(text)
+    if m:
+        text = text[: m.start()]
+    return text.strip()
+
+
 def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
     """POST to ollama /api/generate, non-streaming. Raises on failure."""
     payload = json.dumps({
@@ -686,7 +701,8 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
         "prompt": prompt,
         "stream": False,
         "think": False,
-        "options": {"num_predict": MAX_TOKENS, "temperature": temperature},
+        "options": {"num_predict": MAX_TOKENS, "temperature": temperature,
+                    "repeat_penalty": 1.1, "stop": _STOP_TOKENS},
     }).encode()
     req = urllib.request.Request(
         OLLAMA_URL, data=payload,
@@ -697,7 +713,7 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
         raise RuntimeError(data["error"])
     LAST_CALL_STATS["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
     LAST_CALL_STATS["gen_tokens"] = int(data.get("eval_count") or 0)
-    return _strip_think(data.get("response", ""))
+    return _strip_special(_strip_think(data.get("response", "")))
 
 
 def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):

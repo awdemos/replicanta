@@ -265,3 +265,85 @@ def test_respond_falls_back_on_arena_failure(org, monkeypatch):
     monkeypatch.setattr("narration._ollama_generate", boom)
     reply = respond(org, "hello there")
     assert "hello there" in reply and "2 beliefs" in reply
+
+
+# -- candidate cleaning -----------------------------------------------------
+
+def test_meta_preamble_unwrapped_from_draft(org, monkeypatch):
+    """Chatty models preface the candidate with "Here is a draft of a
+    candidate answer:" — only the answer itself may manifest."""
+    _scripted(monkeypatch, [
+        "Here is a draft of a candidate answer:\n\nfur and paws",
+        "Here is the draft:\nfur and quiet",
+        "both weak",
+        "VOTE: 1",
+        "VOTE: 1",
+    ])
+    assert ThoughtArena().emerge(org) == "fur and paws"
+
+
+def test_trailing_self_evaluation_cut(org, monkeypatch):
+    """A draft that rambles on into its own evaluation is cut at the
+    evaluation boundary."""
+    _scripted(monkeypatch, [
+        "fur and paws\n\nHere is the evaluation: it is quite good",
+        "fur and quiet",
+        "both weak",
+        "VOTE: 1",
+        "VOTE: 1",
+    ])
+    assert ThoughtArena().emerge(org) == "fur and paws"
+
+
+def test_special_token_loop_cut(org, monkeypatch):
+    """Models that miss their stop token loop <|im_start|> forever; the
+    garbage must never reach an utterance."""
+    _scripted(monkeypatch, [
+        "fur and paws",
+        "fur and quiet",
+        "both weak",
+        "VOTE: 1",
+        "VOTE: 1",
+    ])
+    # _strip_special lives in narration._ollama_generate; simulate its
+    # effect here by checking the cleaner directly
+    from narration import _strip_special
+    assert _strip_special(
+        "hello there<|endoftext|><|im_start|>\n<|im_start|>") == "hello there"
+
+
+def test_single_usable_draft_wins_outright(org, monkeypatch):
+    """When one proposer returns only meta-narration, the surviving draft
+    wins without paying for the critique and vote rounds."""
+    calls = _scripted(monkeypatch, [
+        "Here is a draft of a candidate answer:\n\n",   # empty after clean
+        "fur and quiet",
+    ])
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+    assert len(calls) == 2
+
+
+def test_no_usable_draft_falls_back(org, monkeypatch):
+    """If both proposers return nothing usable, the debate fails and the
+    local deterministic fallback answers instead."""
+    _scripted(monkeypatch, ["", "Here is a draft of a candidate answer:"])
+    text = ThoughtArena().emerge(org)
+    assert "2 beliefs" in text and "wake" in text
+
+
+def test_repetition_loop_counts_as_no_candidate(org, monkeypatch):
+    """A proposer stuck looping the same sentence has no candidate; the
+    surviving draft wins outright."""
+    loop = "\n".join(["Do not wrap the text in any Markdown."] * 9)
+    calls = _scripted(monkeypatch, [loop, "fur and quiet"])
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+    assert len(calls) == 2
+
+
+def test_all_loops_fall_back(org, monkeypatch):
+    """When every proposer is stuck in a repetition loop the debate fails
+    and the local fallback answers."""
+    loop = "\n".join(["I am thinking about thinking."] * 5)
+    _scripted(monkeypatch, [loop, loop])
+    text = ThoughtArena().emerge(org)
+    assert "2 beliefs" in text and "wake" in text
