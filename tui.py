@@ -7,6 +7,7 @@ import extensions
 import activity
 import camera
 import listen
+import mud
 import narration
 import nursery
 import speech
@@ -88,6 +89,7 @@ STYLE_DIM = "dim"
 NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
 VOICE_PROBE_INTERVAL = 60.0   # seconds between ollama reachability probes
 ASK_USER_ODDS = 0.35      # chance an idle wake utterance asks the user instead
+MUD_TURN_DELAY = 4.0      # seconds between dungeon moves
 
 
 class OrganismApp(App):
@@ -152,6 +154,8 @@ class OrganismApp(App):
         self._status_text = ""
         self.listener = listen.Listener()
         self.camera = camera.Camera()
+        self._mud_game = None
+        self._mud_hint = None   # one-shot user nudge for the next move
         self._mind_text = ""
         self._memory_text = ""
 
@@ -266,6 +270,57 @@ class OrganismApp(App):
                 self._append_log, f"sight failed: {exc}", STYLE_WARN)
             return
         self.call_from_thread(self._set_sight, sight)
+
+    # -- mud mode ------------------------------------------------------------
+    def _toggle_mud(self):
+        """/mud: start or stop the organism's dungeon crawl. The world is
+        deterministic; the voice picks the moves (wanderer fallback)."""
+        if self._mud_game is not None:
+            game, self._mud_game = self._mud_game, None
+            self._append_log(
+                f"— the dungeon fades (stopped after {game.turns} turns) —",
+                STYLE_DIM, stamp=True)
+            self.org.store.remember(
+                "mud", f"left the dungeon after {game.turns} turns")
+            self.refresh_status()
+            return
+        self._mud_game = mud.MudGame()
+        self._append_log(
+            "— the organism descends into the dungeon —",
+            STYLE_DREAM, stamp=True)
+        self._append_log(self._mud_game.look(), STYLE_DREAM)
+        self.refresh_status()
+        self._mud_turn()
+
+    @work(thread=True)
+    def _mud_turn(self):
+        game = self._mud_game
+        if game is None:
+            return
+        hint, self._mud_hint = self._mud_hint, None
+        command = mud.choose_action(game, hint=hint, rng=self._rng)
+        self.call_from_thread(self._mud_apply, game, command)
+
+    def _mud_apply(self, game, command):
+        if self._mud_game is not game:
+            return                      # stopped (or restarted) meanwhile
+        self._append_log(f"> {command}", STYLE_SELF)
+        result = game.act(command)
+        self._append_log(result, STYLE_DREAM)
+        if game.finished:
+            self._append_log(
+                f"— the dungeon is won in {game.turns} turns —",
+                STYLE_LEARNED, stamp=True)
+            self.org.store.remember(
+                "mud", f"won the dungeon in {game.turns} turns")
+            self._mud_game = None
+            self.refresh_status()
+            return
+        self.set_timer(MUD_TURN_DELAY, self._mud_next)
+
+    def _mud_next(self):
+        if self._mud_game is not None:
+            self._mud_turn()
 
     def _set_sight(self, sight):
         self.org.see(sight)
@@ -541,13 +596,14 @@ class OrganismApp(App):
                 if self._busy() else "")
         spoken = " · speech on" if speech.enabled else ""
         mic = " · 🎙 listening" if self.listener.recording else ""
+        playing = " · 🗡 mud" if self._mud_game is not None else ""
         s = self.org.store
         mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
         self._status_text = (
             f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
             f"{m.rule_count} rules · inner voice "
-            f"{narration.voice_status()}{spoken}{mic} · "
+            f"{narration.voice_status()}{spoken}{mic}{playing} · "
             f"{self.org.probe.clock_utc()}{busy}")
         try:
             self.query_one("#status", Static).update(self._status_text)
@@ -887,6 +943,8 @@ class OrganismApp(App):
             self._look_now()
         elif name == "/camera":
             self._camera(parts[1:])
+        elif name == "/mud":
+            self._toggle_mud()
         elif name == "/reload":
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)
@@ -1024,6 +1082,8 @@ class OrganismApp(App):
 
     def handle_chat(self, text):
         self._log_chat("user", text)
+        if self._mud_game is not None:
+            self._mud_hint = text      # shout a nudge into the next move
         for event in self.org.hear(text):
             self._render_event(event)
         self._maybe_respond(text)

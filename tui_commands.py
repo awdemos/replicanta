@@ -23,6 +23,7 @@ COMMANDS = [
     ("/look", "/look", "grab a camera frame and see it (F6)"),
     ("/camera", "/camera [list|use dev]",
      "camera status, list devices, choose one"),
+    ("/mud", "/mud", "toggle the organism's dungeon crawl (text adventure)"),
     ("/approve", "/approve", "apply the organism's pending genome patch"),
     ("/reject", "/reject", "discard the pending genome patch"),
     ("/revert", "/revert", "undo the last applied genome patch"),

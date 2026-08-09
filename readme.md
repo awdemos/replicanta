@@ -73,6 +73,9 @@ you say.
 - `/look` (or F6) — grab one USB camera frame, describe it with a local
   vision model (moondream), and let the organism see it. `/camera` shows
   the config, `/camera list` / `/camera use <device>` pick the device
+- `/mud` — toggle the organism's dungeon crawl: a tiny text adventure in
+  the chat window where it walks, picks things up, and tries to find the
+  amulet (see Dungeon below)
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
 - **Self-patches**: during reflection it may propose an executable patch
@@ -162,6 +165,13 @@ you say.
   voice's prompt — after a look, it can talk about what it's looking at.
   Needs the `vision` extra (`pip install -e .[vision]`); no camera, no
   opencv or an offline vision model just means a log line, never a crash.
+- **Dungeon**: `/mud` drops the organism into a tiny deterministic text
+  adventure — a clearing, a cave, a locked gate, an amulet to win. Its
+  voice picks the moves (one command per turn, `REPLICANTA_MUD_MODEL`,
+  default qwen2.5:3b); when the voice is offline or talks nonsense a
+  random wanderer steps in so the game never stalls. You can shout a
+  one-shot nudge by typing mid-game. Auto-ends after 50 turns; the
+  status bar shows 🗡 while it's underground.
 - **Any piper voice**: voices live in `voices/` as `<name>.onnx` +
   `<name>.onnx.json` pairs. `/voice list` shows downloaded ones (`*` =
   active), `/voice use en_GB-alan-low` switches, and `/voice get
