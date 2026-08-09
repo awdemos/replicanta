@@ -1,5 +1,6 @@
 import json
 import random
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -120,6 +121,7 @@ class OrganismApp(App):
         Binding("f7", "show_tab('inner-pane')", "inner"),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
+        Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
     ]
 
     CSS = """
@@ -179,6 +181,7 @@ class OrganismApp(App):
         self._mud_hint = None   # one-shot user nudge for the next move
         self._mud_paused = False
         self._mud_thinking = False   # a move-choice worker is in flight
+        self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
         self._inner_text = ""
@@ -279,6 +282,15 @@ class OrganismApp(App):
         """Quit cleanly: persist organism state before exiting."""
         self.action_save_now()
         super().action_quit()
+
+    def action_quit_or_hint(self):
+        """Quit on double-tap; show a hint on first ctrl+c press."""
+        now = time.monotonic()
+        if now - self._quit_hint_time < 1.0:
+            self.action_quit()
+            return
+        self._quit_hint_time = now
+        self.notify("press ctrl+c again to quit", timeout=1.0)
 
     def refresh_top_bar(self):
         """Render the custom top bar: app wordmark, organism identity,
@@ -958,7 +970,7 @@ class OrganismApp(App):
             f"{narration.voice_status()}{spoken}{mic}{playing} · "
             f"{self.org.probe.clock_utc()}{busy}  │  "
             "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit "
-            "(or F10, /quit)")
+            "(or F10, ctrl+c×2, /quit)")
         self._status_text = self._bottombar_text
         try:
             self.query_one("#bottombar", Static).update(self._bottombar_text)
