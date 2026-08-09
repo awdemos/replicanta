@@ -23,6 +23,11 @@ TIMEOUT = 30   # 14b cold-loads can exceed 15s; warm calls take ~2s
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
 VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
 
+# token accounting of the most recent generation (exact, from ollama's own
+# eval fields); the arena reads it after every call to meter neural
+# activity. Debates are sequential, so one global slot is race-free.
+LAST_CALL_STATS = {"prompt_tokens": 0, "gen_tokens": 0}
+
 
 # -- voice health -----------------------------------------------------------
 # Cached ollama reachability. `None` = never probed (the arena then tries the
@@ -611,6 +616,8 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
         data = json.loads(resp.read().decode())
     if data.get("error"):
         raise RuntimeError(data["error"])
+    LAST_CALL_STATS["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
+    LAST_CALL_STATS["gen_tokens"] = int(data.get("eval_count") or 0)
     return _strip_think(data.get("response", ""))
 
 

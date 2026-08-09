@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import extensions
+import activity
 import narration
 import nursery
 import tui_commands
@@ -651,6 +652,8 @@ class OrganismApp(App):
             self._append_log(
                 f"stats: beliefs={m.belief_count} rules={m.rule_count} "
                 f"depth={m.total_depth} score={m.score():.1f}", STYLE_DIM)
+            for line in activity.summary_lines(self.org.store):
+                self._append_log(line, STYLE_DIM)
         elif name == "/save":
             self.action_save_now()
         elif name == "/think":

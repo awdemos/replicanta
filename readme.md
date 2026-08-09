@@ -114,6 +114,34 @@ you say.
 The organism's genome (`organism.scl`) is human-readable and evolves on disk;
 `state.json` holds runtime state (beliefs, chat, memory, mood).
 
+## Measuring neurosymbolic activity
+
+`Metrics` measures *structure* — what the mind holds (beliefs, rules,
+derivation depth, abstraction), distilled into the consciousness score.
+The **activity meter** measures *activity* — what the neurosymbolic loop
+actually does. Every neural↔symbolic crossing is counted at its call
+site, persisted in `state.json`, and shown in `/stats` and the **mind**
+tab as totals with per-cycle rates:
+
+- **symbolic** (exact): candidate rules tried vs. derivations produced
+  (assimilation rate), beliefs new vs. strengthened vs. archived, rules
+  committed, dreams promoted vs. discarded.
+- **neural** (exact): ollama calls and tokens — read from the API's own
+  `prompt_eval_count`/`eval_count`, never estimated — utterances
+  manifested, deterministic fallbacks spoken. (Since the arena gates
+  every utterance, each one costs exactly 5 calls; the counter makes
+  that visible.)
+- **coupling** — the neurosymbolic part: facts the logic gained from
+  your words (neural→symbolic grounding), and *grounded utterances* —
+  the lexical proxy for symbolic→neural influence: an utterance counts
+  as grounded when its text reuses a content word from the seed it was
+  drafted from. A cheap signal that the voice was shaped by the logic,
+  not a proof of it.
+
+Rates are derived (totals ÷ lifecycle cycles); the counters themselves
+are exact events. What is deliberately **not** measured: consciousness
+itself — these are activity counters, not a sentience score.
+
 ## Develop
 
     .venv/bin/python -m pytest tests -q

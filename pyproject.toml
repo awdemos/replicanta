@@ -21,6 +21,7 @@ replicanta = "tui:main"
 
 [tool.setuptools]
 py-modules = [
+    "activity",
     "arena",
     "extensions",
     "learning",

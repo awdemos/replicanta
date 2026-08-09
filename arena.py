@@ -17,6 +17,7 @@ import random
 import re
 import urllib.error
 
+import activity
 import narration
 
 VOTE_PREFIX = "VOTE: "
@@ -84,7 +85,7 @@ class ThoughtArena:
         # voice known-offline: skip the debate entirely so replies stay
         # instant instead of paying an ollama timeout on every utterance
         if narration.voice_online() is False:
-            return self._fallback(snapshot, user_message, fallback)
+            return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"user_message": user_message}
         build.update(prompt_kwargs or {})
         try:
@@ -92,8 +93,11 @@ class ThoughtArena:
                                   timeout, surprise, temperature)
         except (urllib.error.URLError, OSError, ValueError, RuntimeError):
             narration.note_voice_failure()
-            return self._fallback(snapshot, user_message, fallback)
+            return self._fallback(org.store, snapshot, user_message, fallback)
         narration.note_voice_success()
+        activity.note(org.store, "utterances")
+        if activity.grounded(snapshot["seed"], result):
+            activity.note(org.store, "grounded_utterances")
         if on_token is not None:
             for piece in re.findall(r"\S+\s*", result):
                 on_token(piece)
@@ -105,22 +109,33 @@ class ThoughtArena:
         base = narration.build_prompt(snapshot, **build)
         drafts = [
             self._generate(self._proposal(base, 1), model, timeout,
-                           temperature),
+                           temperature, org=org),
         ]
         if self._rng.random() < surprise:
             drafts.append(self._generate(self._rogue_proposal(base), model,
-                                         timeout, temperature))
+                                         timeout, temperature, org=org))
         else:
             drafts.append(self._generate(self._proposal(base, 2), model,
-                                         timeout, temperature))
+                                         timeout, temperature, org=org))
         critique = self._generate(
-            self._critique(base, drafts), model, timeout, temperature)
+            self._critique(base, drafts), model, timeout, temperature,
+            org=org)
         votes = [
             self._generate(self._vote(base, drafts, critique),
-                           model, timeout, temperature)
+                           model, timeout, temperature, org=org)
             for _ in range(2)
         ]
         return self._pick(drafts, votes, critique)
+
+    # -- metering ----------------------------------------------------------
+    def _meter(self, org):
+        """Fold the token accounting of the last generation into the
+        organism's activity counters (llm call + exact ollama tokens)."""
+        activity.note(org.store, "llm_calls")
+        activity.note(org.store, "prompt_tokens",
+                      narration.LAST_CALL_STATS["prompt_tokens"])
+        activity.note(org.store, "gen_tokens",
+                      narration.LAST_CALL_STATS["gen_tokens"])
 
     # -- prompts ---------------------------------------------------------
     def _proposal(self, base, which):
@@ -174,16 +189,23 @@ class ThoughtArena:
         return self._rng.choice(drafts)
 
     # -- model -----------------------------------------------------------
-    def _generate(self, prompt, model, timeout, temperature):
+    def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature == 0.0:
-            return narration._ollama_generate(prompt, model, timeout)
+            text = narration._ollama_generate(prompt, model, timeout)
+            if org is not None:
+                self._meter(org)
+            return text
         if temperature is None:
             temperature = round(TEMP_MIN + self._rng.random()
                                 * (TEMP_MAX - TEMP_MIN), 2)
-        return narration._ollama_generate(prompt, model, timeout,
+        text = narration._ollama_generate(prompt, model, timeout,
                                           temperature=temperature)
+        if org is not None:
+            self._meter(org)
+        return text
 
-    def _fallback(self, snapshot, user_message, fallback):
+    def _fallback(self, store, snapshot, user_message, fallback):
+        activity.note(store, "fallbacks")
         if fallback is not None:
             return fallback(snapshot)
         if user_message:

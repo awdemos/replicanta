@@ -1,6 +1,7 @@
 """Pure string builders for the organism TUI's inspection tabs (Mind,
 Memory). No textual imports — unit testable without a terminal."""
 
+import activity
 from learning import describe
 
 _BELIEF_LIMIT = 12
@@ -47,6 +48,9 @@ def mind_view(org):
     lines += ["",
               (f"genome: {m.belief_count} beliefs · {m.rule_count} rules · "
                f"depth {m.total_depth} · score {m.score():.1f}")]
+    activity_lines = activity.summary_lines(org.store)
+    if activity_lines:
+        lines += [""] + activity_lines
     return "\n".join(lines)
 
 

@@ -53,11 +53,18 @@ class BeliefStore:
         self.last_goal_cycle = 0
         self.last_diary_cycle = 0
         self.last_reflect_cycle = 0
+        self.activity = {}       # neurosymbolic activity counters (activity.py)
         self.on_adverse = None   # callback(amount) fired on contradiction
         self.dirty = False        # any state changed since last save()
         self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
 
     # -- belief operations -------------------------------------------------
+    def note_activity(self, key, n=1):
+        """Increment one neurosymbolic-activity counter (see activity.py
+        for the key taxonomy). Persisted with state.json."""
+        self.activity[key] = self.activity.get(key, 0) + n
+        self.dirty = True
+
     def add(self, belief, conf):
         obj, attr, val = belief
         if not VALID_VALUE_RE.match(obj) or not VALID_VALUE_RE.match(attr) \
@@ -73,18 +80,22 @@ class BeliefStore:
                 if conf > c:
                     self.archived_map[(o, a, v)] = c
                     del self.beliefs_map[(o, a, v)]
+                    self.note_activity("beliefs_archived")
                     break
                 self.archived_map[key] = conf
+                self.note_activity("beliefs_archived")
                 self.dirty = True
                 self.genome_dirty = True
                 return
         if key in self.beliefs_map:
             if conf > self.beliefs_map[key]:
                 self.beliefs_map[key] = conf
+                self.note_activity("beliefs_strengthened")
                 self.dirty = True
                 self.genome_dirty = True
         else:
             self.beliefs_map[key] = conf
+            self.note_activity("beliefs_new")
             self.dirty = True
             self.genome_dirty = True
 
@@ -133,6 +144,7 @@ class BeliefStore:
     def commit_rule(self, text, depth):
         """Commit a derived rule to the genome (marks it for rewriting)."""
         self.rules.append((text, depth))
+        self.note_activity("rules_committed")
         self.dirty = True
         self.genome_dirty = True
 
@@ -194,6 +206,7 @@ class BeliefStore:
             "last_goal_cycle": self.last_goal_cycle,
             "last_diary_cycle": self.last_diary_cycle,
             "last_reflect_cycle": self.last_reflect_cycle,
+            "activity": self.activity,
         }
         self.state_path.write_text(json.dumps(state, indent=2))
         self.dirty = False
@@ -217,6 +230,8 @@ class BeliefStore:
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
         self.last_reflect_cycle = state.get("last_reflect_cycle", 0)
+        self.activity = {k: int(v) for k, v
+                         in state.get("activity", {}).items()}
 
 
 class Mind:
@@ -364,6 +379,7 @@ class SelfQuestioner:
     def ask(self, attr_val_a, attr_val_b):
         head = f"q{self._next_rule_id()}"
         rule = self._candidate_rule(head, attr_val_a, attr_val_b)
+        self.store.note_activity("rules_tried")
         derived = self.mind.query_rule(rule, head)
         if not derived:
             if getattr(self, "stress", None) is not None:
@@ -372,6 +388,7 @@ class SelfQuestioner:
         attr_a, val_a = attr_val_a
         attr_b, val_b = attr_val_b
         combo = f"{val_a}_{val_b}"
+        self.store.note_activity("derivations", len(derived))
         new_beliefs = []
         for (tag, (obj,)) in derived:
             belief = (obj, combo, "true")
@@ -432,9 +449,11 @@ class DreamEngine:
         for dream in dreams:
             derived = self.mind.query_rule(dream["rule"], dream["head"])
             if not derived:
+                self.store.note_activity("dreams_discarded")
                 if getattr(self, "stress", None) is not None:
                     self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
+            self.store.note_activity("dreams_promoted")
             self.store.rule_counter += 1
             self.store.commit_rule(dream["rule"], 1)
             self.store.remember(
@@ -790,6 +809,7 @@ class Organism:
                 self.store.observe(belief, learning.LEARN_CONF)
             else:
                 self.store.add(belief, learning.LEARN_CONF)
+            self.store.note_activity("facts_learned")
             self.store.remember("learned", learning.describe(belief))
             events.append({"kind": "learned", "belief": belief,
                            "text": learning.describe(belief)})
