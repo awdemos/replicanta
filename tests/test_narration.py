@@ -526,3 +526,91 @@ def test_respond_stream_interrupted_keeps_partial(org, monkeypatch):
         raise narration.StreamInterrupted("half a thou", OSError("reset"))
     monkeypatch.setattr(narration, "_ollama_stream", broken)
     assert respond(org, "hello", on_token=lambda tok: None) == "half a thou …"
+
+
+# -- voice quality v2: model, think-mode, prompt register --------------------
+
+
+def test_default_model_is_qwen3_14b():
+    assert narration.DEFAULT_MODEL == "qwen3:14b"
+
+
+def test_strip_think_removes_block():
+    text = narration._strip_think("<think>let me reason</think>hello there")
+    assert text == "hello there"
+
+
+def test_strip_think_unterminated_block():
+    assert narration._strip_think("hi<think>still going") == "hi"
+
+
+def test_strip_think_plain_text_untouched():
+    assert narration._strip_think("just prose") == "just prose"
+
+
+def test_ollama_generate_disables_thinking(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"response": "hi"}).encode()
+
+    def fake_urlopen(req, *a, **k):
+        captured["body"] = req.data
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    _ollama_generate("prompt", "qwen3:14b", 5)
+    assert b'"think": false' in captured["body"]
+
+
+def test_ollama_stream_disables_thinking(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, *a, **k):
+        captured["body"] = req.data
+        return _FakeStream(
+            [json.dumps({"response": "hi", "done": True}).encode() + b"\n"])
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    narration._ollama_stream("prompt", "qwen3:14b", 5, lambda tok: None)
+    assert b'"think": false' in captured["body"]
+
+
+def test_ollama_generate_strips_think_block(monkeypatch):
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {"response": "<think>hmm</think>clean answer"}).encode()
+
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: _Resp())
+    assert _ollama_generate("prompt", "m", 5) == "clean answer"
+
+
+def test_build_prompt_shows_voice_examples(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "You speak plainly and concretely" in prompt
+
+
+def test_build_prompt_bans_cliches(org):
+    prompt = build_prompt(state_snapshot(org))
+    assert "worn-out words" in prompt
+    assert "tapestry" in prompt
+
+
+def test_reply_branch_is_substance_first(org):
+    prompt = build_prompt(state_snapshot(org), user_message="how are you?")
+    assert "substance" in prompt

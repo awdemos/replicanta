@@ -34,8 +34,8 @@ ROGUE_THOUGHT = ("Draft a rogue thought of your own, spun from nowhere - "
                  "yourself. Keep it to one to three sentences. No "
                  "preamble, no quotes, no emoji.")
 
-TEMP_MIN = 0.8      # lower bound for the per-round temperature jitter
-TEMP_MAX = 0.95     # upper bound
+TEMP_MIN = 0.7      # lower bound for the per-round temperature jitter
+TEMP_MAX = 0.85     # upper bound
 
 
 class ThoughtArena:
