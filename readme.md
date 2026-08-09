@@ -24,10 +24,10 @@ you say.
   the input before settling into the log), dreams, lessons, moods and
   lifecycle events as a flat timestamped timeline between the cards.
   Background events (voice flips, learned facts, fading) also pop as toasts.
-- **mind** — its head, live: top beliefs with confidence bars, committed
-  rules, attention focus, genome stats.
+- **mind** — its head, live: top beliefs with confidence bars, its goals
+  (active + completed), committed rules, attention focus, genome stats.
 - **memory** — every episode it remembers (cycle-stamped), what it knows
-  about you, and what you said it is.
+  about you, what you said it is, and the artifacts it has created.
 
 - **"my name is Sam"**, **"i like rain"**, **"you are brave"** — it picks up
   facts about you and itself, keeps them as beliefs, and remembers them
@@ -54,6 +54,14 @@ you say.
 - **Memory**: notable episodes (birth, lessons, dreams, harsh and kind
   moments, fading, revival) are cycle-stamped, persisted, and injected into
   its narration prompt — it has continuity, not amnesia.
+- **Goals**: when it has been awake a while without direction it forms an
+  intention ("learn five things about you", "understand what home means")
+  and pursues it across sessions — the active goal steers its questions,
+  musings and self-talk until it completes it (learn-goals by growing what
+  it knows about you, others by patient pursuit).
+- **Artifacts**: every ten wake cycles it writes a diary entry to
+  `experiments/organism/artifacts/diary.md` — a body of work that outlives
+  the chat, stamped by cycle and date.
 - **Voice**: a local ollama model (`qwen3:14b` by default; `OLLAMA_URL` /
   `OLLAMA_MODEL` overridable) speaks as the organism. Replies and questions
   stream token-by-token; idle musings pass through an inner arena — two
