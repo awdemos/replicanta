@@ -9,6 +9,7 @@ import extensions
 import learning
 import scallopy
 import sentiment
+from fileutil import atomic_write_text
 from hooks import HookEngine, scripts_dir_for
 from probe import SystemProbe
 from skills import SkillStore
@@ -192,7 +193,7 @@ class BeliefStore:
     def save(self):
         self.dir_path.mkdir(parents=True, exist_ok=True)
         if self.genome_dirty or not self.scl_path.exists():
-            self.scl_path.write_text(self.render_scl())
+            atomic_write_text(self.scl_path, self.render_scl())
             self.genome_dirty = False
         state = {
             "chaos": self.chaos,
@@ -212,7 +213,7 @@ class BeliefStore:
             "last_reflect_cycle": self.last_reflect_cycle,
             "activity": self.activity,
         }
-        self.state_path.write_text(json.dumps(state, indent=2))
+        atomic_write_text(self.state_path, json.dumps(state, indent=2))
         self.dirty = False
 
     def load(self):

@@ -9,6 +9,8 @@ import re
 import shutil
 from pathlib import Path
 
+from fileutil import atomic_write_text
+
 NURSERY_DIR = "organisms"
 CURRENT_FILE = "current"
 DEFAULT_NAME = "default"
@@ -72,7 +74,7 @@ def current(root):
 
 
 def set_current(root, name):
-    (Path(root) / CURRENT_FILE).write_text(name + "\n")
+    atomic_write_text(Path(root) / CURRENT_FILE, name + "\n")
 
 
 def migrate(root):

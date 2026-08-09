@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from fileutil import atomic_write_text
+
 _STOP = {"the", "a", "an", "is", "to", "of", "and", "it", "i", "you",
          "my", "me", "when", "how", "on", "in", "at", "be", "are"}
 
@@ -71,7 +73,7 @@ class SkillStore:
         if existing is not None:
             skill.uses = max(skill.uses, existing.uses)
             skill.created_cycle = existing.created_cycle
-        self._path(skill.name).write_text(self._render(skill))
+        atomic_write_text(self._path(skill.name), self._render(skill))
 
     def get(self, name):
         path = self._path(name)
@@ -97,7 +99,7 @@ class SkillStore:
             return
         skill.uses += 1
         skill.updated_cycle = max(skill.updated_cycle, cycle)
-        self._path(skill.name).write_text(self._render(skill))
+        atomic_write_text(self._path(skill.name), self._render(skill))
 
     def archive_stale(self, cycle, limit=100):
         """Move skills untouched for `limit` cycles to archive/; returns

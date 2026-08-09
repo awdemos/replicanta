@@ -12,3 +12,7 @@ artifacts/
 organisms/
 current
 voices/
+
+# tooling state
+.desloppify/
+scorecard.png

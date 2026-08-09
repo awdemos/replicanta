@@ -12,6 +12,8 @@ import json
 import re
 from pathlib import Path
 
+from fileutil import atomic_write_text
+
 _EMPTY = {"version": 0, "entries": [], "pending": None}
 
 _REGISTRY = None
@@ -65,7 +67,7 @@ def _read(path):
 def _write(path, registry):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(registry, indent=2))
+    atomic_write_text(path, json.dumps(registry, indent=2))
 
 
 def load_global(path):
