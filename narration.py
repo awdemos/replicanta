@@ -16,7 +16,7 @@ DEFAULT_MODEL = "qwen3:14b"
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 180
-TIMEOUT = 15
+TIMEOUT = 30   # 14b cold-loads can exceed 15s; warm calls take ~2s
 
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
 VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline

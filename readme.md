@@ -19,10 +19,11 @@ over a global status bar and chat line. The status bar speaks in words:
 animated `thinking…` while it composes. Talk to it — it learns from what
 you say.
 
-- **chat** — the conversation: your words, its voice (replies stream in
-  token-by-token above the input before settling into the log), dreams,
-  lessons, moods, lifecycle events, all timestamped. Background events
-  (voice flips, learned facts, fading) also pop as toasts.
+- **chat** — the conversation as cards: your words in a cyan `you · HH:MM`
+  panel, its voice in a green one (replies stream in token-by-token above
+  the input before settling into the log), dreams, lessons, moods and
+  lifecycle events as a flat timestamped timeline between the cards.
+  Background events (voice flips, learned facts, fading) also pop as toasts.
 - **mind** — its head, live: top beliefs with confidence bars, committed
   rules, attention focus, genome stats.
 - **memory** — every episode it remembers (cycle-stamped), what it knows
@@ -53,12 +54,12 @@ you say.
 - **Memory**: notable episodes (birth, lessons, dreams, harsh and kind
   moments, fading, revival) are cycle-stamped, persisted, and injected into
   its narration prompt — it has continuity, not amnesia.
-- **Voice**: a local ollama model (`OLLAMA_URL` / `OLLAMA_MODEL` overridable)
-  speaks as the organism. Replies and questions stream token-by-token; idle
-  musings pass through an inner arena — two proposers, an adversarial
-  critic, two voters; high chaos injects rogue thoughts. When ollama is
-  unreachable the status bar shows `voice offline` and it speaks from a
-  deterministic fallback instead of stalling.
+- **Voice**: a local ollama model (`qwen3:14b` by default; `OLLAMA_URL` /
+  `OLLAMA_MODEL` overridable) speaks as the organism. Replies and questions
+  stream token-by-token; idle musings pass through an inner arena — two
+  proposers, an adversarial critic, two voters; high chaos injects rogue
+  thoughts. When ollama is unreachable the status bar shows `voice offline`
+  and it speaks from a deterministic fallback instead of stalling.
 
 ## Lifecycle
 
