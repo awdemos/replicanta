@@ -181,3 +181,48 @@ def test_irrelevant_skills_not_injected(tmp_path):
         how="nothing", created_cycle=0, updated_cycle=0))
     snap = narration.state_snapshot(org)
     assert snap["skills"] == []
+
+
+# -- tier A: engine trigger, curation, views ----------------------------------
+
+
+def test_tick_emits_want_reflect_on_cadence(tmp_path):
+    org = _organism(tmp_path, wake_seconds=999, sleep_seconds=999)
+    org.store.cycle = Organism.REFLECT_INTERVAL
+    kinds = [e["kind"] for e in org.tick(1.0)]
+    assert "want_reflect" in kinds
+    kinds = [e["kind"] for e in org.tick(1.0)]
+    assert "want_reflect" not in kinds
+
+
+def test_goal_completion_triggers_reflection(tmp_path):
+    org = _organism(tmp_path, wake_seconds=999, sleep_seconds=999)
+    org.add_goal("learn about the user")
+    org.store.cycle = 5
+    org.store.add(("user", "name", "sam"), 0.8)
+    org.store.add(("user", "like_rain", "true"), 0.8)
+    kinds = [e["kind"] for e in org.tick(1.0)]
+    assert "goal" in kinds
+    assert "want_reflect" in kinds
+
+
+def test_flush_curates_stale_skills(tmp_path):
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(name="ancient", when="x", how="y",
+                                 created_cycle=0, updated_cycle=0))
+    org.store.cycle = 200
+    org.flush(force=True)
+    assert org.skills.get("ancient") is None
+    assert any(m["kind"] == "skill" and "archived" in m["text"]
+               for m in org.store.memory)
+
+
+def test_mind_view_shows_skills(tmp_path):
+    import tui_views
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(name="rain talk", when="user likes rain",
+                                 how="ask once", created_cycle=0,
+                                 updated_cycle=0))
+    view = tui_views.mind_view(org)
+    assert "skills" in view
+    assert "rain talk" in view

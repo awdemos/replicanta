@@ -756,3 +756,48 @@ def test_tui_set_diary_writes_file_and_logs(monkeypatch, tmp_path):
     diary = tmp_path / "artifacts" / "diary.md"
     assert "today I learned about rain." in diary.read_text()
     assert any("diary" in line for line in logged)
+
+
+def test_tui_want_reflect_routes_to_reflect_worker(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    calls = []
+    app._reflect = lambda: calls.append("reflect")
+    app._render_event({"kind": "want_reflect"})
+    assert calls == ["reflect"]
+
+
+def test_tui_set_reflection_logs_created_skill(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.notify = lambda *a, **k: None
+    app.refresh_status = lambda: None
+    app._set_reflection({"action": "created", "name": "rain talk"})
+    assert any("rain talk" in line for line in logged)
+    assert any(m["kind"] == "skill" for m in app.org.store.memory)
+
+
+def test_tui_set_reflection_nothing_is_quiet(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app._set_reflection({"action": "none"})
+    assert logged == []

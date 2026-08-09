@@ -51,6 +51,7 @@ class BeliefStore:
         self.goals = []          # {"text","created_cycle","done_cycle","marker"}
         self.last_goal_cycle = 0
         self.last_diary_cycle = 0
+        self.last_reflect_cycle = 0
         self.on_adverse = None   # callback(amount) fired on contradiction
         self.dirty = False        # any state changed since last save()
         self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
@@ -191,6 +192,7 @@ class BeliefStore:
             "goals": self.goals,
             "last_goal_cycle": self.last_goal_cycle,
             "last_diary_cycle": self.last_diary_cycle,
+            "last_reflect_cycle": self.last_reflect_cycle,
         }
         self.state_path.write_text(json.dumps(state, indent=2))
         self.dirty = False
@@ -213,6 +215,7 @@ class BeliefStore:
         self.goals = [dict(g) for g in state.get("goals", [])]
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
+        self.last_reflect_cycle = state.get("last_reflect_cycle", 0)
 
 
 class Mind:
@@ -571,6 +574,8 @@ class Organism:
     GOAL_PURSUIT_CYCLES = 30  # a generic goal is "pursued enough" after this
     GOAL_LEARN_GROWTH = 2   # learn-goals complete after this many new facts
     DIARY_INTERVAL = 10     # wake cycles between diary entries
+    REFLECT_INTERVAL = 30   # wake cycles between skill reflections
+    SKILL_STALE_CYCLES = 100  # untouched skills get archived after this
 
     def __init__(self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5,
                  probe=None):
@@ -639,6 +644,9 @@ class Organism:
         beliefs/rules changed, so a quiet organism costs no I/O."""
         if not (force or self.store.dirty):
             return False
+        for name in self.skills.archive_stale(
+                self.store.cycle, limit=self.SKILL_STALE_CYCLES):
+            self.store.remember("skill", f"archived: {name}")
         genome = self.store.genome_dirty
         self.store.save()
         if genome:
@@ -692,6 +700,11 @@ class Organism:
                 # stamp first so it fires once while the voice writes
                 self.store.last_diary_cycle = self.store.cycle
                 events.append({"kind": "want_diary"})
+            if (self.store.cycle > 0
+                    and self.store.cycle - self.store.last_reflect_cycle
+                    >= self.REFLECT_INTERVAL):
+                self.store.last_reflect_cycle = self.store.cycle
+                events.append({"kind": "want_reflect"})
         self._since_save += dt
         if self._since_save >= self.SAVE_INTERVAL:
             self._since_save = 0.0
@@ -729,6 +742,9 @@ class Organism:
                     "goal", f"completed: {finished['text']}")
                 events.append({"kind": "goal", "text": finished["text"],
                                "done": True})
+                # completing a goal is exactly the experience worth
+                # distilling a technique from
+                events.append({"kind": "want_reflect"})
         elif (self.store.cycle > 0
                 and self.store.cycle - self.store.last_goal_cycle
                 >= self.GOAL_COOLDOWN):

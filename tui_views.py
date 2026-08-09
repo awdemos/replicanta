@@ -32,6 +32,12 @@ def mind_view(org):
         for g in [g for g in org.store.goals
                   if g["done_cycle"] is not None][-3:]:
             lines.append(f"done (cycle {g['done_cycle']}): {g['text']}")
+    skill_store = getattr(org, "skills", None)
+    skill_list = skill_store.list() if skill_store is not None else []
+    if skill_list:
+        lines += ["", "skills", ""]
+        for s in skill_list[:8]:
+            lines.append(f"{s.name} (used {s.uses}×) — when {s.when}")
     if org.store.rules:
         lines += ["", "committed rules", ""]
         lines += [text for text, _depth in org.store.rules[:_RULE_LIMIT]]

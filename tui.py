@@ -320,6 +320,8 @@ class OrganismApp(App):
             self._append_log(f"goal completed: {event['text']}",
                              STYLE_LEARNED, stamp=True)
             self.notify(f"goal completed: {event['text']}")
+        elif kind == "want_reflect":
+            self._reflect()
 
     def refresh_status(self):
         lc = self.org.lifecycle
@@ -415,6 +417,28 @@ class OrganismApp(App):
         self._write_card(f"{self._org_name()} · diary", entry, STYLE_DREAM)
         self._append_log("diary: entry saved (artifacts/diary.md)",
                          STYLE_DIM, stamp=True)
+        self.refresh_status()
+
+    @work(thread=True)
+    def _reflect(self):
+        result = None
+        try:
+            self.call_from_thread(self._pending_show, "org is reflecting")
+            result = narration.reflect(self.org)
+        except Exception as exc:  # noqa: BLE001 — workers must never die silently
+            self.call_from_thread(self._worker_error, "reflection", exc)
+        if result is not None:
+            self.call_from_thread(self._set_reflection, result)
+
+    def _set_reflection(self, result):
+        self._pending_hide()
+        if result["action"] == "none":
+            return
+        self.org.store.remember(
+            "skill", f"{result['action']} skill: {result['name']}")
+        self._append_log(f"skill {result['action']}: {result['name']}",
+                         STYLE_LEARNED, stamp=True)
+        self.notify(f"skill {result['action']}: {result['name']}")
         self.refresh_status()
 
     # -- pending (live reply region) --------------------------------------
