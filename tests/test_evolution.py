@@ -160,3 +160,19 @@ def test_skill_effectiveness_appears_in_prompt(org):
     snap = state_snapshot(org)
     assert snap["skills"]
     assert "effectiveness" in snap["skills"][0]
+
+
+def test_store_load_preserves_activity_lists(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.activity["surprises"] = [
+        {"cycle": 1, "old": "you felt happy", "new": "you felt sad"},
+    ]
+    store.activity["snapshots"] = [
+        {"cycle": 0, "counters": {"derivations": 5}},
+    ]
+    store.save()
+    store2 = BeliefStore(tmp_path)
+    store2.load()
+    assert isinstance(store2.activity["surprises"], list)
+    assert store2.activity["surprises"][0]["old"] == "you felt happy"
+    assert isinstance(store2.activity["snapshots"], list)
