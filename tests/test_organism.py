@@ -685,3 +685,74 @@ def test_tui_org_card_uses_learned_name(monkeypatch, tmp_path):
     app._log_chat("org", "hi")
     panels = [w for w in written if isinstance(w, Panel)]
     assert "sprig" in str(panels[0].title)
+
+
+# -- goals + artifacts wiring ------------------------------------------------
+
+
+def test_tui_want_goal_routes_to_form_goal(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    calls = []
+    app._form_goal = lambda: calls.append("form")
+    app._render_event({"kind": "want_goal"})
+    assert calls == ["form"]
+
+
+def test_tui_want_diary_routes_to_write_diary(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    calls = []
+    app._write_diary = lambda: calls.append("write")
+    app._render_event({"kind": "want_diary"})
+    assert calls == ["write"]
+
+
+def test_tui_goal_event_logs_completion(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.notify = lambda *a, **k: None
+    app._render_event({"kind": "goal", "text": "learn about the user",
+                       "done": True})
+    assert any("learn about the user" in line for line in logged)
+
+
+def test_tui_set_goal_adds_and_logs(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.notify = lambda *a, **k: None
+    app.refresh_status = lambda: None
+    app._set_goal("learn five things about the user")
+    goal = app.org.store.active_goal()
+    assert goal is not None
+    assert goal["text"] == "learn five things about the user"
+    assert any("goal" in line for line in logged)
+
+
+def test_tui_set_diary_writes_file_and_logs(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.refresh_status = lambda: None
+    app._set_diary("today I learned about rain.")
+    diary = tmp_path / "artifacts" / "diary.md"
+    assert "today I learned about rain." in diary.read_text()
+    assert any("diary" in line for line in logged)

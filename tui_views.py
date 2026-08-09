@@ -23,6 +23,15 @@ def mind_view(org):
         lines.append(f"{conf_bar(conf)} {conf:.2f} {obj}:{attr}={val}")
     if not top:
         lines.append("(no beliefs yet)")
+    if org.store.goals:
+        lines += ["", "goals", ""]
+        active = org.store.active_goal()
+        if active:
+            lines.append(
+                f"→ {active['text']} (since cycle {active['created_cycle']})")
+        for g in [g for g in org.store.goals
+                  if g["done_cycle"] is not None][-3:]:
+            lines.append(f"done (cycle {g['done_cycle']}): {g['text']}")
     if org.store.rules:
         lines += ["", "committed rules", ""]
         lines += [text for text, _depth in org.store.rules[:_RULE_LIMIT]]
@@ -52,4 +61,11 @@ def memory_view(org):
     if views:
         lines += ["", "what you said it is", ""]
         lines += [f"- {v}" for v in views]
+    artifacts = org.store.dir_path / "artifacts"
+    if artifacts.is_dir():
+        files = sorted(p for p in artifacts.iterdir() if p.is_file())
+        if files:
+            lines += ["", "artifacts", ""]
+            lines += [f"- {p.name} ({p.stat().st_size} bytes)"
+                      for p in files]
     return "\n".join(lines)

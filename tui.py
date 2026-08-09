@@ -312,6 +312,14 @@ class OrganismApp(App):
             self._append_log(f"learned: {event['text']}", STYLE_LEARNED,
                              stamp=True)
             self.notify(f"learned: {event['text']}")
+        elif kind == "want_goal":
+            self._form_goal()
+        elif kind == "want_diary":
+            self._write_diary()
+        elif kind == "goal":
+            self._append_log(f"goal completed: {event['text']}",
+                             STYLE_LEARNED, stamp=True)
+            self.notify(f"goal completed: {event['text']}")
 
     def refresh_status(self):
         lc = self.org.lifecycle
@@ -368,6 +376,46 @@ class OrganismApp(App):
         log = self.query_one("#dreams", RichLog)
         log.write("")
         log.write(card)
+
+    # -- goals + artifacts -------------------------------------------------
+    @work(thread=True)
+    def _form_goal(self):
+        text = None
+        try:
+            self.call_from_thread(
+                self._pending_show, "org is setting itself a goal")
+            text = narration.form_goal(self.org)
+        except Exception as exc:  # noqa: BLE001 — workers must never die silently
+            self.call_from_thread(self._worker_error, "goal", exc)
+        if text is not None:
+            self.call_from_thread(self._set_goal, text)
+
+    def _set_goal(self, text):
+        self._pending_hide()
+        self.org.add_goal(text)
+        self._append_log(f"goal: {text}", STYLE_LEARNED, stamp=True)
+        self.notify(f"new goal: {text}")
+        self.refresh_status()
+
+    @work(thread=True)
+    def _write_diary(self):
+        entry = None
+        try:
+            self.call_from_thread(
+                self._pending_show, "org is writing in its diary")
+            entry = narration.diary_entry(self.org)
+        except Exception as exc:  # noqa: BLE001 — workers must never die silently
+            self.call_from_thread(self._worker_error, "diary", exc)
+        if entry is not None:
+            self.call_from_thread(self._set_diary, entry)
+
+    def _set_diary(self, entry):
+        self._pending_hide()
+        self.org.write_diary(entry)
+        self._write_card(f"{self._org_name()} · diary", entry, STYLE_DREAM)
+        self._append_log("diary: entry saved (artifacts/diary.md)",
+                         STYLE_DIM, stamp=True)
+        self.refresh_status()
 
     # -- pending (live reply region) --------------------------------------
     def _pending_show(self, label):

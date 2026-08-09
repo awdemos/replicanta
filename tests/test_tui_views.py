@@ -65,3 +65,34 @@ def test_memory_view_shows_user_facts_and_self_view(org):
     assert "your name is sam" in view
     assert "what you said it is" in view
     assert "brave" in view
+
+
+# -- goals + artifacts sections -----------------------------------------------
+
+
+def test_mind_view_shows_goals(org):
+    org.store.add_goal("learn five things about the user", marker=0)
+    view = tui_views.mind_view(org)
+    assert "goals" in view
+    assert "learn five things about the user" in view
+
+
+def test_mind_view_shows_completed_goals(org):
+    org.store.add_goal("understand rain", marker=0)
+    org.store.complete_active_goal()
+    view = tui_views.mind_view(org)
+    assert "done" in view
+    assert "understand rain" in view
+
+
+def test_memory_view_lists_artifacts(org, tmp_path):
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "diary.md").write_text("dear diary")
+    view = tui_views.memory_view(org)
+    assert "artifacts" in view
+    assert "diary.md" in view
+
+
+def test_memory_view_without_artifacts_dir(org):
+    assert "artifacts" not in tui_views.memory_view(org)
