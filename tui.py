@@ -193,12 +193,18 @@ class OrganismApp(App):
         self._refresh_views()
 
     def _swap_to(self, name):
-        """Persist the current organism and wake another one in its place."""
+        """Persist the current organism and wake another one in its place.
+        In-flight voice workers belong to the old organism: they finish
+        against it and their deliveries are dropped by the org-identity
+        checks, so swapping is always safe."""
         self.org.flush(force=True)
         nursery.set_current(self.root, name)
         org = Organism(nursery.organism_dir(self.root, name), **self._spawn)
         org.load()
         self.org = org
+        # stale workers reset these in their finally blocks anyway; clear
+        # them so the new organism is never blocked by the old one's debate
+        self._narrating = self._responding = self._self_talking = False
         self.query_one("#dreams", RichLog).clear()
         self._pending_hide()
         self._show_org()
@@ -418,14 +424,15 @@ class OrganismApp(App):
     # -- goals + artifacts -------------------------------------------------
     @work(thread=True)
     def _form_goal(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         text = None
         try:
             self.call_from_thread(
                 self._pending_show, "org is setting itself a goal")
-            text = narration.form_goal(self.org)
+            text = narration.form_goal(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "goal", exc)
-        if text is not None:
+        if text is not None and org is self.org:
             self.call_from_thread(self._set_goal, text)
 
     def _set_goal(self, text):
@@ -437,14 +444,15 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _write_diary(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         entry = None
         try:
             self.call_from_thread(
                 self._pending_show, "org is writing in its diary")
-            entry = narration.diary_entry(self.org)
+            entry = narration.diary_entry(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "diary", exc)
-        if entry is not None:
+        if entry is not None and org is self.org:
             self.call_from_thread(self._set_diary, entry)
 
     def _set_diary(self, entry):
@@ -457,13 +465,14 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _reflect(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         result = None
         try:
             self.call_from_thread(self._pending_show, "org is reflecting")
-            result = narration.reflect(self.org)
+            result = narration.reflect(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reflection", exc)
-        if result is not None:
+        if result is not None and org is self.org:
             self.call_from_thread(self._set_reflection, result)
 
     def _set_reflection(self, result):
@@ -536,18 +545,19 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _ask_user(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         question = None
         try:
             self.call_from_thread(self._pending_show, "org is wondering")
             question = narration.ask_user(
-                self.org,
+                org,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "question", exc)
         finally:
             self._narrating = False
-        if question is not None:
+        if question is not None and org is self.org:
             self.call_from_thread(self._set_user_question, question)
 
     def _set_user_question(self, question):
@@ -565,23 +575,26 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _self_talk(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         answer = None
         try:
             self.call_from_thread(
                 self._pending_show, "org is asking itself")
-            question = narration.self_ask(self.org)
+            question = narration.self_ask(org)
+            if org is not self.org:
+                return
             self.call_from_thread(self._pending_hide)
             self.call_from_thread(self._set_self_question, question)
             self.call_from_thread(self._pending_show, "org is answering")
             answer = narration.self_answer(
-                self.org, question,
+                org, question,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "self-talk", exc)
         finally:
             self._self_talking = False
-        if answer is not None:
+        if answer is not None and org is self.org:
             self.call_from_thread(self._set_self_answer, answer)
 
     def _set_self_question(self, question):
@@ -597,15 +610,16 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _narrate(self):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         text = None
         try:
             self.call_from_thread(self._pending_show, "org is musing")
-            text = narration.narrate(self.org)
+            text = narration.narrate(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "narration", exc)
         finally:
             self._narrating = False
-        if text is not None:
+        if text is not None and org is self.org:
             self.call_from_thread(self._log_narration, text)
 
     def _log_narration(self, text):
@@ -674,11 +688,6 @@ class OrganismApp(App):
             self._append_log(f"organisms: {listing}  (* = current)",
                              STYLE_DIM)
         elif name == "/new":
-            if self._busy():
-                self._append_log(
-                    "the organism is mid-thought — try again in a moment.",
-                    STYLE_DIM)
-                return
             new_name = (parts[1] if len(parts) == 2
                         else nursery.next_name(self.root))
             try:
@@ -699,11 +708,6 @@ class OrganismApp(App):
                 self._append_log(
                     f"/swap: no organism {parts[1]!r} — have: {names}",
                     STYLE_WARN)
-                return
-            if self._busy():
-                self._append_log(
-                    "the organism is mid-thought — try again in a moment.",
-                    STYLE_DIM)
                 return
             self._swap_to(parts[1])
         elif name == "/self-talk":
@@ -767,18 +771,19 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _respond(self, text):
+        org = self.org   # capture: a swap mid-debate drops the delivery
         reply = None
         try:
             self.call_from_thread(self._pending_show, "org is thinking")
             reply = narration.respond(
-                self.org, text,
+                org, text,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
         finally:
             self._responding = False
-        if reply is not None:
+        if reply is not None and org is self.org:
             self.call_from_thread(self._set_reply, reply)
 
     def _set_reply(self, reply):

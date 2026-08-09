@@ -966,10 +966,13 @@ def test_tui_swap_roundtrip_and_unknown(monkeypatch, tmp_path):
     assert any("no organism 'nope'" in line for line in logged)
 
 
-def test_tui_swap_refused_while_busy(monkeypatch, tmp_path):
-    app, root, logged = _nursery_app(monkeypatch, tmp_path)
+def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
+    """Swaps are never blocked: in-flight workers belong to the old
+    organism (their deliveries are dropped by identity checks), and the
+    busy flags reset so the new organism can speak immediately."""
+    app, root, _logged = _nursery_app(monkeypatch, tmp_path)
     app._responding = True
     app.handle_command("/new fern")
-    assert app.org.dir_path.name == "default"       # no swap
-    assert not (root / "organisms" / "fern").exists()  # not even born
-    assert any("mid-thought" in line for line in logged)
+    assert app.org.dir_path.name == "fern"       # swapped anyway
+    assert (root / "organisms" / "fern").exists()
+    assert app._responding is False              # flags reset for the new org
