@@ -7,18 +7,19 @@ from you, and grows in consciousness (measured as belief-network complexity).
 
 ## Run
 
-Requires Python 3.14 and a local LLM backend. [Ollama](https://ollama.com)
-is used by default for convenience — any ollama model works. The default
-inner voice is `qwen3.5:latest` (~5.7 GB). Set `OLLAMA_MODEL` to switch
-models, or point `OLLAMA_URL` at a different ollama endpoint.
+Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and a local LLM
+backend. [Ollama](https://ollama.com) is used by default for convenience
+— any ollama model works. The default inner voice is `qwen3.5:latest`
+(~5.7 GB). Set `OLLAMA_MODEL` to switch models, or point `OLLAMA_URL` at
+a different ollama endpoint.
 
 ### 1. Base install
 
 ```bash
 git clone https://github.com/awdemos/replicanta
 cd replicanta
-python3.14 -m venv .venv
-.venv/bin/pip install -e .
+uv venv --python 3.14
+uv pip install -e .
 ```
 
 ### 2. Native dependency: scallopy
@@ -27,7 +28,7 @@ Replicanta needs **scallopy** (the Scallop↔Python binding). It is not on
 PyPI, so install the prebuilt wheel for Python 3.14 / x86_64 / glibc ≥ 2.39:
 
 ```bash
-.venv/bin/pip install \
+uv pip install \
     https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
 ```
 
@@ -60,13 +61,13 @@ Skip this and `/voice` stays mute.
 **Speech-to-text** — for push-to-talk (`/listen`, F5):
 
 ```bash
-.venv/bin/pip install -e '.[listen]'
+uv pip install -e '.[listen]'
 ```
 
 **Vision** — for USB camera sight (`/look`, F6):
 
 ```bash
-.venv/bin/pip install -e '.[vision]'
+uv pip install -e '.[vision]'
 ```
 
 ### 5. Start
@@ -209,7 +210,7 @@ you say.
   is transcribed by a local faster-whisper model and fed to the organism
   through the very same `hear()` path as typed chat, so tone, learning
   and mood all work on spoken words too. Needs the `listen` extra
-  (`pip install -e .[listen]`); the whisper model downloads from
+  (`uv pip install -e .[listen]`); the whisper model downloads from
   HuggingFace on first use. Defaults are CPU-friendly
   (`REPLICANTA_STT_MODEL=base`, `REPLICANTA_STT_DEVICE=cpu`,
   `REPLICANTA_STT_COMPUTE=int8`) because the GPU is usually busy
@@ -219,7 +220,7 @@ you say.
   or two by a local vision model (`REPLICANTA_VISION_MODEL`, default
   moondream via ollama), remembered as an episode, and injected into the
   voice's prompt — after a look, it can talk about what it's looking at.
-  Needs the `vision` extra (`pip install -e .[vision]`); no camera, no
+  Needs the `vision` extra (`uv pip install -e .[vision]`); no camera, no
   opencv or an offline vision model just means a log line, never a crash.
 - **Dungeon**: `/mud` drops the organism into a tiny deterministic text
   adventure — a clearing, a cave, a locked gate, an amulet to win. Its
