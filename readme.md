@@ -5,6 +5,27 @@ mind couples a probabilistic Scallop program with an LLM backend. Inspired by
 biological organisms, it wakes, asks itself questions, sleeps, dreams, learns
 from you, and grows in consciousness (measured as belief-network complexity).
 
+```mermaid
+flowchart LR
+    A["User message or idle trigger"] --> B{"hear() / sense()"}
+    B --> C["Update beliefs, mood, stress, chat log"]
+    C --> D["state_snapshot"]
+    D --> E["Prompt: state + goals + self-model + activity digest + skills + surprises + memory"]
+    E --> F["ThoughtArena: 2 proposers, critic, voters"]
+    F --> G{"ollama reachable?"}
+    G -->|yes| H["Deliver utterance + grounding check + skill outcome"]
+    G -->|no| I["Deterministic fallback"]
+    H --> J["Record chat / activity counters"]
+    I --> J
+    J --> K{"Reflection trigger?"}
+    K -->|yes| L["Reflect: distill skill, patch skill, or nothing"]
+    L --> M["Skills feed back into future prompts"]
+    K -->|no| N["Goals tick"]
+    N --> O["Goal progress / complete / stalled"]
+    O --> P["Sleep: dream engine"]
+    P --> Q["Validate candidate rules, promote or discard"]
+```
+
 ## Run
 
 Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and a local LLM
@@ -292,27 +313,6 @@ debate over its own state:
 The result is a voice that is not reading a static prompt: it is speaking
 from a moving mind that remembers, wants, notices, and occasionally changes
 its own mind.
-
-```mermaid
-flowchart LR
-    A[User message or idle trigger] --> B{hear() / sense()}
-    B --> C[Update beliefs, mood, stress, chat log]
-    C --> D[state_snapshot]
-    D --> E[Prompt: state + goals + self-model + activity digest + skills + surprises + memory]
-    E --> F[ThoughtArena<br/>2 proposers · critic · voters]
-    F --> G{ollama reachable?}
-    G -->|yes| H[Deliver utterance + grounding check + skill outcome]
-    G -->|no| I[Deterministic fallback]
-    H --> J[Record chat / activity counters]
-    I --> J
-    J --> K{Reflection trigger?}
-    K -->|yes| L[Reflect: distill skill, patch skill, or nothing]
-    L --> M[Skills feed back into future prompts]
-    K -->|no| N[Goals tick]
-    N --> O[Goal progress / complete / stalled]
-    O --> P[Sleep: dream engine]
-    P --> Q[Validate candidate rules · promote or discard]
-```
 
 ## Lifecycle
 
