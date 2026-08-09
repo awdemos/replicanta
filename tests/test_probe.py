@@ -364,6 +364,20 @@ def test_fresh_boot_seeds_self_core_not_objects(tmp_path):
                    for (obj, _a, _v) in org.store.beliefs())
 
 
+# -- uname: the host's identity --------------------------------------------
+
+def test_uname_default_runs_the_shell_command(tmp_path):
+    import platform
+    probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys")
+    assert probe.uname().startswith(platform.system())
+
+
+def test_uname_injectable(tmp_path):
+    probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys",
+                        uname=lambda: "Linux testhost 6.1 x86_64")
+    assert probe.uname() == "Linux testhost 6.1 x86_64"
+
+
 # -- helper ----------------------------------------------------------------
 
 def probe_beliefs(proc, sys_tree):

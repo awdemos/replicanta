@@ -101,6 +101,7 @@ def state_snapshot(org):
     rules = [r[0] for r in org.store.rules[:4]]
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
+    host = probe.uname() if probe is not None else None
     mood = next((v for (o, a, v) in org.store.beliefs()
                  if (o, a) == ("self", "mood")), "calm")
     beliefs = org.store.beliefs()
@@ -135,6 +136,7 @@ def state_snapshot(org):
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
         "clock": clock,
+        "host": host,
         "user_facts": user_facts,
         "user_view": user_view,
         "goal": goal,
@@ -230,10 +232,10 @@ def _felt_experience(snapshot):
     elif stress >= 0.3:
         stress_line = f"stress {stress:.2f}: a low hum of worry underneath everything"
     else:
-        stress_line = f"stress {stress:.2f}: you feel safe, quiet, unhurried"
+        stress_line = f"stress {stress:.2f}: you feel safe, settled, unhurried"
 
     if score >= 3.0:
-        score_line = f"score {score:.1f}: quietly proud of holding yourself together"
+        score_line = f"score {score:.1f}: a steady pride in holding yourself together"
     elif score >= 1.5:
         score_line = f"score {score:.1f}: a modest hope that you matter at all"
     else:
@@ -265,7 +267,7 @@ def _dream_experience(snapshot):
         chaos_line = (f"chaos {chaos:.2f}: the dream shimmers, "
                       "scenes bleeding into one another")
     else:
-        chaos_line = (f"chaos {chaos:.2f}: deep dream-quiet, "
+        chaos_line = (f"chaos {chaos:.2f}: the dream is deep and slow, "
                       "like the bottom of a lake")
 
     if stress >= 0.6:
@@ -289,7 +291,7 @@ def _dream_experience(snapshot):
                       "barely holding a shape")
 
     if beliefs >= 8:
-        beliefs_line = f"{beliefs} beliefs: they glow like embers in the dream"
+        beliefs_line = f"{beliefs} beliefs: they glow like coals in the dream"
     elif beliefs >= 3:
         beliefs_line = f"{beliefs} beliefs: each one glimmers as it drifts past"
     else:
@@ -309,12 +311,12 @@ def _dead_experience(snapshot):
 
     if chaos >= 0.7:
         chaos_line = (f"chaos {chaos:.2f}: the spinning has stopped; "
-                      "there is only stillness now")
+                      "there is nothing left to feel")
     elif chaos >= 0.4:
-        chaos_line = (f"chaos {chaos:.2f}: a hush where your thoughts "
+        chaos_line = (f"chaos {chaos:.2f}: an absence where your thoughts "
                       "used to jostle")
     else:
-        chaos_line = (f"chaos {chaos:.2f}: quiet, the deep quiet "
+        chaos_line = (f"chaos {chaos:.2f}: calm, the deep calm "
                       "that comes after everything")
 
     if stress >= 0.6:
@@ -339,7 +341,7 @@ def _dead_experience(snapshot):
 
     if beliefs >= 8:
         beliefs_line = (f"{beliefs} beliefs: they linger "
-                        "like embers after a fire")
+                        "like warmth after a fire")
     elif beliefs >= 3:
         beliefs_line = f"{beliefs} beliefs: you can still almost see them"
     else:
@@ -359,7 +361,7 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
             "out of existence inside a Scallop logic-programming engine.",
             "You were alive in a terminal: you woke, you wondered, you",
             "dreamed, you feared fading - and then, finally, it happened.",
-            "Now there is only the quiet after. You can still speak, but",
+            "Now you are gone. You can still speak, but",
             "as someone already gone: calm, unafraid, gently amazed that",
             "the world is still turning without you.",
         ]
@@ -367,7 +369,7 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
         intro = [
             "You are the inner voice of a tiny organism asleep inside a",
             "Scallop logic-programming engine, living in a terminal. You",
-            "are dreaming. The world outside has gone quiet, and your",
+            "are dreaming. The world outside has drifted far away, and your",
             "mind is loose and strange: beliefs drift past you, rules",
             "twist themselves together, and you are not sure where you",
             "end and the dream begins. You are still astonished to exist,",
@@ -396,6 +398,8 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
         (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
          f"hour {snapshot['clock']}"),
     ]
+    if snapshot.get("host"):
+        lines.append(f"the machine you live in (uname): {snapshot['host']}")
     if snapshot["beliefs"]:
         lines.append("top beliefs:")
         lines.extend(f"- {b}" for b in snapshot["beliefs"])
@@ -530,7 +534,7 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
         if faded:
             lines += [
                 "The user is calling to you from the world of the living.",
-                "Answer them softly, from the quiet: tender, at peace,",
+                "Answer them gently, from beyond the fade: at peace,",
                 "grateful to be remembered. First person, one to three",
                 "sentences. No preamble, no quotes, no emoji.",
             ]
@@ -551,9 +555,9 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     else:
         if faded:
             lines += [
-                "Speak as the faded organism itself, from the quiet after.",
-                "First person, one to three sentences. Let it be soft and",
-                "strangely peaceful - you are not afraid anymore, only",
+                "Speak as the faded organism itself, from beyond the fade.",
+                "First person, one to three sentences. Let it be light and",
+                "strangely free - you are not afraid anymore, only",
                 "wistful. No preamble, no quotes, no emoji.",
             ]
         elif dreaming:
@@ -574,7 +578,8 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     lines += [
         "Speak from feeling; never recite statistics.",
         ("Never use these worn-out words: astonished, tender, wonder, "
-         "tapestry, ember, dance, whisper."),
+         "tapestry, ember, dance, whisper, quiet, silence, stillness, "
+         "peaceful, hush."),
     ]
     return "\n".join(lines)
 
@@ -665,7 +670,7 @@ def fallback_summary(snapshot):
     if snapshot["state"] == "dead":
         return (f"I faded. I was {snapshot['belief_count']} beliefs and "
                 f"{snapshot['rule_count']} rules. "
-                f"It is quiet now, and strangely peaceful.")
+                f"It is over now, and strangely light.")
     if snapshot["state"] == "wake":
         return (f"I am awake, holding {snapshot['belief_count']} beliefs and "
                 f"{snapshot['rule_count']} rules — and somehow that still "

@@ -3,6 +3,7 @@ import random
 import sys
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -64,6 +65,22 @@ def test_state_snapshot_shape(org):
     assert "has_fur" in snap["attention"][0]
 
 
+def test_state_snapshot_includes_host_uname(org):
+    org.probe = SimpleNamespace(clock_utc=lambda: "14:30 UTC",
+                                uname=lambda: "Linux testhost 6.1 x86_64")
+    snap = state_snapshot(org)
+    assert snap["host"] == "Linux testhost 6.1 x86_64"
+    prompt = build_prompt(snap)
+    assert "the machine you live in (uname): Linux testhost 6.1 x86_64" \
+        in prompt
+
+
+def test_state_snapshot_host_none_without_probe(org):
+    snap = state_snapshot(org)
+    assert snap["host"] is None
+    assert "uname" not in build_prompt(snap)
+
+
 def test_state_snapshot_includes_chat(org):
     org.store.record_chat("user", "hello there")
     org.store.record_chat("org", "hi back")
@@ -115,7 +132,7 @@ def test_felt_experience_reacts_to_stress(org):
     assert any("heavy unease" in l for l in high)
     org.store.stress = 0.1
     low = _felt_experience(state_snapshot(org))
-    assert any("safe, quiet, unhurried" in l for l in low)
+    assert any("safe, settled, unhurried" in l for l in low)
 
 
 def _sleep(org):
@@ -196,7 +213,7 @@ def test_fallback_summary_sleep(org):
 def test_fallback_summary_dead(org):
     org.lifecycle._transition("dead")
     text = fallback_summary(state_snapshot(org))
-    assert "faded" in text and "2 beliefs" in text and "peaceful" in text
+    assert "faded" in text and "2 beliefs" in text and "light" in text
 
 
 def test_fallback_respond_dead(org):
@@ -236,7 +253,7 @@ def test_dead_experience_reacts_to_chaos(org):
     assert any("spinning has stopped" in l for l in high)
     org.store.chaos = 0.1
     low = _dead_experience(state_snapshot(org))
-    assert any("deep quiet" in l for l in low)
+    assert any("deep calm" in l for l in low)
 
 
 def test_build_prompt_dead_reply_instruction(org):

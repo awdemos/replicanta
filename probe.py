@@ -2,11 +2,13 @@
 same sources btm reads — /proc/stat (CPU), /proc/meminfo (memory),
 /proc/loadavg (load), /proc/uptime, /sys/class/thermal (temperatures),
 /sys/class/power_supply (battery) and statvfs (disk) — plus the UTC wall
-clock, and quantizes the continuous metrics into discrete symbolic
+clock and the `uname` shell command (the host's identity), and quantizes
+the continuous metrics into discrete symbolic
 beliefs the reasoner can use (e.g. cpu:load=high, mem:usage=mid,
 temp:cpu=hot, time:hour=fourteen)."""
 
 import os
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -50,18 +52,32 @@ def _read_float(path):
         return None
 
 
+def _host_uname():
+    """`uname -snrm` — the host's identity as one line (e.g.
+    'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable."""
+    try:
+        out = subprocess.run(["uname", "-snrm"], capture_output=True,
+                             text=True, timeout=2, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
+
+
 class SystemProbe:
     """Reads live system metrics. All sources are injectable so tests can
     point at fake /proc and /sys trees."""
 
     def __init__(self, proc="/proc", sys="/sys", ncpu=None, statvfs=None,
-                 clock=None):
+                 clock=None, uname=None):
         self.proc = Path(proc)
         self.sys = Path(sys)
         self.ncpu = ncpu if ncpu is not None else os.cpu_count() or 1
         self._statvfs = statvfs or os.statvfs
         self._clock = clock if clock is not None \
             else (lambda: datetime.now(timezone.utc))
+        self._uname = uname if uname is not None else _host_uname
         self._prev_cpu = None   # (idle, total) from the previous stat read
         self._adverse_seen = set()   # adverse beliefs already counted
 
@@ -77,6 +93,13 @@ class SystemProbe:
         """Computer time as 'HH:MM UTC' (e.g. '14:30 UTC')."""
         now = self._clock_now()
         return f"{now.hour:02d}:{now.minute:02d} UTC"
+
+    def uname(self):
+        """The host machine's identity from the `uname` shell command
+        (e.g. 'Linux myhost 6.15.3 x86_64') — whose body the organism
+        lives in. Too specific for a symbolic belief, so it reaches the
+        voice as prompt context instead. None when uname is unavailable."""
+        return self._uname()
 
     # -- raw metrics ------------------------------------------------------
     def snapshot(self):
