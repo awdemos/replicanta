@@ -129,7 +129,8 @@ bar shows state, mood, belief/rule counts, and voice status.
 - `/listen` (F5) — push-to-talk via faster-whisper.
 - `/look` (F6) — capture one USB camera frame and describe it with a local
   vision model.
-- `/mud` — toggle a tiny deterministic text adventure.
+- `/mud` — toggle a tiny deterministic text adventure. It makes one LLM call
+  per move and auto-ends after 50 turns.
 - Self-patches are staged in `artifacts/extensions.json`. `/approve`,
   `/reject`, and `/revert` gate them; nothing applies without you.
 - `/reload` — re-read Lua hook scripts. `/lua name.lua` — run one on demand.
@@ -170,7 +171,8 @@ bar shows state, mood, belief/rule counts, and voice status.
 - **Sight**: `/look` captures one camera frame, describes it with a vision
   model, and remembers it as an episode.
 - **Dungeon**: `/mud` runs a tiny text adventure; the organism's voice picks
-  moves, with a random fallback if the voice is offline.
+  one move per turn, with a random fallback if the voice is offline. Auto-ends
+  after 50 turns.
 - **Piper voices**: drop `<name>.onnx` + `<name>.onnx.json` in `voices/`, or
   use `/voice get <name>` to download from
   [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices). Default
