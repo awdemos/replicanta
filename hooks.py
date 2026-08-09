@@ -21,7 +21,10 @@ and safe actuators:
 Scripts are sandboxed (no os/io/require/load), every hook call is
 protected (a broken script logs an error line, never kills the
 organism), and a lock makes the single Lua runtime safe against the
-TUI's worker threads. `/reload` re-reads the scripts directory."""
+TUI's worker threads. `/reload` re-reads the scripts directory.
+`/lua name.lua` runs one script on demand: it is executed in the same
+sandbox and its `main(ctx)` (when defined) is called with ctx.event set
+to "lua"."""
 
 import threading
 from pathlib import Path
@@ -72,6 +75,10 @@ class HookEngine:
             score=m.score(),
             chaos=org.store.chaos,
             stress=org.store.stress,
+            arousal=org.store.arousal,
+            rationality=org.store.rationality,
+            irrationality=org.store.irrationality,
+            insane=org.store.insane,
             organism=org.dir_path.name,
             activity=self._lua.table_from(dict(org.store.activity)),
             log=lambda msg: self.emit(str(msg)),
@@ -114,6 +121,35 @@ class HookEngine:
                         hook(ctx)
                 except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
                     self.emit(f"{script.name}: {exc}")
+
+    def run(self, name, org):
+        """Run one named script on demand (the /lua command): execute it in
+        the shared sandbox, then call its main(ctx) when defined. Returns
+        a status line for the chat log; never raises."""
+        if Path(name).name != name or not name.endswith(".lua"):
+            return f"/lua: bad script name {name!r} (want a plain *.lua file)"
+        script = self.scripts_dir / name
+        if not script.is_file():
+            return f"/lua: no {name} in {self.scripts_dir}"
+        with self._lock:
+            if self._available is False:
+                return "lua hooks disabled: the 'lupa' package is not installed"
+            try:
+                if self._lua is None:
+                    self._lua = self._runtime()
+                    self._available = True
+            except ImportError:
+                self._available = False
+                return ("lua hooks disabled: the 'lupa' package "
+                        "is not installed")
+            try:
+                self._lua.execute(script.read_text())
+                main = self._lua.globals()["main"]
+                if main is not None:
+                    main(self._ctx(org, "lua", name))
+                return f"lua: ran {name}"
+            except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
+                return f"{name}: {exc}"
 
 
 def scripts_dir_for(dir_path):

@@ -24,6 +24,7 @@ COMMANDS = [
     ("/swap", "/swap name", "swap to another organism"),
     ("/organisms", "/organisms", "list all organisms"),
     ("/reload", "/reload", "re-read the lua hook scripts"),
+    ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand"),
     ("/help", "/help", "this help screen"),
 ]
 

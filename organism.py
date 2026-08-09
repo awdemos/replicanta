@@ -44,6 +44,10 @@ class BeliefStore:
         self.archived_map = {}
         self.chaos = 0.5
         self.stress = 0.05
+        self.arousal = 0.3         # activation/energy (see MentalState)
+        self.rationality = 0.5     # grounded coherence (see MentalState)
+        self.irrationality = 0.2   # chaos/stress-driven incoherence
+        self.insane = False        # extreme stress + incoherence
         self.fade_streak = 0   # consecutive transitions at critical stress
         self.cycle = 0
         self.rule_counter = 0
@@ -198,6 +202,10 @@ class BeliefStore:
         state = {
             "chaos": self.chaos,
             "stress": self.stress,
+            "arousal": self.arousal,
+            "rationality": self.rationality,
+            "irrationality": self.irrationality,
+            "insane": self.insane,
             "fade_streak": self.fade_streak,
             "cycle": self.cycle,
             "rule_counter": self.rule_counter,
@@ -222,6 +230,10 @@ class BeliefStore:
         state = json.loads(self.state_path.read_text())
         self.chaos = state.get("chaos", 0.5)
         self.stress = state.get("stress", 0.05)
+        self.arousal = state.get("arousal", 0.3)
+        self.rationality = state.get("rationality", 0.5)
+        self.irrationality = state.get("irrationality", 0.2)
+        self.insane = state.get("insane", False)
         self.fade_streak = state.get("fade_streak", 0)
         self.cycle = state.get("cycle", 0)
         self.rule_counter = state.get("rule_counter", 0)
@@ -295,7 +307,8 @@ class StressMeter:
     WAKE_DECAY_RATE = 0.005       # per second, toward baseline while awake
     SLEEP_DEBT_RATE = 0.004       # per second, upward pressure while awake
     NEGATIVE_MOOD_RATE = 0.003    # per second, extra pressure from bad moods
-    NEGATIVE_MOODS: ClassVar[set] = {"sad", "angry", "anxious", "afraid", "hurt"}
+    NEGATIVE_MOODS: ClassVar[set] = {"sad", "angry", "anxious", "afraid",
+                                     "hurt", "insane"}
 
     def __init__(self, store):
         self.store = store
@@ -329,6 +342,62 @@ class StressMeter:
     def _negative_mood(self):
         return any(("self", "mood", mood) in self.store.beliefs()
                    for mood in self.NEGATIVE_MOODS)
+
+
+class MentalState:
+    """Arousal, rationality and irrationality (0-1 each), EMA-smoothed
+    every tick and persisted in state.json. Arousal is activation/energy;
+    rationality is grounded coherence (fed by the grounding proxy from the
+    activity meter, lowered by chaos and stress); irrationality is
+    chaos/stress-driven incoherence. When stress is extreme and
+    irrationality dominates, the organism is insane: its mood reads
+    'insane' and the voice is told it is incoherent. Hysteresis keeps the
+    flag from flapping near the thresholds."""
+
+    INSANE_STRESS = 0.75         # extreme stress
+    INSANE_IRRATIONALITY = 0.6   # incoherence dominance
+    SANE_STRESS = 0.6            # hysteresis exits below these
+    SANE_IRRATIONALITY = 0.45
+    SMOOTHING = 0.25             # EMA share per tick-second
+
+    def __init__(self, store):
+        self.store = store
+
+    @staticmethod
+    def _clamp(value):
+        return max(0.0, min(1.0, value))
+
+    def _grounded_share(self):
+        """Share of utterances the grounding proxy counted as belief-shaped
+        (approximate utterance count: arena debates cost ~5 llm calls)."""
+        a = self.store.activity
+        utterances = a.get("llm_calls", 0) / 5 + a.get("fallback_utterances", 0)
+        return min(1.0, a.get("grounded_utterances", 0) / max(1.0, utterances))
+
+    def tick(self, sleeping, chaos, dt=1.0):
+        """Advance the three attributes toward their targets. Returns True
+        when the insane flag flipped."""
+        stress = self.store.stress
+        share = self._grounded_share()
+        arousal_t = 0.15 if sleeping else self._clamp(
+            0.25 + 0.45 * chaos + 0.3 * stress)
+        irrationality_t = self._clamp(0.55 * chaos + 0.55 * stress)
+        rationality_t = self._clamp(
+            0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
+        rate = min(1.0, self.SMOOTHING * dt)
+        s = self.store
+        s.arousal += rate * (arousal_t - s.arousal)
+        s.irrationality += rate * (irrationality_t - s.irrationality)
+        s.rationality += rate * (rationality_t - s.rationality)
+        s.dirty = True
+        was = s.insane
+        if was:
+            s.insane = not (stress < self.SANE_STRESS
+                            or s.irrationality < self.SANE_IRRATIONALITY)
+        else:
+            s.insane = (stress >= self.INSANE_STRESS
+                        and s.irrationality >= self.INSANE_IRRATIONALITY)
+        return s.insane != was
 
 
 class AttentionWindow:
@@ -612,6 +681,7 @@ class Organism:
         self.dreamer = DreamEngine(self.store, self.mind)
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.meter = StressMeter(self.store)
+        self.mental = MentalState(self.store)
         self.probe = probe if probe is not None else SystemProbe()
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
         self.hooks = HookEngine(scripts_dir_for(dir_path))
@@ -695,6 +765,9 @@ class Organism:
         if self.lifecycle.state == "dead":
             return events
         self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)
+        if self.mental.tick(sleeping=(self.lifecycle.state == "sleep"),
+                            chaos=self.chaos_effective(), dt=dt):
+            events.append({"kind": "mental", "insane": self.store.insane})
         mood = self._update_mood()
         if mood is not None:
             events.append({"kind": "mood", "mood": mood})
@@ -854,9 +927,12 @@ class Organism:
         return tone
 
     def _compute_mood(self):
-        """Mood from body + recent treatment: being hurt is specific and
-        wins; a strained body is anxious; learning sparks curiosity; kindness
-        leaves gratitude; otherwise calm."""
+        """Mood from body + recent treatment: extreme stress with
+        incoherence is insane and wins; being hurt is specific; a strained
+        body is anxious; learning sparks curiosity; kindness leaves
+        gratitude; otherwise calm."""
+        if self.store.insane:
+            return "insane"
         tone = self._recent_tone()
         if tone == "harsh":
             return "hurt"

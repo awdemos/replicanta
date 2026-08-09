@@ -159,3 +159,55 @@ def test_cycle_hook_fires_on_transition(tmp_path):
     org.hooks.emit = emitted.append
     org.tick(1.0)
     assert "-> sleep" in emitted
+
+
+# -- /lua on-demand runs ------------------------------------------------------
+
+def test_run_executes_main_with_ctx(scripts, tmp_path):
+    (scripts / "once.lua").write_text(
+        "function main(ctx)\n"
+        "  ctx.log('ran ' .. ctx.event .. ' as ' .. ctx.organism)\n"
+        "end\n")
+    emitted = []
+    engine = HookEngine(scripts, emit=emitted.append)
+    status = engine.run("once.lua", _org(tmp_path))
+    assert status == "lua: ran once.lua"
+    assert emitted and emitted[0].startswith("ran lua as ")
+
+
+def test_run_without_main_still_executes(scripts, tmp_path):
+    (scripts / "bare.lua").write_text("x = 1 + 1\n")
+    engine = HookEngine(scripts)
+    assert engine.run("bare.lua", _org(tmp_path)) == "lua: ran bare.lua"
+
+
+def test_run_rejects_traversal_and_non_lua(scripts, tmp_path):
+    engine = HookEngine(scripts)
+    org = _org(tmp_path)
+    assert "bad script name" in engine.run("../secrets.lua", org)
+    assert "bad script name" in engine.run("notes.txt", org)
+
+
+def test_run_missing_script(scripts, tmp_path):
+    engine = HookEngine(scripts)
+    status = engine.run("ghost.lua", _org(tmp_path))
+    assert status.startswith("/lua: no ghost.lua")
+
+
+def test_run_broken_script_returns_error_never_raises(scripts, tmp_path):
+    (scripts / "bad.lua").write_text("error('boom')\n")
+    engine = HookEngine(scripts)
+    status = engine.run("bad.lua", _org(tmp_path))
+    assert status.startswith("bad.lua:") and "boom" in status
+
+
+def test_run_shares_the_sandbox(scripts, tmp_path):
+    """/lua scripts are sandboxed exactly like event hooks."""
+    (scripts / "evil.lua").write_text(
+        "function main(ctx)\n"
+        "  if os == nil then ctx.log('no os') else ctx.log('PWNED') end\n"
+        "end\n")
+    emitted = []
+    engine = HookEngine(scripts, emit=emitted.append)
+    engine.run("evil.lua", _org(tmp_path))
+    assert emitted == ["no os"]

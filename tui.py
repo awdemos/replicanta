@@ -15,7 +15,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 from textual import work
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
 from textual.screen import ModalScreen
@@ -35,9 +35,13 @@ class SlashCommands(Provider):
     entries fill the chat line and run it."""
 
     def _run(self, usage):
+        """No-arg commands run immediately; commands with placeholder args
+        (/chaos 0..1, /swap name…) only fill the chat line — submitting
+        the placeholder literally would error or do nonsense."""
         self.app.chat_input.value = usage
         self.app.chat_input.focus()
-        self.app.chat_input.action_submit()
+        if " " not in usage:
+            self.app.chat_input.action_submit()
 
     def _hit(self, name, usage, description, score=1.0, display=None):
         return Hit(
@@ -89,7 +93,7 @@ class OrganismApp(App):
     styled log (chat, dreams, learned facts, lifecycle events), a one-line
     status bar, and a command line with tab completion. Commands:
     /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
-    /new, /swap, /organisms, /help (or ctrl+p / F1)."""
+    /new, /swap, /organisms, /reload, /lua file.lua, /help (or ctrl+p / F1)."""
 
     TITLE = "Replicanta"
 
@@ -366,9 +370,19 @@ class OrganismApp(App):
         elif kind == "stress":
             level = "high" if event["band"] == 1 else "critical"
             self._append_log(f"stress rising: {level}", STYLE_WARN)
+        elif kind == "mental":
+            if event["insane"]:
+                self._append_log(
+                    "the organism's mind comes apart: incoherent, insane",
+                    STYLE_WARN, stamp=True)
+                self.notify("the organism has gone insane", severity="error")
+            else:
+                self._append_log(
+                    "the organism's thoughts settle back into coherence",
+                    STYLE_DIM, stamp=True)
         elif kind == "mood":
             mood = event["mood"]
-            style = (STYLE_WARN if mood in ("hurt", "anxious")
+            style = (STYLE_WARN if mood in ("hurt", "anxious", "insane")
                      else STYLE_LEARNED if mood in ("grateful", "curious")
                      else STYLE_DIM)
             self._append_log(f"mood: {mood}", style)
@@ -399,12 +413,18 @@ class OrganismApp(App):
         busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
                 if self._busy() else "")
         spoken = " · speech on" if speech.enabled else ""
+        s = self.org.store
+        mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
+                  f"{s.irrationality:.2f}")
         self._status_text = (
-            f"{icon} {word} · {mood} · {m.belief_count} beliefs · "
+            f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
             f"{m.rule_count} rules · inner voice "
             f"{narration.voice_status()}{spoken} · "
             f"{self.org.probe.clock_utc()}{busy}")
-        self.query_one("#status", Static).update(self._status_text)
+        try:
+            self.query_one("#status", Static).update(self._status_text)
+        except ScreenStackError:
+            pass  # not mounted: unit tests drive handlers without a screen
 
     # -- log ---------------------------------------------------------------
     def _stamp(self):
@@ -418,7 +438,10 @@ class OrganismApp(App):
             line = f"[{style}]{line}[/{style}]"
         if stamp:
             line = f"[dim]{self._stamp()}[/dim] {line}"
-        self.query_one("#dreams", RichLog).write(line)
+        try:
+            self.query_one("#dreams", RichLog).write(line)
+        except ScreenStackError:
+            pass  # not mounted: unit tests drive handlers without a screen
 
     def _org_name(self):
         """Card title for the organism: its learned name (the user can give
@@ -669,13 +692,32 @@ class OrganismApp(App):
     def handle_command(self, cmd):
         parts = cmd.split()
         name = parts[0]
-        if name == "/chaos" and len(parts) == 2:
-            self.org.store.chaos = float(parts[1])
+        try:
+            self._dispatch(name, parts)
+        except (ValueError, IndexError) as exc:
+            # a mistyped argument must never kill the input handler
+            self._append_log(f"{name}: {exc}", STYLE_WARN)
+
+    def _dispatch(self, name, parts):
+        if name == "/chaos":
+            if len(parts) != 2:
+                self._append_log("/chaos needs a number 0-1 "
+                                 f"(now {self.org.store.chaos:.2f})",
+                                 STYLE_DIM)
+                return
+            value = float(parts[1])
+            if not 0.0 <= value <= 1.0:
+                raise ValueError("chaos must be between 0 and 1")
+            self.org.store.chaos = value
+            self._append_log(f"chaos: {value:.2f}", STYLE_DIM)
+            self.refresh_status()
         elif name == "/focus" and len(parts) == 2:
             self.org.window.focus(parts[1])
             self.org.store.attention = self.org.window.pairs
+            self._append_log(f"attention locked on {parts[1]}", STYLE_DIM)
         elif name == "/focus":
             self.org.window.focus(None)
+            self._append_log("attention floating free", STYLE_DIM)
         elif name == "/sleep":
             for event in self.org.force_state("sleep"):
                 self._render_event(event)
@@ -694,9 +736,15 @@ class OrganismApp(App):
                     f"{self.org.lifecycle.state}).", STYLE_DIM)
         elif name == "/stats":
             m = self.org.metrics()
+            s = self.org.store
             self._append_log(
                 f"stats: beliefs={m.belief_count} rules={m.rule_count} "
                 f"depth={m.total_depth} score={m.score():.1f}", STYLE_DIM)
+            self._append_log(
+                f"mental: arousal={s.arousal:.2f} "
+                f"rationality={s.rationality:.2f} "
+                f"irrationality={s.irrationality:.2f} "
+                f"insane={s.insane}", STYLE_DIM)
             for line in activity.summary_lines(self.org.store):
                 self._append_log(line, STYLE_DIM)
         elif name == "/save":
@@ -709,6 +757,15 @@ class OrganismApp(App):
             self._append_log(
                 f"lua hooks reloaded ({count} script"
                 f"{'s' if count != 1 else ''})", STYLE_DIM)
+        elif name == "/lua":
+            if len(parts) != 2:
+                names = ", ".join(s.name for s in self.org.hooks.scripts)
+                self._append_log(
+                    f"/lua needs a script name (scripts/: {names or 'none'})",
+                    STYLE_DIM)
+                return
+            self._append_log(self.org.hooks.run(parts[1], self.org),
+                             STYLE_DIM)
         elif name == "/organisms":
             names = nursery.list_organisms(self.root)
             current = self.org.dir_path.name

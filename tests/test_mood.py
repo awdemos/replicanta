@@ -147,5 +147,6 @@ def test_snapshot_includes_mood(tmp_path):
 
 def test_felt_experience_has_mood_line():
     snap = {"chaos": 0.5, "stress": 0.1, "score": 1.0, "belief_count": 2,
-            "mood": "grateful"}
+            "mood": "grateful", "arousal": 0.3, "rationality": 0.5,
+            "irrationality": 0.2, "insane": False}
     assert any("grateful" in line for line in _felt_experience(snap))

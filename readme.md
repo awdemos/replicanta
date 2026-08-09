@@ -76,6 +76,7 @@ you say.
   sentences).
 - `/approve`, `/reject`, `/revert` — the approval gate for its patches
 - `/reload` — re-read the Lua hook scripts in `scripts/` (see Scripting)
+- `/lua name.lua` — run one script from `scripts/` on demand (see Scripting)
 - **Many organisms**: they live in a nursery — `organisms/<name>/` under
   the app root, each with its own genome, state and artifacts; a `current`
   pointer file remembers who is awake. `/new fern` births a fresh organism
@@ -91,7 +92,15 @@ you say.
   battery, clock — and the host's identity via the `uname` shell command)
   as symbolic beliefs — a straining host distresses it.
 - **Mood**: derived from stress and how you treat it (calm / hurt / anxious /
-  grateful / curious), written back as a belief and fed to its inner voice.
+  grateful / curious / insane), written back as a belief and fed to its
+  inner voice.
+- **Mental state**: three persisted attributes — **arousal** (activation /
+  energy), **rationality** (grounded coherence, fed by belief-shaped
+  utterances) and **irrationality** (chaos/stress-driven incoherence) —
+  smoothed every tick. Under extreme stress with dominant irrationality the
+  organism goes **insane**: its mood reads insane, the voice is told it is
+  incoherent, and hysteresis keeps it there until stress and incoherence
+  genuinely subside.
 - **Memory**: notable episodes (birth, lessons, dreams, harsh and kind
   moments, fading, revival) are cycle-stamped, persisted, and injected into
   its narration prompt — it has continuity, not amnesia.
@@ -196,10 +205,18 @@ event functions — `/reload` picks changes up without restarting:
   `on_learned` (`ctx.text` = your words), `on_utterance` (`ctx.text` =
   its manifested words), `on_fade`.
 - **ctx reads**: `event`, `text`, `state`, `cycle`, `mood`,
-  `belief_count`, `rule_count`, `score`, `chaos`, `stress`, `organism`,
+  `belief_count`, `rule_count`, `score`, `chaos`, `stress`, `arousal`,
+  `rationality`, `irrationality`, `insane`, `organism`,
   and `activity` — the full activity-meter counters as a table.
 - **ctx acts**: `log(msg)` (a line in the chat log), `set_chaos(x)`,
   `focus(attr)` (nil to clear).
+
+`/lua name.lua` runs one script on demand in the same sandbox — define a
+`main(ctx)` and it is called with `ctx.event == "lua"`:
+
+    function main(ctx)
+      ctx.log("on demand at cycle " .. ctx.cycle)
+    end
 
 Scripts are sandboxed (no `os`/`io`/`require`/`load`) and every call is
 protected — a broken script logs an error line, it can never kill the
@@ -215,12 +232,21 @@ renders events — so behavior is testable without a terminal.
 
 ## CI (Dagger)
 
-CI is a [Dagger](https://dagger.io) module in `ci/` — the same pipeline
-runs locally and in GitHub Actions:
+CI is a [Dagger](https://dagger.io) module in `ci/` — no CI service, the
+same pipeline runs on your machine:
 
     dagger call ci --source=.       # lint (ruff) + full test suite
     dagger call test --source=.     # just the tests
     dagger call lint --source=.     # just ruff
+
+A git pre-commit hook runs the pipeline on every commit. Install it once:
+
+    git config core.hooksPath ci/hooks
+
+(`git commit --no-verify` bypasses when you must. The hook needs dagger
+and a container runtime; it auto-detects the rootless docker/podman
+socket when `DOCKER_HOST` is unset, and skips silently when dagger is
+not installed.)
 
 The pipeline uses the prebuilt scallopy wheel attached to the
 [v0.1.0 release](https://github.com/awdemos/replicanta/releases/tag/v0.1.0)

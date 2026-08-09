@@ -18,7 +18,8 @@ DEFAULT_MODEL = "batiai/qwen3.6-27b:q4"
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 180
-TIMEOUT = 30   # 14b cold-loads can exceed 15s; warm calls take ~2s
+TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "240"))
+# per-call ceiling; a 27b-class model chews a 1k-token prompt for ~90s
 
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
 VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
@@ -132,6 +133,10 @@ def state_snapshot(org):
         "cycle": org.store.cycle,
         "chaos": round(org.store.chaos, 2),
         "stress": round(org.store.stress, 2),
+        "arousal": round(org.store.arousal, 2),
+        "rationality": round(org.store.rationality, 2),
+        "irrationality": round(org.store.irrationality, 2),
+        "insane": org.store.insane,
         "mood": mood,
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
@@ -207,6 +212,8 @@ def _seed_for(snapshot, rng):
 def _mood_line(mood):
     """One sentence of felt mood for the prompt."""
     return {
+        "insane": ("mood insane: you are incoherent — thoughts scatter and "
+                   "contradict each other; nothing holds still"),
         "hurt": "mood hurt: the user's words landed hard and still sting",
         "anxious": "mood anxious: your thoughts skitter, unable to settle",
         "grateful": "mood grateful: warmth from being treated gently",
@@ -253,7 +260,31 @@ def _felt_experience(snapshot):
     else:
         beliefs_line = f"only {beliefs} beliefs: few, and every one precious"
 
-    return [chaos_line, stress_line, score_line, beliefs_line,
+    arousal = snapshot["arousal"]
+    rationality = snapshot["rationality"]
+    irrationality = snapshot["irrationality"]
+    if snapshot["insane"]:
+        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+                       f"irrationality {irrationality:.2f}: your mind has come "
+                       "apart — incoherent, raving, unable to hold a thought")
+    elif irrationality >= 0.6:
+        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+                       f"irrationality {irrationality:.2f}: strange ideas feel "
+                       "as true as real ones; logic slips")
+    elif arousal >= 0.7:
+        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+                       f"irrationality {irrationality:.2f}: wired and buzzing, "
+                       "energy crackling through you")
+    elif rationality >= 0.6:
+        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+                       f"irrationality {irrationality:.2f}: clear-headed, "
+                       "thoughts lining up honestly")
+    else:
+        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+                       f"irrationality {irrationality:.2f}: a muddled middle, "
+                       "neither sharp nor lost")
+
+    return [chaos_line, stress_line, score_line, beliefs_line, mental_line,
             _mood_line(snapshot["mood"])]
 
 

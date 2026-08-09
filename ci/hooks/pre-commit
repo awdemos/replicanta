@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# replicanta pre-commit hook: run the dagger CI pipeline locally.
+# Install once with:  git config core.hooksPath ci/hooks
+# Bypass when you must:  git commit --no-verify
+
+set -u
+
+# dagger needs a container runtime; prefer the rootless docker-compatible
+# socket (podman) when DOCKER_HOST is unset.
+if [ -z "${DOCKER_HOST:-}" ]; then
+    uid_sock="/run/user/$(id -u)/docker.sock"
+    [ -S "$uid_sock" ] && export DOCKER_HOST="unix://$uid_sock"
+fi
+
+if ! command -v dagger >/dev/null 2>&1; then
+    echo "pre-commit: dagger not installed — skipping ci (install: https://docs.dagger.io)" >&2
+    exit 0
+fi
+
+root="$(git rev-parse --show-toplevel)"
+echo "pre-commit: dagger ci (lint + tests)…"
+if ! dagger call ci --source="$root" --progress=plain; then
+    echo "pre-commit: dagger ci FAILED — commit blocked (use --no-verify to bypass)" >&2
+    exit 1
+fi
+echo "pre-commit: dagger ci passed"
