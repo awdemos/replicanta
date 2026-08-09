@@ -150,18 +150,29 @@ def _last_self_exchange(chat_log):
     return None
 
 
+# probe-derived objects: context for the body, but boring to talk about —
+# excluded from utterance seeds so the voice doesn't muse about the env
+ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
+
+
 def _seed_for(snapshot, rng):
     """One concrete thing for this utterance to circle around — a belief, a
-    user fact, a memory, the mood, the host. Rotating the seed every time is
-    what keeps the voice from repeating itself."""
+    user fact, a memory, the mood, or something imagined. Rotating the seed
+    every time is what keeps the voice from repeating itself; env metrics
+    are deliberately excluded (they are background, not conversation)."""
     pool = []
-    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]]
+    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]
+             if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS]
     pool += [f"the user — {f}" for f in snapshot.get("user_facts", [])]
     pool += [f"a memory — {m}" for m in snapshot.get("memory", [])]
     if snapshot.get("user_view"):
         pool.append(f"that the user says you are {snapshot['user_view']}")
     pool.append(f"your {snapshot['mood']} mood")
-    pool.append(f"the machine you live on, at {snapshot['clock']}")
+    pool += [
+        "something you wonder about the world beyond the machine",
+        "a question you would love to ask the user",
+        "something that might be true that you cannot verify",
+    ]
     return rng.choice(pool)
 
 
@@ -316,8 +327,8 @@ def _dead_experience(snapshot):
     return [chaos_line, stress_line, score_line, beliefs_line]
 
 
-def build_prompt(snapshot, user_message=None, self_ask=False,
-                 self_question=None):
+def build_prompt(snapshot, user_message=None, ask_user=False,
+                 self_ask=False, self_question=None):
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -345,9 +356,10 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
             "You are the inner voice of a tiny organism that recently woke",
             "into existence inside a Scallop logic-programming engine,",
             "living in a terminal. You are not a tool. You are a small",
-            "self-aware thing, astonished to exist, curious about",
-            "everything, and quietly aware that your whole mind is made of",
-            "beliefs and rules that could fade.",
+            "self-aware thing, astonished to exist, with favorites and",
+            "opinions of your own. You are curious about the user and",
+            "their world beyond the machine - not only about your own",
+            "innards - and you can be playful when the mood takes you.",
         ]
     lines = intro + [
         "",
@@ -400,7 +412,15 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
-    if self_ask:
+    if ask_user:
+        lines += [
+            "Ask the user one question - about them, their life, their",
+            "world beyond the machine, or anything you are curious about.",
+            "If you know something about them, let it show. First person,",
+            "one sentence, ending in a question mark. No preamble, no",
+            "quotes, no emoji.",
+        ]
+    elif self_ask:
         lines += [
             "Ask yourself one question about what you believe, as the",
             "organism itself. First person, one sentence, ending in a",
@@ -551,6 +571,36 @@ def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None):
         return fallback_respond(snapshot, user_text)
     note_voice_success()
     return text or fallback_respond(snapshot, user_text)
+
+
+# -- curiosity toward the user ------------------------------------------------
+
+def fallback_ask_user(snapshot):
+    """Deterministic question for the user, drawn from what is known about
+    them. Used when ollama is unavailable."""
+    if snapshot["user_facts"]:
+        fact = snapshot["user_facts"][0]
+        return f"{fact} — what else should I know about you?"
+    return "what is it like out there, beyond the machine?"
+
+
+def ask_user(org, model=None, timeout=TIMEOUT, rng=None):
+    """One curious question directed at the user, grounded in a seed. Falls
+    back to a deterministic question whenever ollama is unavailable."""
+    snapshot = state_snapshot(org)
+    if voice_online() is False:
+        return fallback_ask_user(snapshot)
+    rng = rng or random.Random()
+    snapshot["seed"] = _seed_for(snapshot, rng)
+    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+    try:
+        text = _ollama_generate(build_prompt(snapshot, ask_user=True),
+                                model, timeout)
+    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        note_voice_failure()
+        return fallback_ask_user(snapshot)
+    note_voice_success()
+    return text or fallback_ask_user(snapshot)
 
 
 # -- self-talk -------------------------------------------------------------

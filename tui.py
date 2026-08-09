@@ -1,3 +1,4 @@
+import random
 from typing import ClassVar
 
 import narration
@@ -62,6 +63,7 @@ STYLE_DIM = "dim"
 
 NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
 VOICE_PROBE_INTERVAL = 60.0   # seconds between ollama reachability probes
+ASK_USER_ODDS = 0.35      # chance an idle wake utterance asks the user instead
 
 
 class OrganismApp(App):
@@ -101,6 +103,8 @@ class OrganismApp(App):
         self._voice_announced = None
         self._self_talk_on = False
         self._self_talking = False
+        self._rng = random.Random()
+        self._last_was_question = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -285,14 +289,37 @@ class OrganismApp(App):
     # -- narration -------------------------------------------------------
     def _maybe_narrate(self):
         """Route the periodic voice: self-dialogue when toggled on and
-        awake, ordinary narration otherwise."""
+        awake; otherwise ordinary narration, sometimes swapped for a
+        curious question directed at the user (never twice in a row)."""
         if self._self_talk_on and self.org.lifecycle.state == "wake":
             self._maybe_self_talk()
             return
-        if not self._narrating:
-            self._narrating = True
+        if self._narrating:
+            return
+        self._narrating = True
+        if (self.org.lifecycle.state == "wake"
+                and not self._last_was_question
+                and self._rng.random() < ASK_USER_ODDS):
+            self._last_was_question = True
             self.refresh_status()
-            self._narrate()
+            self._ask_user()
+            return
+        self._last_was_question = False
+        self.refresh_status()
+        self._narrate()
+
+    @work(thread=True)
+    def _ask_user(self):
+        try:
+            question = narration.ask_user(self.org)
+        finally:
+            self._narrating = False
+        self.call_from_thread(self._set_user_question, question)
+
+    def _set_user_question(self, question):
+        self.org.store.record_chat("org", question)
+        self._append_log(f"org: {question}", STYLE_ORG)
+        self.refresh_status()
 
     # -- self-talk ---------------------------------------------------------
     def _maybe_self_talk(self):

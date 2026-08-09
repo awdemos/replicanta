@@ -410,3 +410,55 @@ def test_self_ask_prompt_continues_the_conversation(org, monkeypatch):
     assert "what do I believe?" in captured["prompt"]
     assert "I believe in fur." in captured["prompt"]
     assert "follows naturally" in captured["prompt"]
+
+
+# -- curiosity toward the user -----------------------------------------------
+
+
+def test_seed_pool_excludes_env_metrics(org):
+    org.store.add(("cpu", "load", "high"), 0.9)
+    org.store.add(("self", "wants", "rain"), 0.9)
+    snap = state_snapshot(org)
+    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(50)}
+    assert not any("cpu" in s for s in seeds)
+
+
+def test_seed_pool_includes_imaginative_seeds(org):
+    snap = state_snapshot(org)
+    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(50)}
+    assert any("wonder" in s or "cannot verify" in s or "ask the user" in s
+               for s in seeds)
+
+
+def test_build_prompt_ask_user_branch(org):
+    prompt = build_prompt(state_snapshot(org), ask_user=True)
+    assert "Ask the user one question" in prompt
+    assert "ending in a question mark" in prompt
+
+
+def test_ask_user_fallback_without_user_facts(org):
+    assert "beyond the machine" in narration.fallback_ask_user(
+        state_snapshot(org))
+
+
+def test_ask_user_fallback_uses_user_facts(org):
+    org.store.add(("user", "name", "sam"), 0.8)
+    question = narration.fallback_ask_user(state_snapshot(org))
+    assert "your name is sam" in question
+    assert "what else should I know" in question
+
+
+def test_ask_user_offline_returns_fallback(org):
+    narration._voice.online = False
+    question = narration.ask_user(org)
+    assert "beyond the machine" in question
+
+
+def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    narration.ask_user(org)
+    assert "what is most alive in you right now" in captured["prompt"]
+    assert "Ask the user one question" in captured["prompt"]
