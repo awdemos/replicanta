@@ -976,3 +976,70 @@ def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
     assert app.org.dir_path.name == "fern"       # swapped anyway
     assert (root / "organisms" / "fern").exists()
     assert app._responding is False              # flags reset for the new org
+
+
+import speech
+
+
+def test_tui_voice_toggles_speech(monkeypatch, tmp_path):
+    """`/voice` flips the spoken voice; enabling it announces itself with a
+    spoken greeting (patched out here)."""
+    said = []
+    monkeypatch.setattr(speech, "available", lambda: True)
+    monkeypatch.setattr(speech, "say", lambda text: said.append(text))
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice on")
+    assert speech.enabled is True
+    assert said == ["I can speak now."]
+    assert any("spoken voice on" in line for line in logged)
+    app.handle_command("/voice off")
+    assert speech.enabled is False
+    assert any("spoken voice off" in line for line in logged)
+
+
+def test_tui_voice_bare_toggles(monkeypatch, tmp_path):
+    monkeypatch.setattr(speech, "available", lambda: True)
+    monkeypatch.setattr(speech, "say", lambda text: None)
+    app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice")
+    assert speech.enabled is True
+    app.handle_command("/voice")
+    assert speech.enabled is False
+
+
+def test_tui_voice_warns_without_model(monkeypatch, tmp_path):
+    monkeypatch.setattr(speech, "available", lambda: False)
+    monkeypatch.setattr(speech, "say", lambda text: None)
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice on")
+    assert speech.enabled is True            # flag set, but honest about it
+    assert any("staying mute" in line for line in logged)
+
+
+def test_tui_voice_rejects_bad_arg(monkeypatch, tmp_path):
+    app, _root, logged = _nursery_app(monkeypatch, tmp_path)
+    app.handle_command("/voice loudly")
+    assert speech.enabled is False
+    assert any("on or off" in line for line in logged)
+
+
+def test_tui_reply_speaks_only_when_enabled(monkeypatch, tmp_path):
+    """The organism's own utterances route through speech.say — a no-op
+    unless the user turned the spoken voice on."""
+    import threading
+    said = []
+    spoke = threading.Event()
+
+    def fake_speak(text):
+        said.append(text)
+        spoke.set()
+
+    monkeypatch.setattr(speech, "available", lambda: True)
+    monkeypatch.setattr(speech, "_speak", fake_speak)
+    app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
+    app._set_reply("i am here")
+    assert said == []                          # disabled: silence
+    speech.set_enabled(True)
+    app._set_reply("i am here")
+    assert spoke.wait(2.0)
+    assert said == ["i am here"]

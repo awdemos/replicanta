@@ -20,8 +20,9 @@ built from a sibling checkout of the scallop repo):
 
 The app has three tabs — **chat** (F2), **mind** (F3), **memory** (F4) —
 over a global status bar and chat line. The status bar speaks in words:
-`🧠 awake · curious · 23 beliefs · 4 rules · voice online · 14:32`, with an
-animated `thinking…` while it composes. Talk to it — it learns from what
+`🧠 awake · curious · 23 beliefs · 4 rules · inner voice online · 14:32`,
+with an animated `thinking…` while it composes and a `speech on` marker
+when the spoken voice is enabled. Talk to it — it learns from what
 you say.
 
 - **chat** — the conversation as cards: your words in a cyan `you · HH:MM`
@@ -46,6 +47,9 @@ you say.
 - `/stats` — growth metrics; `/save` — persist; `/think` — narrate now
 - `/self-talk` — toggle self-dialogue: it asks itself a question and
   answers it, out loud, every narration cycle
+- `/voice` — toggle the spoken voice: with it on, everything the organism
+  says (replies, musings, questions, self-talk) is also spoken aloud via
+  a local piper TTS model (see Voice)
 - it also asks *you* questions — about a third of its idle wake utterances
   are curiosity aimed at you, not at itself
 - **Self-patches**: during reflection it may propose an executable patch
@@ -98,8 +102,21 @@ you say.
   lands, replayed token-by-token as it settles; high chaos injects rogue
   thoughts into free-form speech (never into structured tasks like
   reflections, whose format a rogue candidate would break). When ollama
-  is unreachable the status bar shows `voice offline`
+  is unreachable the status bar shows `inner voice offline`
   and it speaks from a deterministic fallback instead of stalling.
+- **Spoken voice**: `/voice on` makes the organism audible. Synthesis is
+  a local piper model (`voices/en_US-lessac-medium.onnx`, overridable
+  with `REPLICANTA_VOICE_MODEL`; fetch one from
+  `huggingface.co/rhasspy/piper-voices`, e.g. `curl -L -o
+  voices/en_US-lessac-medium.onnx
+  https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx`
+  plus the matching `.onnx.json`); playback goes through PulseAudio/
+  PipeWire (`soundcard`), so it reaches the host's speakers even from
+  inside a Toolbx container. Utterances queue on a single thread — they
+  never overlap and never block the UI — and the whole path is optional:
+  no model, missing package or audio failure just means silence, never
+  a crash. Only the organism's own speech is spoken, never yours or the
+  system lines.
 
 ## Lifecycle
 

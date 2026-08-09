@@ -7,6 +7,7 @@ import extensions
 import activity
 import narration
 import nursery
+import speech
 import tui_commands
 import tui_views
 from organism import Organism
@@ -285,13 +286,13 @@ class OrganismApp(App):
             self._voice_announced = state
             if state == "offline":
                 self._append_log(
-                    "voice: offline — speaking from my bones "
+                    "inner voice: offline — speaking from my bones "
                     "(local fallback)", STYLE_DIM)
-                self.notify("voice offline — local fallback",
+                self.notify("inner voice offline — local fallback",
                             severity="warning")
             elif state == "online":
-                self._append_log("voice: online (ollama)", STYLE_DIM)
-                self.notify("voice online (ollama)")
+                self._append_log("inner voice: online (ollama)", STYLE_DIM)
+                self.notify("inner voice online (ollama)")
         self.refresh_status()
 
     # -- ticks -----------------------------------------------------------
@@ -375,9 +376,11 @@ class OrganismApp(App):
         m = self.org.metrics()
         busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
                 if self._busy() else "")
+        spoken = " · speech on" if speech.enabled else ""
         self._status_text = (
             f"{icon} {word} · {mood} · {m.belief_count} beliefs · "
-            f"{m.rule_count} rules · voice {narration.voice_status()} · "
+            f"{m.rule_count} rules · inner voice "
+            f"{narration.voice_status()}{spoken} · "
             f"{self.org.probe.clock_utc()}{busy}")
         self.query_one("#status", Static).update(self._status_text)
 
@@ -564,6 +567,7 @@ class OrganismApp(App):
         self._pending_hide()
         self.org.store.record_chat("org", question)
         self._write_card(self._org_name(), question, STYLE_ORG)
+        speech.say(question)
         self.refresh_status()
 
     # -- self-talk ---------------------------------------------------------
@@ -600,12 +604,14 @@ class OrganismApp(App):
     def _set_self_question(self, question):
         self.org.store.record_chat("org", question)
         self._write_card("self", question, "dim yellow")
+        speech.say(question)
 
     def _set_self_answer(self, answer):
         self._pending_hide()
         self.org.store.record_chat("org", answer)
         # nested under its question so the exchange reads as a dialogue
         self._append_log(f"  ↳ {answer}", STYLE_SELF)
+        speech.say(answer)
         self.refresh_status()
 
     @work(thread=True)
@@ -625,6 +631,7 @@ class OrganismApp(App):
     def _log_narration(self, text):
         self._pending_hide()
         self._write_card(self._org_name(), text, STYLE_ORG)
+        speech.say(text)
         self.refresh_status()
 
     # -- chat line -------------------------------------------------------
@@ -710,6 +717,26 @@ class OrganismApp(App):
                     STYLE_WARN)
                 return
             self._swap_to(parts[1])
+        elif name == "/voice":
+            arg = parts[1] if len(parts) == 2 else ""
+            if arg in ("on", "off") or not arg:
+                speech.set_enabled(not speech.enabled if not arg
+                                   else arg == "on")
+                state = "on" if speech.enabled else "off"
+                if speech.enabled and not speech.available():
+                    self._append_log(
+                        f"spoken voice {state}, but no piper model at "
+                        f"{speech.MODEL_PATH} — staying mute", STYLE_WARN)
+                elif speech.enabled:
+                    self._append_log(
+                        "spoken voice on — the organism speaks aloud "
+                        "(piper tts)", STYLE_DIM)
+                    speech.say("I can speak now.")
+                else:
+                    self._append_log("spoken voice off", STYLE_DIM)
+                self.refresh_status()
+            else:
+                self._append_log("/voice takes on or off", STYLE_DIM)
         elif name == "/self-talk":
             self._self_talk_on = not self._self_talk_on
             if self._self_talk_on:
@@ -790,6 +817,7 @@ class OrganismApp(App):
         self._pending_hide()
         self.org.store.record_chat("org", reply)
         self._log_chat("org", reply)
+        speech.say(reply)
         self.refresh_status()
 
 
