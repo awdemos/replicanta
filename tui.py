@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import escape
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
@@ -135,6 +136,25 @@ class RenameScreen(ModalScreen):
         self.dismiss(event.value.strip() or None)
 
 
+class CellDetailScreen(ModalScreen):
+    """Inspector for one neural-memory cell: what kind of object it is
+    plus the metadata it carries. Escape or click anywhere to close."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close")]
+
+    def __init__(self, cell):
+        super().__init__()
+        self._cell = cell
+
+    def compose(self) -> ComposeResult:
+        yield Static(Text(tui_views.cell_detail_text(self._cell)),
+                     id="cell-detail")
+
+    def on_click(self, event):
+        self.dismiss()
+
+
 # role -> log style (Rich markup); engine events get their own styles
 STYLE_YOU = "cyan"
 STYLE_ORG = "green"
@@ -202,6 +222,9 @@ class OrganismApp(App):
     #org-menu { border: round $primary; width: 44; height: auto;
                 background: $surface; }
     #rename-input { border: round $primary; width: 60; }
+    CellDetailScreen { align: center middle; }
+    #cell-detail { border: round $secondary; padding: 1 2; width: 64;
+                  height: auto; background: $surface; }
     #bottombar { height: 1; padding: 0 1; background: $surface;
                   color: $text-muted; }
     """
@@ -215,6 +238,8 @@ class OrganismApp(App):
                      else organism.dir_path.parent.parent)
         # kwargs for Organism() when birthing/swapping (wake/sleep/chaos)
         self._spawn = dict(spawn or {})
+        # metadata grid behind the cells tab, for click-to-inspect
+        self._cells_grid = []
         self.chat_input = None
         self._narrating = False
         self._responding = False
@@ -403,6 +428,21 @@ class OrganismApp(App):
         click or Enter): swap to it, rename it, or cancel."""
         if event.item.name:
             self._open_org_menu(event.item.name)
+
+    def on_click(self, event):
+        """Left-click a neural-memory cell (F8 grid) to inspect what kind
+        of object it holds and its metadata. Grid geometry: one header
+        line, then CELLS_ROWS lines of 2-column-wide cells."""
+        if getattr(event.widget, "id", None) != "cells":
+            return
+        col = event.x // 2
+        row = event.y - 1
+        if not (0 <= row < tui_views.CELLS_ROWS
+                and 0 <= col < tui_views.CELLS_COLS):
+            return
+        idx = row * tui_views.CELLS_COLS + col
+        if idx < len(self._cells_grid) and self._cells_grid[idx]:
+            self.push_screen(CellDetailScreen(self._cells_grid[idx]))
 
     def _open_org_menu(self, name):
         def on_choice(result):
@@ -980,8 +1020,8 @@ class OrganismApp(App):
         self.query_one("#memory", Static).update(self._memory_text)
         self.query_one("#inner", Static).update(
             tui_views.inner_renderable(self.org))
-        self.query_one("#cells", Static).update(
-            tui_views.cells_view(self.org))
+        text, self._cells_grid = tui_views.cells_layout(self.org)
+        self.query_one("#cells", Static).update(text)
 
     def _render_event(self, event):
         """Render one engine event into the log."""

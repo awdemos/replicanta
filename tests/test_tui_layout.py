@@ -211,3 +211,53 @@ def test_chat_input_stays_below_main_area(monkeypatch, tmp_path):
             assert bottom.styles.height.value == 1
 
     asyncio.run(check())
+
+
+def test_cells_tab_click_opens_detail(monkeypatch, tmp_path):
+    """Left-clicking an occupied cell in the F8 grid opens the inspector
+    with the object's kind and metadata."""
+    import tui_views
+    from tui import CellDetailScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.add(("cat", "has_fur", "true"), 0.9)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_views()
+            app.action_show_tab("cells-pane")
+            await pilot.pause()
+            idx = next(i for i, c in enumerate(app._cells_grid) if c)
+            row, col = divmod(idx, tui_views.CELLS_COLS)
+            await pilot.click("#cells", offset=(col * 2, row + 1))
+            await pilot.pause()
+            assert isinstance(app.screen, CellDetailScreen)
+            detail = _renderable_text(app.screen.query_one("#cell-detail"))
+            assert "kind: belief" in detail
+            assert "object:    cat" in detail
+            assert "attribute: has_fur" in detail
+            # click anywhere closes the inspector
+            await pilot.click("#cell-detail")
+            await pilot.pause()
+            assert not isinstance(app.screen, CellDetailScreen)
+
+    asyncio.run(check())
+
+
+def test_cells_tab_click_on_empty_cell_does_nothing(monkeypatch, tmp_path):
+    import tui_views
+    from tui import CellDetailScreen
+    app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.add(("cat", "has_fur", "true"), 0.9)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_views()
+            app.action_show_tab("cells-pane")
+            await pilot.pause()
+            idx = next(i for i, c in enumerate(app._cells_grid) if not c)
+            row, col = divmod(idx, tui_views.CELLS_COLS)
+            await pilot.click("#cells", offset=(col * 2, row + 1))
+            await pilot.pause()
+            assert not isinstance(app.screen, CellDetailScreen)
+
+    asyncio.run(check())

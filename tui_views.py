@@ -334,37 +334,46 @@ def _stable_index(key, capacity):
     return int.from_bytes(digest[:8], "big") % capacity
 
 
-def cells_view(org):
+def cells_layout(org):
     """Top-down neural memory grid: one cell per belief/rule/memory/goal.
 
     Colors encode the kind of thing remembered; brightness encodes how
     strongly the organism holds it. Empty cells use the deep-space
-    background."""
+    background. Returns (text, cells): the renderable plus the
+    CELLS_COLS*CELLS_ROWS grid with each occupied cell's full metadata,
+    so a click on the grid can be resolved to what it holds."""
     capacity = CELLS_COLS * CELLS_ROWS
     items = []
     for (obj, attr, val), conf in org.store.beliefs().items():
         kind = "self" if obj == "self" else "belief"
-        items.append((kind, conf, f"{obj}:{attr}={val}"))
+        items.append((kind, conf, f"{obj}:{attr}={val}",
+                      {"object": obj, "attribute": attr, "value": val}))
     for text, depth in org.store.rules:
-        items.append(("rule", 0.5 + min(depth, 4) / 8, text))
+        items.append(("rule", 0.5 + min(depth, 4) / 8, text,
+                      {"text": text, "depth": depth}))
     for entry in org.store.memory[-50:]:
-        kind = entry.get("kind", "memory")
-        items.append(("memory", 0.7, f"{kind}:{entry.get('text', '')}"))
+        mkind = entry.get("kind", "memory")
+        items.append(("memory", 0.7, f"{mkind}:{entry.get('text', '')}",
+                      {"cycle": entry.get("cycle"), "tag": mkind,
+                       "text": entry.get("text", "")}))
     goal = org.store.active_goal()
     if goal:
-        items.append(("goal", 0.9, goal["text"]))
+        items.append(("goal", 0.9, goal["text"],
+                      {"text": goal["text"],
+                       "created_cycle": goal.get("created_cycle"),
+                       "strategy": goal.get("strategy")}))
 
     # Most strongly held memories get a cell when space runs out.
     items.sort(key=lambda item: -item[1])
     items = items[:capacity]
 
     grid = [None] * capacity
-    for kind, conf, key in items:
+    for kind, conf, key, meta in items:
         start = _stable_index(key, capacity)
         for probe in range(capacity):
             pos = (start + probe) % capacity
             if grid[pos] is None:
-                grid[pos] = (kind, conf)
+                grid[pos] = {"kind": kind, "confidence": conf, **meta}
                 break
 
     text = Text()
@@ -376,11 +385,37 @@ def cells_view(org):
             if cell is None:
                 text.append("  ", style=f"on {_CELLS_BG}")
             else:
-                kind, conf = cell
-                text.append("  ", style=f"on {_cell_color(kind, conf)}")
+                text.append("  ", style=f"on {_cell_color(
+                    cell['kind'], cell['confidence'])}")
         text.append("\n")
     text.append(
         "legend: beliefs cyan · self pink · rules green · memory amber · "
-        "goals magenta",
+        "goals magenta · click a cell to inspect it",
         style="#94a3b8")
-    return text
+    return text, grid
+
+
+def cells_view(org):
+    """Just the renderable half of cells_layout (grid metadata unused)."""
+    return cells_layout(org)[0]
+
+
+def cell_detail_text(cell):
+    """Human-readable description of one occupied cell: what kind of
+    object it is plus every metadata field it carries."""
+    kind = cell["kind"]
+    lines = [f"kind: {kind}  (confidence {cell['confidence']:.2f})", ""]
+    if kind in ("belief", "self"):
+        lines += [f"object:    {cell['object']}",
+                  f"attribute: {cell['attribute']}",
+                  f"value:     {cell['value']}"]
+    elif kind == "rule":
+        lines += [f"depth: {cell['depth']}", "", cell["text"]]
+    elif kind == "memory":
+        lines += [f"cycle: {cell['cycle']}", f"tag:   {cell['tag']}",
+                  "", cell["text"]]
+    elif kind == "goal":
+        lines += [f"created cycle: {cell['created_cycle']}",
+                  f"strategy:      {cell['strategy'] or '-'}",
+                  "", cell["text"]]
+    return "\n".join(lines)

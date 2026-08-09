@@ -208,3 +208,62 @@ def test_inner_renderable_without_activity_still_shows_state(org):
     text = _render(tui_views.inner_renderable(org))
     assert "mental state" in text
     assert "perpetuation loop" not in text
+
+
+# -- cells grid (F8) ----------------------------------------------------------
+
+def _stocked_org(org):
+    """An organism with one of each cell kind."""
+    org.store.add(("cat", "has_fur", "true"), 0.9)
+    org.store.add(("self", "mood", "calm"), 0.8)
+    org.store.rules.append(
+        ('q1(x) = bel(x, "has_fur", "true")', 2))
+    org.store.remember("mud", "found a torch")
+    org.store.add_goal("learn the user's name", marker=1, strategy="ask")
+    return org
+
+
+def test_cells_layout_returns_metadata_grid(org):
+    org = _stocked_org(org)
+    text, grid = tui_views.cells_layout(org)
+    assert "neural memory" in _render(text)
+    assert len(grid) == tui_views.CELLS_COLS * tui_views.CELLS_ROWS
+    occupied = [c for c in grid if c]
+    kinds = {c["kind"] for c in occupied}
+    assert kinds == {"belief", "self", "rule", "memory", "goal"}
+    belief = next(c for c in occupied if c["kind"] == "belief")
+    assert belief["object"] == "cat"
+    assert belief["attribute"] == "has_fur"
+    assert belief["value"] == "true"
+    assert belief["confidence"] == 0.9
+    rule = next(c for c in occupied if c["kind"] == "rule")
+    assert rule["depth"] == 2 and "has_fur" in rule["text"]
+    memory = next(c for c in occupied if c["kind"] == "memory")
+    assert memory["tag"] == "mud" and memory["cycle"] == 3
+    goal = next(c for c in occupied if c["kind"] == "goal")
+    assert goal["text"] == "learn the user's name"
+    assert goal["created_cycle"] == 3 and goal["strategy"] == "ask"
+
+
+def test_cells_view_matches_layout_text(org):
+    org = _stocked_org(org)
+    assert _render(tui_views.cells_view(org)) == \
+        _render(tui_views.cells_layout(org)[0])
+
+
+def test_cell_detail_text_describes_each_kind(org):
+    org = _stocked_org(org)
+    _, grid = tui_views.cells_layout(org)
+    occupied = {c["kind"]: c for c in grid if c}
+    belief = tui_views.cell_detail_text(occupied["belief"])
+    assert "kind: belief" in belief and "object:    cat" in belief
+    assert "attribute: has_fur" in belief and "value:     true" in belief
+    self_cell = tui_views.cell_detail_text(occupied["self"])
+    assert "kind: self" in self_cell and "mood" in self_cell
+    rule = tui_views.cell_detail_text(occupied["rule"])
+    assert "kind: rule" in rule and "depth: 2" in rule
+    memory = tui_views.cell_detail_text(occupied["memory"])
+    assert "kind: memory" in memory and "tag:   mud" in memory
+    goal = tui_views.cell_detail_text(occupied["goal"])
+    assert "kind: goal" in goal and "created cycle: 3" in goal
+    assert "learn the user's name" in goal
