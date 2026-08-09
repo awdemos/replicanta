@@ -22,6 +22,7 @@ class Skill:
     uses: int = 0
     created_cycle: int = 0
     updated_cycle: int = 0
+    effectiveness: float = 0.5
 
 
 def _slug(name):
@@ -44,7 +45,8 @@ class SkillStore:
     def _render(self, s):
         return (f"# {s.name}\nwhen: {s.when}\nhow: {s.how}\n"
                 f"meta: uses={s.uses} created={s.created_cycle} "
-                f"updated={s.updated_cycle}\n")
+                f"updated={s.updated_cycle} "
+                f"effectiveness={s.effectiveness:.2f}\n")
 
     def _parse(self, text):
         lines = text.splitlines()
@@ -63,7 +65,8 @@ class SkillStore:
             how=fields.get("how", ""),
             uses=int(meta.get("uses", 0)),
             created_cycle=int(meta.get("created", 0)),
-            updated_cycle=int(meta.get("updated", 0)))
+            updated_cycle=int(meta.get("updated", 0)),
+            effectiveness=float(meta.get("effectiveness", 0.5)))
 
     def save(self, skill):
         """Create or patch a skill file. Patching preserves the use count
@@ -91,14 +94,30 @@ class SkillStore:
                 out.append(skill)
         return out
 
-    def record_use(self, name, cycle=0):
-        """Count one retrieval; also touches the updated cycle so active
-        skills never go stale."""
+    def record_use(self, name, cycle=0, outcome=None):
+        """Count one retrieval and update a rolling effectiveness score.
+
+        `outcome` is a dict with optional keys: grounded, new_belief,
+        user_replied. Each positive signal contributes to a 0..1 score;
+        effectiveness is an EMA toward that score.
+        """
         skill = self.get(name)
         if skill is None:
             return
         skill.uses += 1
         skill.updated_cycle = max(skill.updated_cycle, cycle)
+        if outcome:
+            score = 0.0
+            if outcome.get("grounded"):
+                score += 0.4
+            if outcome.get("user_replied"):
+                score += 0.3
+            if outcome.get("new_belief"):
+                score += 0.3
+            score = min(1.0, score)
+            alpha = 0.2
+            skill.effectiveness += alpha * (score - skill.effectiveness)
+            skill.effectiveness = max(0.0, min(1.0, skill.effectiveness))
         atomic_write_text(self._path(skill.name), self._render(skill))
 
     def archive_stale(self, cycle, limit=100):
@@ -107,6 +126,19 @@ class SkillStore:
         archived = []
         for skill in self.list():
             if cycle - skill.updated_cycle >= limit:
+                archive = self.dir_path / "archive"
+                archive.mkdir(parents=True, exist_ok=True)
+                self._path(skill.name).rename(
+                    archive / self._path(skill.name).name)
+                archived.append(skill.name)
+        return archived
+
+    def flush(self, cycle):
+        """Archive skills that stayed below the effectiveness floor after
+        enough uses. Returns the names archived."""
+        archived = []
+        for skill in self.list():
+            if skill.uses >= 10 and skill.effectiveness < 0.2:
                 archive = self.dir_path / "archive"
                 archive.mkdir(parents=True, exist_ok=True)
                 self._path(skill.name).rename(

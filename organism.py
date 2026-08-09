@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 import extensions
+import goals
 import learning
 import scallopy
 import sentiment
@@ -60,6 +61,7 @@ class BeliefStore:
         self.last_diary_cycle = 0
         self.last_reflect_cycle = 0
         self.activity = {}       # neurosymbolic activity counters (activity.py)
+        self._surprise_this_tick = False
         self.on_adverse = None   # callback(amount) fired on contradiction
         self.on_utterance = None # callback(role, text) fired on chat lines
         self.dirty = False        # any state changed since last save()
@@ -71,6 +73,19 @@ class BeliefStore:
         for the key taxonomy). Persisted with state.json."""
         self.activity[key] = self.activity.get(key, 0) + n
         self.dirty = True
+
+    def _record_surprise(self, old_belief, new_belief):
+        """A held belief was contradicted and archived. Keep the last ten
+        surprises in activity["surprises"] for the voice prompt."""
+        surprises = self.activity.setdefault("surprises", [])
+        surprises.append({
+            "cycle": self.cycle,
+            "old": learning.describe(old_belief),
+            "new": learning.describe(new_belief),
+        })
+        while len(surprises) > 10:
+            surprises.pop(0)
+        self._surprise_this_tick = True
 
     def add(self, belief, conf):
         obj, attr, val = belief
@@ -88,9 +103,11 @@ class BeliefStore:
                     self.archived_map[(o, a, v)] = c
                     del self.beliefs_map[(o, a, v)]
                     self.note_activity("beliefs_archived")
+                    self._record_surprise((o, a, v), belief)
                     break
                 self.archived_map[key] = conf
                 self.note_activity("beliefs_archived")
+                self._record_surprise(belief, (o, a, v))
                 self.dirty = True
                 self.genome_dirty = True
                 return
@@ -158,12 +175,13 @@ class BeliefStore:
         self.genome_dirty = True
 
     # -- goals ---------------------------------------------------------------
-    def add_goal(self, text, marker=0):
+    def add_goal(self, text, marker=0, strategy=None):
         """Form a new intention: one active goal at a time, cycle-stamped.
         `marker` records the progress baseline (e.g. user-fact count at
         formation) so the engine can tell when the goal is achieved."""
         self.goals.append({"text": text, "created_cycle": self.cycle,
-                           "done_cycle": None, "marker": marker})
+                           "done_cycle": None, "marker": marker,
+                           "strategy": strategy})
         self.dirty = True
 
     def active_goal(self):
@@ -410,20 +428,34 @@ class AttentionWindow:
         self.beliefs = beliefs
         self.pairs = set()
         self.focus_attr = None
+        self.rationale = ""
 
     def refresh(self, cycle=0):
         all_pairs = {(a, v) for (_o, a, v) in self.beliefs}
         if self.focus_attr is not None:
             self.pairs = {(a, v) for (a, v) in all_pairs if a == self.focus_attr}
+            self.rationale = (
+                f"you are holding onto {self.focus_attr} because "
+                "something about it matters right now"
+            )
             return
         size = max(self.MIN_WINDOW, len(all_pairs) - cycle)
         self.pairs = set(random.sample(sorted(all_pairs), min(size, len(all_pairs))))
+        labels = ", ".join(f"{a}={v}" for a, v in sorted(self.pairs))
+        self.rationale = (
+            f"your attention drifted across {len(self.pairs)} things: {labels}"
+        )
 
     def focus(self, attr):
         self.focus_attr = attr
         if attr is not None:
             self.pairs = {(a, v) for (a, v) in self.pairs if a == attr} or \
                          {(a, v) for (a, v) in self._all_pairs() if a == attr}
+            self.rationale = (
+                f"you are holding onto {attr} because it keeps coming up"
+            )
+        else:
+            self.rationale = "your attention is open to whatever surfaces"
 
     def _all_pairs(self):
         return {(a, v) for (_o, a, v) in self.beliefs}
@@ -524,10 +556,13 @@ class DreamEngine:
             derived = self.mind.query_rule(dream["rule"], dream["head"])
             if not derived:
                 self.store.note_activity("dreams_discarded")
+                self.store.activity["discarded_streak"] = \
+                    self.store.activity.get("discarded_streak", 0) + 1
                 if getattr(self, "stress", None) is not None:
                     self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
             self.store.note_activity("dreams_promoted")
+            self.store.activity["discarded_streak"] = 0
             self.store.rule_counter += 1
             self.store.commit_rule(dream["rule"], 1)
             self.store.remember(
@@ -748,6 +783,8 @@ class Organism:
         for name in self.skills.archive_stale(
                 self.store.cycle, limit=self.SKILL_STALE_CYCLES):
             self.store.remember("skill", f"archived: {name}")
+        for name in self.skills.flush(self.store.cycle):
+            self.store.remember("skill", f"deprecated low-effectiveness: {name}")
         genome = self.store.genome_dirty
         self.store.save()
         if genome:
@@ -765,10 +802,14 @@ class Organism:
         events = []
         if self.lifecycle.state == "dead":
             return events
+        self.store._surprise_this_tick = False
+        was_insane = self.store.insane
         self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)
         if self.mental.tick(sleeping=(self.lifecycle.state == "sleep"),
                             chaos=self.chaos_effective(), dt=dt):
             events.append({"kind": "mental", "insane": self.store.insane})
+            if was_insane and not self.store.insane:
+                events.append({"kind": "want_reflect"})
         mood = self._update_mood()
         if mood is not None:
             events.append({"kind": "mood", "mood": mood})
@@ -791,9 +832,20 @@ class Organism:
             new_beliefs = self._wake()
             if new_beliefs:
                 events.append({"kind": "beliefs", "new": new_beliefs})
+                if len(new_beliefs) >= 5:
+                    events.append({"kind": "want_reflect"})
         elif new_state == "dead":
             events.append({"kind": "state", "to": "dead"})
             self.hooks.fire("fade", self)
+        reflect_triggered = any(e["kind"] == "want_reflect" for e in events)
+        if self.store.activity.get("discarded_streak", 0) >= 3 \
+                and not reflect_triggered:
+            events.append({"kind": "want_reflect"})
+            reflect_triggered = True
+        if getattr(self.store, "_surprise_this_tick", False) \
+                and not reflect_triggered:
+            events.append({"kind": "want_reflect"})
+            reflect_triggered = True
         band = self._stress_band()
         if band != self._last_stress_band:
             if band > self._last_stress_band and band > 0:
@@ -824,7 +876,8 @@ class Organism:
         fallback). Records the user-fact count as the progress marker for
         learn-goals and remembers the moment as an episode."""
         marker = sum(1 for (o, _a, _v) in self.store.beliefs() if o == "user")
-        self.store.add_goal(text, marker=marker)
+        self.store.add_goal(text, marker=marker,
+                            strategy=goals.formulate_subgoals(text))
         self.store.remember("goal", f"new goal: {text}")
 
     def _goals_tick(self):
@@ -840,9 +893,11 @@ class Organism:
                 facts = sum(1 for (o, _a, _v) in self.store.beliefs()
                             if o == "user")
                 done = facts >= goal["marker"] + self.GOAL_LEARN_GROWTH
+                goals.update_progress(goal, facts, self.store.cycle)
             else:
-                done = (self.store.cycle - goal["created_cycle"]
-                        >= self.GOAL_PURSUIT_CYCLES)
+                progress = self.store.cycle - goal["created_cycle"]
+                done = progress >= self.GOAL_PURSUIT_CYCLES
+                goals.update_progress(goal, progress, self.store.cycle)
             if done:
                 finished = self.store.complete_active_goal()
                 self.store.remember(
@@ -852,6 +907,10 @@ class Organism:
                 # completing a goal is exactly the experience worth
                 # distilling a technique from
                 events.append({"kind": "want_reflect"})
+            elif goals.is_stalled(goal, self.store.cycle,
+                                  goal.get("last_progress_current", 0)):
+                events.append({"kind": "goal_stalled",
+                               "text": goal["text"]})
         elif (self.store.cycle > 0
                 and self.store.cycle - self.store.last_goal_cycle
                 >= self.GOAL_COOLDOWN):
@@ -860,6 +919,20 @@ class Organism:
         return events
 
     # -- artifacts -----------------------------------------------------------
+    def record_self_model(self, insight_text):
+        """Store a durable belief about the organism's own behavior.
+
+        The value is compressed to the [a-z_]+ belief vocabulary and capped
+        in length so it survives the belief validator and appears in the
+        voice prompt's self-model section.
+        """
+        value = re.sub(r"[^a-z_ ]", "", insight_text.lower())
+        value = re.sub(r"\s+", "_", value).strip("_")
+        value = value[:40].strip("_")
+        if len(value) < 2:
+            return
+        self.store.add(("self", "insight", value), 0.7)
+
     def write_diary(self, entry):
         """Append one diary entry to artifacts/diary.md (created lazily) —
         the organism's body of work outside the chat. Remembers the moment

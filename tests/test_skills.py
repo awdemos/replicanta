@@ -169,9 +169,23 @@ def test_relevant_skills_injected_into_prompt(tmp_path):
         how="ask one follow-up", created_cycle=0, updated_cycle=0))
     snap = narration.state_snapshot(org)
     assert any("rain talk" in s for s in snap["skills"])
-    assert org.skills.get("rain talk").uses == 1
+    # Use is recorded when an utterance is actually delivered, not when the
+    # prompt is built.
+    assert org.skills.get("rain talk").uses == 0
     prompt = narration.build_prompt(snap)
     assert "what you have learned how to do" in prompt
+
+
+def test_skill_effectiveness_updates_on_recorded_outcome(tmp_path):
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(
+        name="rain talk", when="the user likes rain",
+        how="ask one follow-up", created_cycle=0, updated_cycle=0))
+    org.skills.record_use("rain talk", cycle=1,
+                          outcome={"grounded": True, "user_replied": True})
+    skill = org.skills.get("rain talk")
+    assert skill.uses == 1
+    assert skill.effectiveness > 0.5
 
 
 def test_irrelevant_skills_not_injected(tmp_path):

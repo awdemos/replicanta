@@ -96,8 +96,19 @@ class ThoughtArena:
             return self._fallback(org.store, snapshot, user_message, fallback)
         narration.note_voice_success()
         activity.note(org.store, "utterances")
-        if activity.grounded(snapshot["seed"], result):
+        grounded = activity.grounded(snapshot["seed"], result)
+        if grounded:
             activity.note(org.store, "grounded_utterances")
+        skill_store = getattr(org, "skills", None)
+        if skill_store is not None:
+            outcome = {
+                "grounded": grounded,
+                "user_replied": bool(user_message),
+                "new_belief": False,
+            }
+            for skill in snapshot.get("relevant_skills", []):
+                skill_store.record_use(
+                    skill.name, cycle=org.store.cycle, outcome=outcome)
         if on_token is not None:
             for piece in re.findall(r"\S+\s*", result):
                 on_token(piece)

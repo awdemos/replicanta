@@ -13,6 +13,7 @@ import urllib.request
 
 import activity
 import extensions
+import goals
 import learning
 from skills import Skill
 
@@ -119,9 +120,13 @@ def state_snapshot(org):
     user_view = next((v for (o, a, v) in beliefs
                       if (o, a) == ("self", "described_as")), None)
     memory = getattr(org.store, "memory", [])
-    goal = (org.store.active_goal() or {}).get("text")
+    goal_dict = org.store.active_goal() or {}
+    goal = goal_dict.get("text")
+    goal_progress = goals.goal_progress(org.store)
+    goal_strategy = goal_dict.get("strategy")
     skill_names = []
     skill_lines = []
+    relevant_skills = []
     skill_store = getattr(org, "skills", None)
     if skill_store is not None:
         skill_names = [s.name for s in skill_store.list()]
@@ -129,9 +134,18 @@ def state_snapshot(org):
             ([goal] if goal else [])
             + [t for _r, t in org.store.chat_log[-4:]]
             + user_facts)
-        for s in skill_store.relevant(context, limit=3):
-            skill_store.record_use(s.name, cycle=org.store.cycle)
-            skill_lines.append(f"{s.name} (when {s.when}): {s.how}")
+        relevant_skills = skill_store.relevant(context, limit=3)
+        for s in relevant_skills:
+            skill_lines.append(
+                f"{s.name} (effectiveness {s.effectiveness:.0%}, "
+                f"used {s.uses}x): {s.how}"
+            )
+    self_model = [
+        learning.describe(b) for b in beliefs
+        if b[0] == "self" and b[1] in ("insight", "tends_to", "poor_at")
+    ]
+    attention_rationale = getattr(org.window, "rationale", None)
+    surprises = org.store.activity.get("surprises", [])[-3:]
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -150,13 +164,19 @@ def state_snapshot(org):
                     for (obj, attr, val), conf in top_beliefs],
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
+        "attention_rationale": attention_rationale,
         "clock": clock,
         "host": host,
         "user_facts": user_facts,
         "user_view": user_view,
         "goal": goal,
+        "goal_progress": goal_progress,
+        "goal_strategy": goal_strategy,
         "skill_names": skill_names,
         "skills": skill_lines,
+        "relevant_skills": relevant_skills,
+        "self_model": self_model,
+        "surprises": surprises,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
         "asked": [text for role, text in org.store.chat_log
                   if role == "org" and text.strip().endswith("?")][-3:],
@@ -464,8 +484,23 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     if snapshot.get("memory"):
         lines.append("you remember:")
         lines.extend(f"- {m}" for m in snapshot["memory"])
+    if snapshot.get("goal_progress"):
+        lines.append(snapshot["goal_progress"])
     if snapshot.get("goal"):
         lines.append(f"what you are trying to do: {snapshot['goal']}")
+    if snapshot.get("goal_strategy"):
+        lines.append(snapshot["goal_strategy"])
+    if snapshot.get("attention_rationale"):
+        lines.append(f"where your attention is: {snapshot['attention_rationale']}")
+    if snapshot.get("self_model"):
+        lines.append("what you know about yourself:")
+        lines.extend(f"- {m}" for m in snapshot["self_model"])
+    if snapshot.get("surprises"):
+        lines.append("recent surprises (things you thought were true but were not):")
+        lines.extend(
+            f"- cycle {s['cycle']}: {s['old']} -> {s['new']}"
+            for s in snapshot["surprises"]
+        )
     if snapshot.get("skill_names"):
         lines.append("skills you already have: "
                      + ", ".join(snapshot["skill_names"]))
@@ -828,6 +863,13 @@ def reflect(org, model=None, timeout=TIMEOUT, rng=None):
     store.save(Skill(name=result["name"], when=result["when"],
                      how=result["how"], created_cycle=cycle,
                      updated_cycle=cycle))
+    if hasattr(org, "record_self_model"):
+        if result["action"] == "patched":
+            org.record_self_model(
+                f"I refine my skill {result['name']} when {result['when']}")
+        else:
+            org.record_self_model(
+                f"I tend to {result['name']} when {result['when']}")
     return result
 
 
