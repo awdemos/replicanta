@@ -376,3 +376,37 @@ def test_respond_prompt_carries_a_seed(org, monkeypatch):
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     respond(org, "hello there")
     assert "what is most alive in you right now" in captured["prompt"]
+
+
+# -- self-talk continuity ------------------------------------------------------
+
+
+def test_last_self_exchange_extracts_latest_pair(org):
+    org.store.record_chat("org", "what do I believe?")
+    org.store.record_chat("org", "I believe in fur.")
+    org.store.record_chat("user", "hello")
+    snap = state_snapshot(org)
+    assert snap["last_exchange"] == ("what do I believe?", "I believe in fur.")
+
+
+def test_last_self_exchange_none_without_history(org):
+    assert state_snapshot(org)["last_exchange"] is None
+
+
+def test_last_self_exchange_none_for_dangling_question(org):
+    org.store.record_chat("org", "what do I believe?")
+    assert state_snapshot(org)["last_exchange"] is None
+
+
+def test_self_ask_prompt_continues_the_conversation(org, monkeypatch):
+    org.store.record_chat("org", "what do I believe?")
+    org.store.record_chat("org", "I believe in fur.")
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    narration.self_ask(org)
+    assert "Your ongoing conversation with yourself" in captured["prompt"]
+    assert "what do I believe?" in captured["prompt"]
+    assert "I believe in fur." in captured["prompt"]
+    assert "follows naturally" in captured["prompt"]

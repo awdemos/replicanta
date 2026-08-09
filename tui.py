@@ -319,7 +319,8 @@ class OrganismApp(App):
 
     def _set_self_answer(self, answer):
         self.org.store.record_chat("org", answer)
-        self._append_log(f"self: {answer}", STYLE_SELF)
+        # nested under its question so the exchange reads as a dialogue
+        self._append_log(f"  ↳ {answer}", STYLE_SELF)
         self.refresh_status()
 
     @work(thread=True)

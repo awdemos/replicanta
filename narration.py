@@ -124,9 +124,30 @@ def state_snapshot(org):
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
         "asked": [text for role, text in org.store.chat_log
                   if role == "org" and text.strip().endswith("?")][-3:],
+        "last_exchange": _last_self_exchange(org.store.chat_log),
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
     }
+
+
+def _last_self_exchange(chat_log):
+    """The most recent self-talk (question, answer) pair from the chat log,
+    or None. Feeds continuity: the next self-question follows from it, so
+    successive cycles read as one ongoing inner conversation."""
+    question = None
+    for role, text in reversed(chat_log):
+        if role != "org":
+            continue
+        if question is None:
+            if text.strip().endswith("?"):
+                continue  # a question with no answer after it
+            question_answer = text
+            question = "<pending>"
+        elif question == "<pending>":
+            if text.strip().endswith("?"):
+                return (text, question_answer)
+            return None
+    return None
 
 
 def _seed_for(snapshot, rng):
@@ -389,6 +410,18 @@ def build_prompt(snapshot, user_message=None, self_ask=False,
             lines.append("you already asked yourself these — "
                          "do not repeat them:")
             lines.extend(f"- {q}" for q in snapshot["asked"])
+        if snapshot.get("last_exchange"):
+            q, a = snapshot["last_exchange"]
+            lines += [
+                "",
+                "Your ongoing conversation with yourself, so far:",
+                f"- you asked: {q}",
+                f"- you answered: {a}",
+                "Ask your next question so it follows naturally from that",
+                "exchange — a real continuation, one thread of thought",
+                "leading to the next (or gently start a new thread if the",
+                "last one feels finished).",
+            ]
     elif self_question:
         lines += [
             f"You asked yourself: {self_question}",
