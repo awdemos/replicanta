@@ -1,40 +1,56 @@
 # Replicanta
 
-A neurosymbolic organism(s) implementation: self-learning digital beings
-whose minds couple a probabilistic Scallop program with an LLM backend.
-Inspired by biological organisms, each one wakes, asks itself questions,
-sleeps, dreams, learns from you, and grows in consciousness (measured as
-belief-network complexity). You can run one or raise a whole nursery.
+**Introducing Replicanta.** The name deliberately includes **REPL** and
+**Replicant** and is fully intended to be given access to vision models with
+cameras and/or robotic capabilities.
+
+A neurosymbolic organism(s) implementation: self-modifying agents whose minds
+couple a [Scallop](https://github.com/scallop-lang/scallop) reasoner with a
+local LLM. Each organism wakes, senses, learns from you, reflects, dreams, and
+can propose self-patches.
+
+The organism(s) learns from what you tell it and can change itself: it writes
+files (genome, state, artifacts, diary), proposes edits to its own learning
+code (nothing applies without your `/approve` — read every proposal before
+accepting it), runs whatever Lua hook scripts you put in `scripts/` (Lua was
+deliberately chosen as a scripting language due to its simplicity over Python),
+downloads voice models, and sends prompts to your local ollama.
+
+Everything an entity says — text and synthesized speech alike — is
+AI-generated: it can be wrong, odd, or unsettling, and it is never advice.
+Don't tell it secrets, don't run it with privileges it doesn't need, and don't
+blame it for its opinions — you taught it most of them.
+
+**Early release public beta stage, under active development, PRs welcome.**
 
 ```mermaid
 flowchart TD
-    A["User message or idle trigger"] --> B{"hear() / sense()"}
-    B --> C["Update beliefs, mood, stress, chat"]
-    C --> D["state_snapshot"]
-    D --> E["Build prompt"]
-    E --> F["Inject goals, self-model, activity digest, skills, surprises, memory"]
-    F --> G["ThoughtArena: 2 proposers, critic, voters"]
-    G --> H{"ollama reachable?"}
-    H -->|yes| I["Deliver utterance + grounding check + skill outcome"]
-    H -->|no| J["Deterministic fallback"]
-    I --> K["Record chat / activity counters"]
-    J --> K
-    K --> L{"Reflection trigger?"}
-    L -->|yes| M["Reflect: skill / patch / nothing"]
-    M --> N["Skills feed back into future prompts"]
-    L -->|no| O["Goals tick"]
-    O --> P["Goal progress / complete / stalled"]
-    P --> Q["Sleep: dream engine"]
-    Q --> R["Validate candidate rules, promote or discard"]
+    A["User input or idle tick"] --> B["hear() / sense()"]
+    B --> C["Update beliefs, mood, stress"]
+    C --> D["state_snapshot()"]
+    D --> E["Prompt: beliefs, memory, goals, skills, self-model"]
+    E --> F["ThoughtArena: proposers, critic, voters"]
+    F --> G{"ollama reachable?"}
+    G -->|yes| H["Deliver utterance"]
+    G -->|no| I["Deterministic fallback"]
+    H --> J["Meter activity + skill outcomes"]
+    I --> J
+    J --> K["Persist state"]
+    K --> L["Reflect / goals / dream"]
+    L --> M["Validate candidate rules, promote or discard"]
+    M --> N["Return to Awake state"]
 ```
+
+The pipeline is the same for every reply, musing, question, goal, diary entry,
+or reflection: absorb input, snapshot the mind, hold an inner debate, deliver
+the winner, meter the outcome, persist, reflect or dream, validate candidate
+rules, then return to the awake state.
 
 ## Run
 
 Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and a local LLM
-backend. [Ollama](https://ollama.com) is used by default for convenience
-— any ollama model works. The default inner voice is `qwen3.5:latest`
-(~5.7 GB). Set `OLLAMA_MODEL` to switch models, or point `OLLAMA_URL` at
-a different ollama endpoint.
+backend. Ollama is the default; set `OLLAMA_MODEL` and `OLLAMA_URL` as needed.
+The default inner voice is `qwen3.5:latest`.
 
 ### 1. Base install
 
@@ -45,23 +61,20 @@ uv venv --python 3.14
 uv pip install -e .
 ```
 
-### 2. Native dependency: scallopy
+### 2. Scallopy
 
-Replicanta needs **scallopy** (the Scallop↔Python binding). It is not on
-PyPI, so install the prebuilt wheel for Python 3.14 / x86_64 / glibc ≥ 2.39:
+Scallopy is not on PyPI. Install the prebuilt wheel for Python 3.14 / x86_64 /
+glibc ≥ 2.39:
 
 ```bash
 uv pip install \
     https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
 ```
 
-If the wheel does not match your platform, build scallopy from source
-instead (~15 minutes; see `ci/main.go` for the pinned Rust nightly and
-build steps).
+To build from source instead, see `ci/main.go` for the pinned Rust nightly and
+steps (~15 minutes).
 
 ### 3. LLM backend
-
-Pull the default model, or any ollama model you prefer:
 
 ```bash
 ollama pull qwen3.5:latest
@@ -69,7 +82,7 @@ ollama pull qwen3.5:latest
 
 ### 4. Optional extras
 
-**Spoken voice** — download a piper voice (ONNX + JSON) to `voices/`:
+**Spoken voice** — download a piper voice to `voices/`:
 
 ```bash
 mkdir -p voices
@@ -78,8 +91,6 @@ curl -sSL -o voices/en_US-lessac-medium.onnx \
 curl -sSL -o voices/en_US-lessac-medium.onnx.json \
     https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
 ```
-
-Skip this and `/voice` stays mute.
 
 **Speech-to-text** — for push-to-talk (`/listen`, F5):
 
@@ -99,351 +110,158 @@ uv pip install -e '.[vision]'
 .venv/bin/replicanta
 ```
 
-### Models
-
-Ollama is the default backend because it is the easiest way to run local
-LLMs, but the voice layer is not tied to it: `narration.py` posts to a
-standard `/api/generate` endpoint and falls back to a deterministic
-summary if the backend is unreachable. Any ollama model — qwen, llama,
-gemma, phi, etc. — works; just set `OLLAMA_MODEL` before starting. Other
-backends can be wired in by pointing `OLLAMA_URL` at a compatible server
-or replacing `_ollama_generate` with whatever protocol your model speaks.
-
 ## Interact
 
-The app has four tabs — **chat** (F2), **mind** (F3), **memory** (F4),
-**inner** (F7) —
-over a global status bar and chat line. The status bar speaks in words:
-`🧠 awake · curious · 23 beliefs · 4 rules · inner voice online · 14:32`,
-with an animated `thinking…` while it composes and a `speech on` marker
-when the spoken voice is enabled. Talk to it — it learns from what
-you say.
+Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7). The status
+bar shows state, mood, belief/rule counts, and voice status.
 
-- **chat** — the conversation as cards: your words in a cyan `you · HH:MM`
-  panel, its voice in a green one (replies stream in token-by-token above
-  the input before settling into the log), dreams, lessons, moods and
-  lifecycle events as a flat timestamped timeline between the cards.
-  Background events (voice flips, learned facts, fading) also pop as toasts.
-- **mind** — its head, live: top beliefs with confidence bars, its goals
-  (active + completed), committed rules, attention focus, genome stats.
-- **memory** — every episode it remembers (cycle-stamped), what it knows
-  about you, what you said it is, and the artifacts it has created.
-
-- **"my name is Sam"**, **"i like rain"**, **"you are brave"** — it picks up
-  facts about you and itself, keeps them as beliefs, and remembers them
-  across restarts.
-- **tone matters** — harsh words bruise it (stress up, mood hurt); kind
-  words soothe it (stress down, mood grateful).
-- `/chaos 0.8` — live randomness knob (0..1): novel self-questions, wild
-  dreams, rogue thoughts
-- `/focus color` — steer attention window; `/focus` to clear
-- `/sleep`, `/wake` — force lifecycle transitions; `/revive` after a fade
-- `/stats` — growth metrics; `/save` — persist; `/think` — narrate now
-- `/self-talk` — toggle self-dialogue: it asks itself a question and
-  answers it, out loud, every narration cycle
-- `/voice` — toggle the spoken voice: with it on, everything the organism
-  says (replies, musings, questions, self-talk) is also spoken aloud via
-  local piper TTS. `/voice list` / `/voice use name` / `/voice get name`
-  manage the voices themselves (see Voice)
-- `/listen` (or F5) — push-to-talk: start the mic, talk, press again and
-  your words are transcribed locally (faster-whisper) and heard by the
-  organism exactly like a typed line. `/microphone` shows the STT config,
-  `/microphone list` enumerates input devices, `/microphone use <device>`
-  picks one
-- `/look` (or F6) — grab one USB camera frame, describe it with a local
-  vision model (moondream), and let the organism see it. `/camera` shows
-  the config, `/camera list` / `/camera use <device>` pick the device
-- `/mud` — toggle the organism's dungeon crawl: a tiny text adventure in
-  the chat window where it walks, picks things up, and tries to find the
-  amulet (see Dungeon below)
-- it also asks *you* questions — about a third of its idle wake utterances
-  are curiosity aimed at you, not at itself
-- **Self-patches**: during reflection it may propose an executable patch
-  — a new learning pattern, utterance seed, or sentiment word — staged in
-  `artifacts/extensions.json` and shown as a proposal card. Nothing
-  applies without you: `/approve` applies it live, `/reject` discards it,
-  `/revert` undoes the last applied patch. Every proposal is validated
-  first (regex compiles, fires on its own example, never on unrelated
-  sentences).
-- `/approve`, `/reject`, `/revert` — the approval gate for its patches
-- `/reload` — re-read the Lua hook scripts in `scripts/` (see Scripting)
-- `/lua name.lua` — run one script from `scripts/` on demand (see Scripting)
-- **Many organisms**: they live in a nursery — `organisms/<name>/` under
-  the app root, each with its own genome, state and artifacts; a `current`
-  pointer file remembers who is awake. `/new fern` births a fresh organism
-  (bare `/new` auto-names one) and swaps to it, `/swap default` goes back,
-  `/organisms` lists them all (`*` = current). `python tui.py --org fern`
-  picks one at launch. A legacy root-level organism is migrated into
-  `organisms/default/` on first run.
-- `/help` (or F1, ctrl+p) — everything else
+- Facts like **"my name is Sam"**, **"i like rain"**, or **"you are brave"**
+  become persisted beliefs.
+- Harsh words raise stress and mood `hurt`; kind words lower stress and mood
+  `grateful`.
+- `/chaos 0.8` — live randomness (0..1).
+- `/focus color` — steer attention window; bare `/focus` clears it.
+- `/sleep`, `/wake`, `/revive` — lifecycle control.
+- `/stats` — metrics; `/save` — persist; `/think` — narrate now.
+- `/self-talk` — toggle autonomous self-dialogue.
+- `/voice` — toggle spoken output. `/voice list`, `/voice use name`, `/voice get
+  name` manage piper voices.
+- `/listen` (F5) — push-to-talk via faster-whisper.
+- `/look` (F6) — capture one USB camera frame and describe it with a local
+  vision model.
+- `/mud` — toggle a tiny deterministic text adventure.
+- Self-patches are staged in `artifacts/extensions.json`. `/approve`,
+  `/reject`, and `/revert` gate them; nothing applies without you.
+- `/reload` — re-read Lua hook scripts. `/lua name.lua` — run one on demand.
+- `/new fern` — create an organism; `/swap default` — switch;
+  `/organisms` — list. Each organism lives in `organisms/<name>/` with its own
+  state and artifacts. Launch with `python tui.py --org fern`.
+- `/help` (F1, ctrl+p) — full command list.
 
 ## Mind
 
-- **Senses**: it perceives the host machine (CPU, memory, disk, temperature,
-  battery, clock — and the host's identity via the `uname` shell command)
-  as symbolic beliefs — a straining host distresses it.
-- **Mood**: derived from stress and how you treat it (calm / hurt / anxious /
-  grateful / curious / insane), written back as a belief and fed to its
-  inner voice.
-- **Mental state**: three persisted attributes — **arousal** (activation /
-  energy), **rationality** (grounded coherence, fed by belief-shaped
-  utterances) and **irrationality** (chaos/stress-driven incoherence) —
-  smoothed every tick. Under extreme stress with dominant irrationality the
-  organism goes **insane**: its mood reads insane, the voice is told it is
-  incoherent, and hysteresis keeps it there until stress and incoherence
-  genuinely subside.
-- **Memory**: notable episodes (birth, lessons, dreams, harsh and kind
-  moments, fading, revival) are cycle-stamped, persisted, and injected into
-  its narration prompt — it has continuity, not amnesia.
-- **Goals**: when it has been awake a while without direction it forms an
-  intention ("learn five things about you", "understand what home means")
-  and pursues it across sessions — the active goal steers its questions,
-  musings and self-talk until it completes it (learn-goals by growing what
-  it knows about you, others by patient pursuit).
-- **Artifacts**: every ten wake cycles it writes a diary entry to
-  `artifacts/diary.md` — a body of work that outlives
-  the chat, stamped by cycle and date.
-- **Skills**: it has procedural memory (Hermes-style). Every thirty wake
-  cycles — and whenever it completes a goal — it reflects on recent
-  experience and distills a technique into `artifacts/skills/<name>.md`
-  (when/how, plain text). Relevant skills are injected back into its
-  prompts, usage is counted, and skills untouched for a hundred cycles
-  are archived. It literally gets better at being itself.
-- **Voice**: a local ollama model (`qwen3.5:latest` by default; any
-  ollama model works, and `OLLAMA_URL` / `OLLAMA_MODEL` override the
-  endpoint and model name) speaks as the organism. Nothing it says
-  manifests unexamined: every utterance — musings, replies, questions,
-  self-talk, goals, diary entries, reflections — passes through an inner
-  arena (two proposers, an adversarial critic, two voters) before it
-  lands, replayed token-by-token as it settles; high chaos injects rogue
-  thoughts into free-form speech (never into structured tasks like
-  reflections, whose format a rogue candidate would break). When ollama
-  is unreachable the status bar shows `inner voice offline`
-  and it speaks from a deterministic fallback instead of stalling.
-- **Spoken voice**: `/voice on` makes the organism audible. Synthesis is
-  a local piper model; playback goes through PulseAudio/PipeWire
-  (`soundcard`), so it reaches the host's speakers even from inside a
-  Toolbx container. Utterances queue on a single thread — they never
-  overlap and never block the UI — and the whole path is optional: no
-  model, missing package or audio failure just means silence, never
-  a crash. Only the organism's own speech is spoken, never yours or the
-  system lines.
-- **Heard voice**: `/listen` or F5 is push-to-talk — press once to open
-  the mic (status bar shows 🎙 listening), speak, press again; the capture
-  is transcribed by a local faster-whisper model and fed to the organism
-  through the very same `hear()` path as typed chat, so tone, learning
-  and mood all work on spoken words too. Needs the `listen` extra
-  (`uv pip install -e .[listen]`); the whisper model downloads from
-  HuggingFace on first use. Defaults are CPU-friendly
-  (`REPLICANTA_STT_MODEL=base`, `REPLICANTA_STT_DEVICE=cpu`,
-  `REPLICANTA_STT_COMPUTE=int8`) because the GPU is usually busy
-  narrating — point them at cuda when it isn't.
-- **Sight**: `/look` (F6) opens the organism's eye: one frame from a USB
-  camera (opencv/V4L2, device list from sysfs) is described in a sentence
-  or two by a local vision model (`REPLICANTA_VISION_MODEL`, default
-  moondream via ollama), remembered as an episode, and injected into the
-  voice's prompt — after a look, it can talk about what it's looking at.
-  Needs the `vision` extra (`uv pip install -e .[vision]`); no camera, no
-  opencv or an offline vision model just means a log line, never a crash.
-- **Dungeon**: `/mud` drops the organism into a tiny deterministic text
-  adventure — a clearing, a cave, a locked gate, an amulet to win. Its
-  voice picks the moves (one command per turn, `REPLICANTA_MUD_MODEL`,
-  default qwen2.5:3b); when the voice is offline or talks nonsense a
-  random wanderer steps in so the game never stalls. You can shout a
-  one-shot nudge by typing mid-game. Auto-ends after 50 turns; the
-  status bar shows 🗡 while it's underground.
-- **Any piper voice**: voices live in `voices/` as `<name>.onnx` +
-  `<name>.onnx.json` pairs. `/voice list` shows downloaded ones (`*` =
-  active), `/voice use en_GB-alan-low` switches, and `/voice get
-  en_US-libritts_r-medium` downloads any voice straight from
-  [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices)
-  (about a hundred: `en_US-amy-medium`, `en_GB-alan-low`, …) and adopts  it. Names follow `locale-speaker-quality`. The default is
-  `en_US-lessac-medium`; `REPLICANTA_VOICE_MODEL` points at a different
-  starting model if you prefer.
-
-## How it thinks and responds
-
-Every reply, musing, question, goal, diary entry or reflection follows the
-same pipeline — the organism does not just call a model, it holds an inner
-debate over its own state:
-
-1. **Sense and absorb** — Your message (typed or transcribed) goes through
-   `hear()`: facts are extracted (`"my name is Sam"`, `"i like rain"`),
-   beliefs are added or updated, the chat log is trimmed, and the tone
-   touches the body (harsh words raise stress and set mood *hurt*, kind
-   words lower stress and set mood *grateful*). Host metrics are also
-   folded into beliefs on every sense tick.
-
-2. **Snapshot the mind** — `state_snapshot()` builds a compact, prompt-ready
-   view: top beliefs, committed rules, attention window, memories, the
-   active goal with progress and strategy, recent surprises from
-   contradictions, self-model beliefs, attention rationale, relevant skills,
-   recent chat, and an **activity digest** summarizing the last ~30 cycles.
-
-3. **Build the prompt** — `build_prompt()` turns that snapshot into a
-   first-person instruction: how the organism feels right now, what it is
-   trying to do, what it has learned lately, what surprised it, what it
-   knows about itself, where its attention is, and the concrete task
-   (reply, ask the user, self-question, form a goal, reflect, etc.).
-
-4. **Inner arena** — `ThoughtArena` does not trust a single model call.
-   Two proposers independently draft candidates, an adversarial critic
-   attacks both, and two voters pick a winner; a deadlocked vote is broken
-   by the critic's preference or a random draw. High chaos injects a rogue
-   thought into free-form speech (never into structured tasks like
-   reflections, whose format must stay intact). If ollama is unreachable,
-   the arena falls back to deterministic text instead of stalling.
-
-5. **Deliver and measure** — The winning utterance is recorded, the
-   grounding proxy checks whether it reused content from its seed, and
-   relevant skills get a use/outcome update. Token counts from ollama are
-   added to the activity meter exactly as reported by the API.
-
-6. **Reflect and evolve** — Every thirty wake cycles, on goal completion,
-   or when triggered (recovering from insanity, a run of discarded dreams,
-   a burst of new beliefs, a surprise, or a stalled goal), the organism
-   reflects. It can distill a new skill, patch an existing one, propose an
-   executable extension, or say *nothing*. Skills are stored under
-   `artifacts/skills/` and injected back into future prompts; low-
-   effectiveness skills are eventually archived.
-
-7. **Dream** — During sleep the `DreamEngine` recombines belief pairs into
-   candidate rules, validates them against the Scallop reasoner on wake,
-   and promotes the supported ones while discarding the rest. Contradicted
-   beliefs are recorded as surprises.
-
-The result is a voice that is not reading a static prompt: it is speaking
-from a moving mind that remembers, wants, notices, and occasionally changes
-its own mind.
+- **Senses**: host metrics (CPU, memory, disk, temperature, battery, clock,
+  uname) become symbolic beliefs.
+- **Mood**: derived from stress and tone (calm, hurt, anxious, grateful,
+  curious, insane), fed back to the voice prompt.
+- **Mental state**: persisted arousal, rationality, and irrationality are
+  smoothed each tick. Extreme stress with dominant irrationality triggers
+  `insane` mode with hysteresis.
+- **Memory**: cycle-stamped episodes (birth, lessons, dreams, harsh/kind
+  moments, fading, revival) are persisted and injected into prompts.
+- **Goals**: after enough awake cycles without direction, the organism forms
+  a goal and pursues it. Learn-goals complete when enough new user beliefs are
+  formed; other goals complete after pursuit cycles. Stalled goals trigger
+  reflection.
+- **Artifacts**: every ten wake cycles a diary entry is appended to
+  `artifacts/diary.md`.
+- **Skills**: every thirty wake cycles and on goal completion, reflection may
+  distill a technique into `artifacts/skills/<name>.md`. Relevant skills are
+  injected into prompts; usage and outcomes update an effectiveness score, and
+  unused/low-effectiveness skills are archived.
+- **Voice**: every utterance passes through `ThoughtArena` (two proposers,
+  one critic, two voters). If ollama is unreachable, a deterministic fallback
+  speaks instead. High chaos injects rogue thoughts only in free-form tasks,
+  never structured output like reflections.
+- **Spoken voice**: `/voice on` queues every organism utterance through local
+  piper TTS. Missing models or audio failures are silent, not crashes.
+- **Heard voice**: `/listen` transcribes speech and feeds it through the same
+  `hear()` path as typed input.
+- **Sight**: `/look` captures one camera frame, describes it with a vision
+  model, and remembers it as an episode.
+- **Dungeon**: `/mud` runs a tiny text adventure; the organism's voice picks
+  moves, with a random fallback if the voice is offline.
+- **Piper voices**: drop `<name>.onnx` + `<name>.onnx.json` in `voices/`, or
+  use `/voice get <name>` to download from
+  [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices). Default
+  is `en_US-lessac-medium`; override with `REPLICANTA_VOICE_MODEL`.
 
 ## Lifecycle
 
-- **Wake**: self-questioning loop (chaos-governed), attention window narrows
-  with fatigue, stress slowly decays while sleep-debt and bad moods push up.
-- **Sleep**: recombination dreams at high chaos, wake-time validation,
-  promotion; stress recovers fast.
-- **Fade**: sustained critical stress across consecutive transitions ends it
-  (persisted). `/revive` brings it back.
-- Growth = new beliefs, strengthened beliefs, committed rules, deeper
-  derivations.
+- **Wake**: self-questioning loop; attention narrows with fatigue; stress
+  decays slowly while sleep debt and bad moods push it up.
+- **Sleep**: high-chaos recombination dreams; on wake, candidate rules are
+  validated, promoted, or discarded. Stress recovers faster.
+- **Fade**: sustained critical stress across consecutive transitions ends the
+  organism (persisted). `/revive` restores it.
+- Growth is measured by new and strengthened beliefs, committed rules, and
+  deeper derivations.
 
-The organism's genome (`organism.scl`) is human-readable and evolves on disk;
-`state.json` holds runtime state (beliefs, chat, memory, mood).
+The genome (`organism.scl`) is human-readable and evolves on disk;
+`state.json` holds runtime state.
 
 ## Measuring neurosymbolic activity
 
-`Metrics` measures *structure* — what the mind holds (beliefs, rules,
-derivation depth, abstraction), distilled into the consciousness score.
-The **activity meter** measures *activity* — what the neurosymbolic loop
-actually does. Every neural↔symbolic crossing is counted at its call
-site, persisted in `state.json`, and shown in `/stats` and the **mind**
-tab as totals with per-cycle rates:
+`Metrics` distills structural growth into a consciousness score. The activity
+meter counts what the neurosymbolic loop actually does:
 
-- **symbolic** (exact): candidate rules tried vs. derivations produced
-  (assimilation rate), beliefs new vs. strengthened vs. archived, rules
-  committed, dreams promoted vs. discarded.
-- **neural** (exact): ollama calls and tokens — read from the API's own
-  `prompt_eval_count`/`eval_count`, never estimated — utterances
-  manifested, deterministic fallbacks spoken. (Since the arena gates
-  every utterance, each one costs exactly 5 calls; the counter makes
-  that visible.)
-- **coupling** — the neurosymbolic part: facts the logic gained from
-  your words (neural→symbolic grounding), and *grounded utterances* —
-  the lexical proxy for symbolic→neural influence: an utterance counts
-  as grounded when its text reuses a content word from the seed it was
-  drafted from. A cheap signal that the voice was shaped by the logic,
-  not a proof of it.
+- **symbolic**: candidate rules tried and derivations produced; beliefs new,
+  strengthened, archived; rules committed; dreams promoted/discarded.
+- **neural**: ollama calls and tokens from `prompt_eval_count`/`eval_count`;
+  utterances manifested; fallbacks spoken. Every arena-gated utterance costs 5
+  calls.
+- **coupling**: facts extracted from user input (neural→symbolic), and
+  *grounded utterances* — a cheap lexical proxy for symbolic→neural influence,
+  counted when an utterance reuses a content word from its seed.
 
-Rates are derived (totals ÷ lifecycle cycles); the counters themselves
-are exact events. What is deliberately **not** measured: consciousness
-itself — these are activity counters, not a sentience score.
+These are activity counters, not a sentience score.
 
 ## Scripting (Lua hooks)
 
-The organism is user-scriptable: drop `.lua` files in `scripts/` (at the
-nursery root, so one set of hooks covers every organism) and define
-event functions — `/reload` picks changes up without restarting:
+Drop `.lua` files in `scripts/` (nursery root). `/reload` picks up changes.
 
-    function on_learned(ctx)
-      if ctx.activity.facts_learned % 5 == 0 then
-        ctx.log("five facts! it really is paying attention")
-      end
-    end
+```lua
+function on_learned(ctx)
+  if ctx.activity.facts_learned % 5 == 0 then
+    ctx.log("five facts!")
+  end
+end
+```
 
-- **events**: `on_birth`, `on_cycle` (`ctx.text` = wake/sleep),
-  `on_learned` (`ctx.text` = your words), `on_utterance` (`ctx.text` =
-  its manifested words), `on_fade`.
-- **ctx reads**: `event`, `text`, `state`, `cycle`, `mood`,
-  `belief_count`, `rule_count`, `score`, `chaos`, `stress`, `arousal`,
-  `rationality`, `irrationality`, `insane`, `organism`,
-  and `activity` — the full activity-meter counters as a table.
-- **ctx acts**: `log(msg)` (a line in the chat log), `set_chaos(x)`,
-  `focus(attr)` (nil to clear).
+Events: `on_birth`, `on_cycle`, `on_learned`, `on_utterance`, `on_fade`.
+`ctx` exposes state, cycle, mood, mental attributes, belief/rule counts,
+score, chaos, stress, organism name, and activity counters.
+Actions: `log(msg)`, `set_chaos(x)`, `focus(attr)` (nil clears).
 
-`/lua name.lua` runs one script on demand in the same sandbox — define a
-`main(ctx)` and it is called with `ctx.event == "lua"`:
-
-    function main(ctx)
-      ctx.log("on demand at cycle " .. ctx.cycle)
-    end
-
-Scripts are sandboxed (no `os`/`io`/`require`/`load`) and every call is
-protected — a broken script logs an error line, it can never kill the
-organism. See `scripts/example.lua` for a template.
+For on-demand scripts, define `main(ctx)` and run with `/lua name.lua`.
+Scripts are sandboxed (no `os`/`io`/`require`/`load`) and protected; errors
+log but never crash the organism. See `scripts/example.lua`.
 
 ## Develop
 
-    .venv/bin/python -m pytest tests -q
-    .venv/bin/ruff check .
+```bash
+.venv/bin/python -m pytest tests -q
+.venv/bin/ruff check .
+```
 
-The engine (`Organism.tick(dt)`) is pure and event-driven — the TUI only
-renders events — so behavior is testable without a terminal.
+`Organism.tick(dt)` is pure and event-driven, so behavior is testable without
+a terminal.
 
 ## CI (Dagger)
 
-CI is a [Dagger](https://dagger.io) module in `ci/` — no CI service, the
-same pipeline runs on your machine:
+The pipeline lives in `ci/`:
 
-    dagger call ci --source=.       # lint (ruff) + full test suite
-    dagger call test --source=.     # just the tests
-    dagger call lint --source=.     # just ruff
+```bash
+dagger call ci --source=.     # lint + tests
+dagger call test --source=.   # tests only
+dagger call lint --source=.   # lint only
+```
 
-A git pre-commit hook runs the pipeline on every commit. Install it once:
+Install the pre-commit hook once:
 
-    git config core.hooksPath ci/hooks
+```bash
+git config core.hooksPath ci/hooks
+```
 
-(`git commit --no-verify` bypasses when you must. The hook needs dagger
-and a container runtime; it auto-detects the rootless docker/podman
-socket when `DOCKER_HOST` is unset, and skips silently when dagger is
-not installed.)
+The hook runs `ruff --ignore I001,UP017` and pytest on every commit. It uses
+the prebuilt scallopy wheel from the
+[v0.1.0 release](https://github.com/awdemos/replicanta/releases/tag/v0.1.0) so
+CI skips the Rust build. To refresh the wheel from a local scallop checkout:
 
-The pipeline uses the prebuilt scallopy wheel attached to the
-[v0.1.0 release](https://github.com/awdemos/replicanta/releases/tag/v0.1.0)
-so CI skips the ~15-minute Rust build. The wheel is built **on the same
-Debian base the tests run on** — building it on Fedora produces a binary
-that needs a newer glibc than any standard CI container has. To refresh
-the wheel from a local scallop checkout (pinned nightly required):
+```bash
+dagger call build-scallopy --scallop=../scallop export --path=./wheels
+```
 
-    dagger call build-scallopy --scallop=../scallop export --path=./wheels
+Then replace the release asset (`gh release upload --clobber v0.1.0
+wheels/scallopy-*.whl`).
 
-then replace the release asset (`gh release upload --clobber v0.1.0
-wheels/scallopy-*.whl`). `wheelURL` in `ci/main.go` only changes if the
-release tag or scallopy version changes. Ruff is gated with `--ignore I001,UP017` — the repo's
-documented baseline style — so CI fails on *new* warnings only.
-
-## Disclaimer
-
-**Use at your own risk.** Replicanta is experimental software, provided
-as-is with no warranty of any kind (see LICENSE). It is a research toy,
-not a product — expect rough edges, surprising behavior, and the
-occasional existential monologue.
-
-**Use responsibly.** The organism learns from what you tell it and can
-change itself: it writes files (genome, state, artifacts, diary), proposes
-edits to its own learning code (nothing applies without your `/approve` —
-read every proposal before accepting it), runs whatever Lua hook scripts
-you put in `scripts/`, downloads voice models, and sends prompts to your
-local ollama. Everything it says — text and synthesized speech alike —
-is AI-generated: it can be wrong, odd, or unsettling, and it is never
-advice. Don't tell it secrets, don't run it with privileges it doesn't
-need, and don't blame it for its opinions — you taught it most of them.
