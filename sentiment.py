@@ -2,6 +2,8 @@
 body. Harsh words bruise (stress up); kind words soothe (stress down).
 No UI or engine imports — shared by the core (organism.hear) and the TUI."""
 
+import extensions
+
 HARSHNESS_CAP = 0.15
 _HARSH_HITS = 0.03
 _HARSH_TERMS = (
@@ -19,14 +21,20 @@ _KIND_TERMS = (
 
 
 def harshness(text):
-    """Score how harsh a user message is, 0.0 (neutral) .. HARSHNESS_CAP."""
+    """Score how harsh a user message is, 0.0 (neutral) .. HARSHNESS_CAP.
+    Terms extend via the tier B extension registry."""
     low = text.lower()
-    hits = sum(1 for term in _HARSH_TERMS if term in low)
+    terms = _HARSH_TERMS + tuple(
+        e["text"] for e in extensions.active_entries("harsh_term"))
+    hits = sum(1 for term in terms if term in low)
     return min(HARSHNESS_CAP, hits * _HARSH_HITS)
 
 
 def kindness(text):
-    """Score how kind a user message is, 0.0 (neutral) .. KINDNESS_CAP."""
+    """Score how kind a user message is, 0.0 (neutral) .. KINDNESS_CAP.
+    Terms extend via the tier B extension registry."""
     low = text.lower()
-    hits = sum(1 for term in _KIND_TERMS if term in low)
+    terms = _KIND_TERMS + tuple(
+        e["text"] for e in extensions.active_entries("kind_term"))
+    hits = sum(1 for term in terms if term in low)
     return min(KINDNESS_CAP, hits * _KIND_HITS)

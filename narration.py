@@ -10,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import extensions
 import learning
 from skills import Skill
 
@@ -191,6 +192,8 @@ def _seed_for(snapshot, rng):
         "a question you would love to ask the user",
         "something that might be true that you cannot verify",
     ]
+    # tier B executable skills: seeds approved by the user
+    pool += [e["text"] for e in extensions.active_entries("seed")]
     return rng.choice(pool)
 
 

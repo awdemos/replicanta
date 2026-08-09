@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from typing import ClassVar
 
+import extensions
 import learning
 import scallopy
 import sentiment
@@ -603,6 +604,7 @@ class Organism:
         # First boot = no state.json yet: the .scl genome is the source of
         # truth, so seed the belief store from the mind before anything runs.
         fresh = not self.store.state_path.exists()
+        extensions.load_global(self.dir_path / "artifacts" / "extensions.json")
         self.store.load()
         self.store.dir_path = self.dir_path
         self.store.scl_path = self.dir_path / "organism.scl"

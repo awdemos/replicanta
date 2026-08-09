@@ -12,6 +12,8 @@ Belief shapes:
 
 import re
 
+import extensions
+
 LEARN_CONF = 0.8
 MAX_PER_MESSAGE = 2
 
@@ -79,6 +81,22 @@ def extract(text):
         if attr is None:
             continue
         fact = ((obj, attr, val), replace)
+        if fact not in facts:
+            facts.append(fact)
+        if len(facts) >= MAX_PER_MESSAGE:
+            break
+    # tier B executable skills: registry patterns approved by the user
+    for entry in extensions.active_entries("pattern"):
+        match = re.search(entry["regex"], text, re.IGNORECASE)
+        if match is None:
+            continue
+        raw = match.group(1) if match.groups() else match.group(0)
+        value = _sanitize(raw)
+        if value is None:
+            continue
+        obj, attr, val = (part.replace("{x}", value)
+                          for part in entry["template"].split(":"))
+        fact = ((obj, attr, val), obj == "self")
         if fact not in facts:
             facts.append(fact)
         if len(facts) >= MAX_PER_MESSAGE:
