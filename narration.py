@@ -14,7 +14,7 @@ import extensions
 import learning
 from skills import Skill
 
-DEFAULT_MODEL = "qwen3:14b"
+DEFAULT_MODEL = "batiai/qwen3.6-27b:q4"
 OLLAMA_URL = os.environ.get(
     "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 180

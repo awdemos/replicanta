@@ -6,21 +6,29 @@ consciousness (measured as belief-network complexity).
 
 ## Run
 
-Requires Python 3.14, a Rust toolchain, and ollama (the inner voice;
-`qwen3:14b` by default). The one native dependency is **scallopy** 0.2.5,
-the Scallop↔Python binding — it is not on PyPI, so build it from the
-companion repo:
+Requires Python 3.14 and ollama (the inner voice; `batiai/qwen3.6-27b:q4`
+by default — ~16GB download, wants ~24GB RAM; `OLLAMA_MODEL` overrides).
 
-    python3.14 -m venv .venv
-    .venv/bin/pip install -e . maturin pytest ruff
-    git clone https://github.com/awdemos/scallop ../scallop
-    RUSTUP_TOOLCHAIN=nightly-2026-05-24 VIRTUAL_ENV=.venv \
-        .venv/bin/maturin build --release --manifest-path ../scallop/etc/scallopy/Cargo.toml
-    .venv/bin/pip install ../scallop/target/wheels/scallopy-*-cp314-*.whl
-    .venv/bin/replicanta
+**Copy-paste install** (agents: this block is for you — run it verbatim):
 
-(the scallopy build needs the pinned nightly above; the PEP 604 fix in
-scallop@master is required — older checkouts will not work.)
+```bash
+git clone https://github.com/awdemos/replicanta
+cd replicanta
+python3.14 -m venv .venv
+.venv/bin/pip install -e . \
+    https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
+ollama pull batiai/qwen3.6-27b:q4
+mkdir -p voices && curl -sSL -o voices/en_US-lessac-medium.onnx \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
+    && curl -sSL -o voices/en_US-lessac-medium.onnx.json \
+    https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+.venv/bin/replicanta
+```
+
+(the wheel above is the one native dependency — **scallopy** 0.2.5, the
+Scallop↔Python binding, not on PyPI — prebuilt as manylinux_2_39 for
+x86_64 cp314, so it runs on any modern distro. The piper voice model is
+optional; skip it and `/voice` simply stays mute.)
 
 ## Interact
 
@@ -101,7 +109,8 @@ you say.
   (when/how, plain text). Relevant skills are injected back into its
   prompts, usage is counted, and skills untouched for a hundred cycles
   are archived. It literally gets better at being itself.
-- **Voice**: a local ollama model (`qwen3:14b` by default; `OLLAMA_URL` /
+- **Voice**: a local ollama model (`batiai/qwen3.6-27b:q4` by default;
+  `OLLAMA_URL` /
   `OLLAMA_MODEL` overridable) speaks as the organism. Nothing it says
   manifests unexamined: every utterance — musings, replies, questions,
   self-talk, goals, diary entries, reflections — passes through an inner
@@ -203,6 +212,29 @@ organism. See `scripts/example.lua` for a template.
 
 The engine (`Organism.tick(dt)`) is pure and event-driven — the TUI only
 renders events — so behavior is testable without a terminal.
+
+## CI (Dagger)
+
+CI is a [Dagger](https://dagger.io) module in `ci/` — the same pipeline
+runs locally and in GitHub Actions:
+
+    dagger call ci --source=.       # lint (ruff) + full test suite
+    dagger call test --source=.     # just the tests
+    dagger call lint --source=.     # just ruff
+
+The pipeline uses the prebuilt scallopy wheel attached to the
+[v0.1.0 release](https://github.com/awdemos/replicanta/releases/tag/v0.1.0)
+so CI skips the ~15-minute Rust build. The wheel is built **on the same
+Debian base the tests run on** — building it on Fedora produces a binary
+that needs a newer glibc than any standard CI container has. To refresh
+the wheel from a local scallop checkout (pinned nightly required):
+
+    dagger call build-scallopy --scallop=../scallop export --path=./wheels
+
+then replace the release asset (`gh release upload --clobber v0.1.0
+wheels/scallopy-*.whl`). `wheelURL` in `ci/main.go` only changes if the
+release tag or scallopy version changes. Ruff is gated with `--ignore I001,UP017` — the repo's
+documented baseline style — so CI fails on *new* warnings only.
 
 ## Disclaimer
 

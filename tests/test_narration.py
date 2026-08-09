@@ -499,8 +499,8 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 # -- voice quality v2: model, think-mode, prompt register --------------------
 
 
-def test_default_model_is_qwen3_14b():
-    assert narration.DEFAULT_MODEL == "qwen3:14b"
+def test_default_model_is_qwen3_6_27b():
+    assert narration.DEFAULT_MODEL == "batiai/qwen3.6-27b:q4"
 
 
 def test_strip_think_removes_block():
