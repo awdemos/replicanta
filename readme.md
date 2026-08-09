@@ -203,3 +203,20 @@ organism. See `scripts/example.lua` for a template.
 
 The engine (`Organism.tick(dt)`) is pure and event-driven — the TUI only
 renders events — so behavior is testable without a terminal.
+
+## Disclaimer
+
+**Use at your own risk.** Replicanta is experimental software, provided
+as-is with no warranty of any kind (see LICENSE). It is a research toy,
+not a product — expect rough edges, surprising behavior, and the
+occasional existential monologue.
+
+**Use responsibly.** The organism learns from what you tell it and can
+change itself: it writes files (genome, state, artifacts, diary), proposes
+edits to its own learning code (nothing applies without your `/approve` —
+read every proposal before accepting it), runs whatever Lua hook scripts
+you put in `scripts/`, downloads voice models, and sends prompts to your
+local ollama. Everything it says — text and synthesized speech alike —
+is AI-generated: it can be wrong, odd, or unsettling, and it is never
+advice. Don't tell it secrets, don't run it with privileges it doesn't
+need, and don't blame it for its opinions — you taught it most of them.
