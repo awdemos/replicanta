@@ -484,65 +484,15 @@ def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
 # -- streaming ---------------------------------------------------------------
 
 
-class _FakeStream:
-    """Stands in for urllib's HTTPResponse on /api/generate stream=true."""
-
-    def __init__(self, lines, error_after=None):
-        self._lines = list(lines)
-        self._error_after = error_after
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def readline(self):
-        if (self._error_after is not None
-                and len(self._lines) <= self._error_after):
-            raise OSError("connection reset")
-        return self._lines.pop(0) if self._lines else b""
-
-
-def test_ollama_stream_yields_tokens(monkeypatch):
-    lines = [
-        json.dumps({"response": "hel", "done": False}).encode() + b"\n",
-        json.dumps({"response": "lo", "done": True}).encode() + b"\n",
-    ]
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda *a, **k: _FakeStream(lines))
+def test_respond_replays_winner_through_on_token(org, monkeypatch):
+    """The debate itself cannot stream; the winning reply is replayed in
+    word chunks so the incremental display keeps working."""
+    monkeypatch.setattr("narration._ollama_generate",
+                        lambda *a, **k: "hi there friend")
     tokens = []
-    text = narration._ollama_stream("p", "m", 1, tokens.append)
-    assert tokens == ["hel", "lo"]
-    assert text == "hello"
-
-
-def test_ollama_stream_midstream_error_raises_with_partial(monkeypatch):
-    lines = [json.dumps({"response": "hel", "done": False}).encode() + b"\n"]
-    monkeypatch.setattr(
-        urllib.request, "urlopen",
-        lambda *a, **k: _FakeStream(lines, error_after=0))
-    with pytest.raises(narration.StreamInterrupted) as err:
-        narration._ollama_stream("p", "m", 1, lambda tok: None)
-    assert err.value.partial == "hel"
-
-
-def test_respond_streams_tokens(org, monkeypatch):
-    def fake_stream(prompt, model, timeout, on_token, temperature=0.95):
-        on_token("hi")
-        on_token(" there")
-        return "hi there"
-    monkeypatch.setattr(narration, "_ollama_stream", fake_stream)
-    tokens = []
-    assert respond(org, "hello", on_token=tokens.append) == "hi there"
-    assert tokens == ["hi", " there"]
-
-
-def test_respond_stream_interrupted_keeps_partial(org, monkeypatch):
-    def broken(prompt, model, timeout, on_token, temperature=0.95):
-        raise narration.StreamInterrupted("half a thou", OSError("reset"))
-    monkeypatch.setattr(narration, "_ollama_stream", broken)
-    assert respond(org, "hello", on_token=lambda tok: None) == "half a thou …"
+    assert respond(org, "hello", on_token=tokens.append) == "hi there friend"
+    assert "".join(tokens) == "hi there friend"
+    assert len(tokens) > 1  # chunked, not one blob
 
 
 # -- voice quality v2: model, think-mode, prompt register --------------------
@@ -584,19 +534,6 @@ def test_ollama_generate_disables_thinking(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     _ollama_generate("prompt", "qwen3:14b", 5)
-    assert b'"think": false' in captured["body"]
-
-
-def test_ollama_stream_disables_thinking(monkeypatch):
-    captured = {}
-
-    def fake_urlopen(req, *a, **k):
-        captured["body"] = req.data
-        return _FakeStream(
-            [json.dumps({"response": "hi", "done": True}).encode() + b"\n"])
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    narration._ollama_stream("prompt", "qwen3:14b", 5, lambda tok: None)
     assert b'"think": false' in captured["body"]
 
 

@@ -614,58 +614,6 @@ def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
     return _strip_think(data.get("response", ""))
 
 
-class StreamInterrupted(Exception):
-    """A streaming generation died after emitting tokens. Carries the
-    partial text so callers can keep it (the voice state is not penalized:
-    ollama was reachable, the connection just dropped)."""
-
-    def __init__(self, partial, cause):
-        super().__init__(str(cause))
-        self.partial = partial
-
-
-def _ollama_stream(prompt, model, timeout, on_token, temperature=0.95):
-    """POST to ollama /api/generate with stream=true, invoking on_token for
-    each piece as it arrives; returns the full text. Raises the usual
-    urllib/OSError family when the request fails before the first token,
-    RuntimeError on an ollama-level error, and StreamInterrupted (carrying
-    the partial text) when the connection dies mid-generation."""
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": True,
-        "think": False,
-        "options": {"num_predict": MAX_TOKENS, "temperature": temperature},
-    }).encode()
-    req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
-        headers={"Content-Type": "application/json"})
-    parts = []
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        while True:
-            try:
-                line = resp.readline()
-            except OSError as exc:
-                if parts:
-                    raise StreamInterrupted("".join(parts), exc) from exc
-                raise
-            if not line:
-                break
-            try:
-                chunk = json.loads(line.decode())
-            except ValueError:
-                continue  # tolerate blank/garbled keep-alive lines
-            if chunk.get("error"):
-                raise RuntimeError(chunk["error"])
-            token = chunk.get("response", "")
-            if token:
-                parts.append(token)
-                on_token(token)
-            if chunk.get("done"):
-                break
-    return _strip_think("".join(parts))
-
-
 def fallback_summary(snapshot):
     if snapshot["state"] == "dead":
         return (f"I faded. I was {snapshot['belief_count']} beliefs and "
@@ -702,33 +650,17 @@ def fallback_respond(snapshot, user_message):
 
 def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
             on_token=None):
-    """First-person reply to the user. A single focused generation — direct
-    speech, not a debate: the arena's critique rounds average the
-    personality out of a personal answer (and cost 5x the latency). Streams
-    tokens through on_token when given. Falls back to a deterministic reply
-    whenever ollama fails."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
-        return fallback_respond(snapshot, user_text)
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    temperature = round(0.65 + rng.random() * 0.1, 2)
-    prompt = build_prompt(snapshot, user_message=user_text)
-    try:
-        if on_token is None:
-            text = _ollama_generate(prompt, model, timeout,
-                                    temperature=temperature)
-        else:
-            text = _ollama_stream(prompt, model, timeout, on_token,
-                                  temperature=temperature)
-    except StreamInterrupted as exc:
-        return exc.partial.strip() + " …"
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_respond(snapshot, user_text)
-    note_voice_success()
-    return text or fallback_respond(snapshot, user_text)
+    """First-person reply to the user. Like everything the organism says,
+    the reply runs the inner arena (two proposers draft, an adversarial
+    critic attacks, two voters pick) before it manifests. The debate
+    itself cannot stream, so the winning reply is replayed through
+    on_token in word chunks. Falls back to a deterministic reply whenever
+    ollama fails."""
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, user_message=user_text,
+        fallback=lambda snap: fallback_respond(snap, user_text),
+        on_token=on_token, model=model, timeout=timeout)
 
 
 # -- skills: reflection loop -------------------------------------------------
@@ -791,22 +723,18 @@ def parse_reflect(text):
 
 def reflect(org, model=None, timeout=TIMEOUT, rng=None):
     """One reflection cycle: the voice reviews recent experience and
-    distills a skill (or patches one, or says 'nothing'). Applies the
-    result to the organism's skill store. Offline (or unparseable) is a
-    quiet no-op — never a fake skill."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
+    distills a skill (or patches one, or says 'nothing'). Like every
+    utterance, the reflection runs the inner arena — as a structured
+    task, so no rogue candidate can break the output format — and the
+    winning candidate is parsed and applied to the organism's skill
+    store. Offline (or unparseable) is a quiet no-op — never a fake
+    skill."""
+    from arena import ThoughtArena
+    text = ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"reflect": True}, structured=True,
+        fallback=lambda _snap: None, model=model, timeout=timeout)
+    if text is None:
         return {"action": "none"}
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        text = _ollama_generate(build_prompt(snapshot, reflect=True),
-                                model, timeout)
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return {"action": "none"}
-    note_voice_success()
     result = parse_reflect(text)
     if result is None or result["action"] == "none":
         return {"action": "none"}
@@ -848,21 +776,13 @@ def fallback_form_goal(snapshot, rng=None):
 
 def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
     """One concrete intention, voiced by the organism and grounded in what
-    it knows and remembers. Falls back to a deterministic goal offline."""
-    snapshot = state_snapshot(org)
-    rng = rng or random.Random()
-    if voice_online() is False:
-        return fallback_form_goal(snapshot, rng)
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        text = _ollama_generate(build_prompt(snapshot, form_goal=True),
-                                model, timeout)
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_form_goal(snapshot, rng)
-    note_voice_success()
-    return text or fallback_form_goal(snapshot, rng)
+    it knows and remembers. Runs the inner arena as a structured task
+    before it manifests. Falls back to a deterministic goal offline."""
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"form_goal": True}, structured=True,
+        fallback=lambda snap: fallback_form_goal(snap, rng),
+        model=model, timeout=timeout)
 
 
 # -- artifacts -------------------------------------------------------------
@@ -877,21 +797,12 @@ def fallback_diary_entry(snapshot):
 
 def diary_entry(org, model=None, timeout=TIMEOUT, rng=None):
     """One short diary entry about recent days, voiced by the organism.
+    Runs the inner arena as a structured task before it is written.
     Falls back to a deterministic entry offline."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
-        return fallback_diary_entry(snapshot)
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        text = _ollama_generate(build_prompt(snapshot, diary=True),
-                                model, timeout)
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_diary_entry(snapshot)
-    note_voice_success()
-    return text or fallback_diary_entry(snapshot)
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"diary": True}, structured=True,
+        fallback=fallback_diary_entry, model=model, timeout=timeout)
 
 
 # -- curiosity toward the user ------------------------------------------------
@@ -906,27 +817,15 @@ def fallback_ask_user(snapshot):
 
 
 def ask_user(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
-    """One curious question directed at the user, grounded in a seed. Falls
-    back to a deterministic question whenever ollama is unavailable."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
-        return fallback_ask_user(snapshot)
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    prompt = build_prompt(snapshot, ask_user=True)
-    try:
-        if on_token is None:
-            text = _ollama_generate(prompt, model, timeout)
-        else:
-            text = _ollama_stream(prompt, model, timeout, on_token)
-    except StreamInterrupted as exc:
-        return exc.partial.strip() + " …"
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_ask_user(snapshot)
-    note_voice_success()
-    return text or fallback_ask_user(snapshot)
+    """One curious question directed at the user, grounded in a seed. Runs
+    the inner arena before it manifests; the winning question is replayed
+    through on_token in word chunks. Falls back to a deterministic
+    question whenever ollama is unavailable."""
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"ask_user": True},
+        fallback=fallback_ask_user, on_token=on_token,
+        model=model, timeout=timeout)
 
 
 # -- self-talk -------------------------------------------------------------
@@ -954,48 +853,24 @@ def fallback_self_answer(snapshot, question):
 def self_ask(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
     """First-person self-question about the organism's own mind, grounded
     in a rotating seed and steered away from its own recent questions.
-    Falls back to a deterministic template whenever ollama is unavailable."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
-        return fallback_self_ask(snapshot)
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    prompt = build_prompt(snapshot, self_ask=True)
-    try:
-        if on_token is None:
-            text = _ollama_generate(prompt, model, timeout)
-        else:
-            text = _ollama_stream(prompt, model, timeout, on_token)
-    except StreamInterrupted as exc:
-        return exc.partial.strip() + " …"
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_self_ask(snapshot)
-    note_voice_success()
-    return text or fallback_self_ask(snapshot)
+    Runs the inner arena before it manifests; the winner is replayed
+    through on_token in word chunks. Falls back to a deterministic
+    template whenever ollama is unavailable."""
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"self_ask": True},
+        fallback=fallback_self_ask, on_token=on_token,
+        model=model, timeout=timeout)
 
 
 def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None,
                 on_token=None):
-    """First-person answer to the organism's own question. Falls back to
-    a deterministic reply whenever ollama is unavailable."""
-    snapshot = state_snapshot(org)
-    if voice_online() is False:
-        return fallback_self_answer(snapshot, question)
-    rng = rng or random.Random()
-    snapshot["seed"] = _seed_for(snapshot, rng)
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    prompt = build_prompt(snapshot, self_question=question)
-    try:
-        if on_token is None:
-            text = _ollama_generate(prompt, model, timeout)
-        else:
-            text = _ollama_stream(prompt, model, timeout, on_token)
-    except StreamInterrupted as exc:
-        return exc.partial.strip() + " …"
-    except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-        note_voice_failure()
-        return fallback_self_answer(snapshot, question)
-    note_voice_success()
-    return text or fallback_self_answer(snapshot, question)
+    """First-person answer to the organism's own question. Runs the inner
+    arena before it manifests; the winner is replayed through on_token in
+    word chunks. Falls back to a deterministic reply whenever ollama is
+    unavailable."""
+    from arena import ThoughtArena
+    return ThoughtArena(rng=rng).emerge(
+        org, prompt_kwargs={"self_question": question},
+        fallback=lambda snap: fallback_self_answer(snap, question),
+        on_token=on_token, model=model, timeout=timeout)

@@ -83,10 +83,14 @@ you say.
   prompts, usage is counted, and skills untouched for a hundred cycles
   are archived. It literally gets better at being itself.
 - **Voice**: a local ollama model (`qwen3:14b` by default; `OLLAMA_URL` /
-  `OLLAMA_MODEL` overridable) speaks as the organism. Replies and questions
-  stream token-by-token; idle musings pass through an inner arena — two
-  proposers, an adversarial critic, two voters; high chaos injects rogue
-  thoughts. When ollama is unreachable the status bar shows `voice offline`
+  `OLLAMA_MODEL` overridable) speaks as the organism. Nothing it says
+  manifests unexamined: every utterance — musings, replies, questions,
+  self-talk, goals, diary entries, reflections — passes through an inner
+  arena (two proposers, an adversarial critic, two voters) before it
+  lands, replayed token-by-token as it settles; high chaos injects rogue
+  thoughts into free-form speech (never into structured tasks like
+  reflections, whose format a rogue candidate would break). When ollama
+  is unreachable the status bar shows `voice offline`
   and it speaks from a deterministic fallback instead of stalling.
 
 ## Lifecycle

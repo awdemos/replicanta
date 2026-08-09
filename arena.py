@@ -1,13 +1,16 @@
-"""Thought arena: the organism's inner debate. narrate() and respond()
-now run their words through a small adversarial chamber instead of a
-single solo model call: two proposers independently draft a thought, an
-adversarial critic attacks both, and two voters pick a majority winner
-(or, when the vote deadlocks, the critic's own preference tips the tie,
-and a random draw decides a truly indifferent deadlock). The per-round
-temperature jitters so the debate is never two identical passes, and in
-high chaos the organism may inject a rogue thought of its own. Any
-ollama failure at any stage falls back to the local deterministic
-summaries, so the organism always has a voice."""
+"""Thought arena: the organism's inner debate. Every utterance the
+organism manifests — idle musings, replies, questions to the user,
+self-talk, goals, diary entries, reflections — runs through a small
+adversarial chamber instead of a single solo model call: two proposers
+independently draft a candidate, an adversarial critic attacks both, and
+two voters pick a majority winner (or, when the vote deadlocks, the
+critic's own preference tips the tie, and a random draw decides a truly
+indifferent deadlock). The per-round temperature jitters so the debate
+is never two identical passes, and in high chaos the organism may inject
+a rogue thought of its own (never for structured tasks like reflections,
+whose output contract a rogue candidate would break). Any ollama failure
+at any stage falls back to the local deterministic answers, so the
+organism always has a voice."""
 
 import os
 import random
@@ -39,8 +42,8 @@ TEMP_MAX = 0.85     # upper bound
 
 
 class ThoughtArena:
-    """One debate per narrate()/respond() call. Stateless apart from a
-    per-call RNG, so a single instance is safe to share."""
+    """One debate per utterance. Stateless apart from a per-call RNG, so
+    a single instance is safe to share."""
 
     def __init__(self, rng=None, model=None, timeout=None):
         self._rng = rng if rng is not None else random.Random()
@@ -48,8 +51,21 @@ class ThoughtArena:
         self._timeout = timeout
 
     # -- public ----------------------------------------------------------
-    def emerge(self, org, user_message=None, model=None, timeout=None):
-        """Run a full debate and return the winning thought."""
+    def emerge(self, org, user_message=None, prompt_kwargs=None,
+               fallback=None, structured=False, on_token=None,
+               model=None, timeout=None):
+        """Run a full debate and return the winning candidate.
+
+        prompt_kwargs are forwarded to narration.build_prompt to select
+        the task (ask_user, self_ask, self_question, form_goal, diary,
+        reflect); user_message selects the reply task. fallback is a
+        callable taking the state snapshot, used when the voice is
+        offline or the debate fails (default: the local summary/reply).
+        structured=True suppresses the rogue-thought injection so the
+        output contract (e.g. the reflection format) survives. The
+        debate itself cannot stream, so a winner is replayed through
+        on_token in word chunks to keep the incremental display alive.
+        """
         model = (model or self._model
                  or os.environ.get("OLLAMA_MODEL", narration.DEFAULT_MODEL))
         timeout = timeout or self._timeout or narration.TIMEOUT
@@ -61,27 +77,32 @@ class ThoughtArena:
         # (organism.chaos_effective()); the arena should too, so surprise
         # rises as the organism gets stressed, not just on the raw knob
         effective = getattr(org, "chaos_effective", lambda: snapshot["chaos"])()
-        surprise = self._surprise_for(effective)
+        surprise = 0.0 if structured else self._surprise_for(effective)
         # temperature=0 in the snapshot means deterministic probe mode
         # (tests); anything else jitters per round
         temperature = 0.0 if snapshot.get("temperature") == 0 else None
         # voice known-offline: skip the debate entirely so replies stay
         # instant instead of paying an ollama timeout on every utterance
         if narration.voice_online() is False:
-            return self._fallback(snapshot, user_message)
+            return self._fallback(snapshot, user_message, fallback)
+        build = {"user_message": user_message}
+        build.update(prompt_kwargs or {})
         try:
-            result = self._debate(org, snapshot, user_message, model,
+            result = self._debate(org, snapshot, build, model,
                                   timeout, surprise, temperature)
         except (urllib.error.URLError, OSError, ValueError, RuntimeError):
             narration.note_voice_failure()
-            return self._fallback(snapshot, user_message)
+            return self._fallback(snapshot, user_message, fallback)
         narration.note_voice_success()
+        if on_token is not None:
+            for piece in re.findall(r"\S+\s*", result):
+                on_token(piece)
         return result
 
     # -- debate ----------------------------------------------------------
-    def _debate(self, org, snapshot, user_message, model, timeout,
+    def _debate(self, org, snapshot, build, model, timeout,
                 surprise, temperature):
-        base = narration.build_prompt(snapshot, user_message=user_message)
+        base = narration.build_prompt(snapshot, **build)
         drafts = [
             self._generate(self._proposal(base, 1), model, timeout,
                            temperature),
@@ -106,26 +127,26 @@ class ThoughtArena:
         angle = ("" if which == 1
                  else " Take the opposite emotional angle from the first.")
         return (base + "\n\n"
-                f"Draft a first-person thought{angle} Keep it to one to "
-                "three sentences. No preamble, no quotes, no emoji.")
+                "Draft a candidate answer, following the task instruction "
+                f"above exactly.{angle}")
 
     def _rogue_proposal(self, base):
         return base + "\n\n" + ROGUE_THOUGHT
 
     def _critique(self, base, drafts):
         return (base
-                + f"\n\nThought 1:\n{drafts[0]}"
-                + f"\n\nThought 2:\n{drafts[1]}"
-                + "\n\nAttack both thoughts. Point out the weakness in "
+                + f"\n\nCandidate 1:\n{drafts[0]}"
+                + f"\n\nCandidate 2:\n{drafts[1]}"
+                + "\n\nAttack both candidates. Point out the weakness in "
                   "each, in one or two sentences. Do not draft a new "
-                  "thought.")
+                  "candidate.")
 
     def _vote(self, base, drafts, critique):
         return (base
-                + f"\n\nThought 1:\n{drafts[0]}"
-                + f"\n\nThought 2:\n{drafts[1]}"
+                + f"\n\nCandidate 1:\n{drafts[0]}"
+                + f"\n\nCandidate 2:\n{drafts[1]}"
                 + f"\n\nCritique:\n{critique}"
-                + "\n\nWhich thought is better? Reply exactly with "
+                + "\n\nWhich candidate is better? Reply exactly with "
                   f"{VOTE_PREFIX}1 or {VOTE_PREFIX}2")
 
     # -- resolution ------------------------------------------------------
@@ -162,7 +183,9 @@ class ThoughtArena:
         return narration._ollama_generate(prompt, model, timeout,
                                           temperature=temperature)
 
-    def _fallback(self, snapshot, user_message):
+    def _fallback(self, snapshot, user_message, fallback):
+        if fallback is not None:
+            return fallback(snapshot)
         if user_message:
             return narration.fallback_respond(snapshot, user_message)
         return narration.fallback_summary(snapshot)

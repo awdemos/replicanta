@@ -1,8 +1,9 @@
-"""Thought-arena feature: narrate()/respond() run an inner debate — two
-proposers draft, an adversarial critic attacks, two voters pick a
-majority winner (or a random draw when deadlocked) — with per-round
-temperature jitter, a chaos-gated rogue thought, and the same local
-fallbacks whenever ollama fails."""
+"""Thought-arena feature: every utterance the organism manifests runs an
+inner debate — two proposers draft a candidate, an adversarial critic
+attacks, two voters pick a majority winner (or a random draw when
+deadlocked) — with per-round temperature jitter, a chaos-gated rogue
+thought (suppressed for structured tasks), and the same local fallbacks
+whenever ollama fails."""
 
 import random
 import sys
@@ -113,12 +114,45 @@ def test_narrate_runs_a_debate(org, monkeypatch):
     assert len(calls) == 5
 
 
-def test_respond_is_a_single_direct_generation(org, monkeypatch):
-    """Replies to the user deliberately bypass the debate: the arena's
-    critique rounds average the personality out of a personal answer."""
-    calls = _scripted(monkeypatch, ["hello, little one"])
+def test_respond_runs_a_debate(org, monkeypatch):
+    """Replies to the user run the same arena: nothing manifests before
+    the debate picks a winner."""
+    calls = _scripted(monkeypatch, [
+        "hello, little one",
+        "hi, I suppose",
+        "the second is cold",
+        "VOTE: 1",
+        "VOTE: 1",
+    ])
     assert respond(org, "hello there") == "hello, little one"
-    assert len(calls) == 1
+    assert len(calls) == 5
+
+
+def test_structured_tasks_never_go_rogue(org, monkeypatch):
+    """A rogue candidate would break the output contract of structured
+    tasks (reflection format, goals, diary), so it is never injected."""
+    calls = []
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: calls.append(prompt) or "x")
+    org.store.chaos = 1.0
+    out = ThoughtArena(rng=_AlwaysZero()).emerge(
+        org, prompt_kwargs={"reflect": True}, structured=True,
+        fallback=lambda _snap: None)
+    assert out == "x"
+    assert len(calls) == 5
+    assert not any(ROGUE_THOUGHT in p for p in calls)
+    assert any("Answer in EXACTLY" in p for p in calls)  # reflect task
+
+
+def test_task_fallback_used_on_debate_failure(org, monkeypatch):
+    def boom(prompt, model, timeout, temperature=0.95):
+        raise RuntimeError("ollama down")
+
+    monkeypatch.setattr("narration._ollama_generate", boom)
+    out = ThoughtArena().emerge(org, prompt_kwargs={"ask_user": True},
+                                fallback=lambda _snap: "fallback question?")
+    assert out == "fallback question?"
 
 
 # -- nonlinearity ----------------------------------------------------------
@@ -215,7 +249,7 @@ def test_late_round_failure_falls_back(org, monkeypatch):
     must not swallow an error into a broken half-debate."""
 
     def critic_dies(prompt, model, timeout, temperature=0.95):
-        if "Attack both thoughts" in prompt:
+        if "Attack both candidates" in prompt:
             raise RuntimeError("critic died")
         return "fur and paws"
 
