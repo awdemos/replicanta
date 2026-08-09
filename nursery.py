@@ -16,7 +16,7 @@ CURRENT_FILE = "current"
 DEFAULT_NAME = "default"
 AUTO_NAME_PREFIX = "replicanta"
 
-NAME_RE = re.compile(r"^[a-z0-9_-]+$")
+NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _nursery(root):
@@ -26,7 +26,7 @@ def _nursery(root):
 def _validate(name):
     if not NAME_RE.match(name):
         raise ValueError(
-            f"invalid organism name {name!r} — use lowercase letters, "
+            f"invalid organism name {name!r} — use letters, "
             "digits, - and _")
 
 
@@ -65,10 +65,13 @@ def next_name(root):
 
 def rename(root, old, new):
     """Rename an organism: move its whole directory and repoint `current`
-    when the renamed one is the awake organism. ValueError on an invalid
-    or taken new name, or when the old organism does not exist. Returns
-    the new directory. Callers holding a live Organism must flush it
-    before the move and reopen it from the new path afterwards."""
+    when the renamed one is the awake organism. Names may mix upper- and
+    lowercase; on case-insensitive filesystems a change of letter case
+    alone goes through a temporary name so the move cannot clobber the
+    source. ValueError on an invalid or taken new name, or when the old
+    organism does not exist. Returns the new directory. Callers holding
+    a live Organism must flush it before the move and reopen it from the
+    new path afterwards."""
     _validate(new)
     src = organism_dir(root, old)
     if not src.is_dir():
@@ -76,9 +79,16 @@ def rename(root, old, new):
     if new == old:
         return src
     dest = organism_dir(root, new)
-    if dest.exists():
-        raise ValueError(f"organism {new!r} already exists")
-    src.rename(dest)
+    if new.lower() == old.lower():
+        # pure case change: two hops so case-insensitive filesystems
+        # (and filesystems where src == dest) survive the move
+        tmp = organism_dir(root, f"{old}.rename-tmp")
+        src.rename(tmp)
+        tmp.rename(dest)
+    else:
+        if dest.exists():
+            raise ValueError(f"organism {new!r} already exists")
+        src.rename(dest)
     if current(root) == old:
         set_current(root, new)
     return dest

@@ -33,9 +33,17 @@ def test_create_rejects_duplicate_and_invalid_names(tmp_path):
     nursery.create(root, "fern", root / "organism.scl")
     with pytest.raises(ValueError, match="already exists"):
         nursery.create(root, "fern", root / "organism.scl")
-    for bad in ("Fern", "has space", "a/b", ""):
+    for bad in ("has space", "a/b", "", "dots.name", "emoji\u2603"):
         with pytest.raises(ValueError, match="invalid organism name"):
             nursery.create(root, bad, root / "organism.scl")
+
+
+def test_create_allows_capital_letters(tmp_path):
+    root = _root(tmp_path)
+    dest = nursery.create(root, "Fern", root / "organism.scl")
+    assert dest == root / "organisms" / "Fern"
+    nursery.create(root, "Replicanta-2_X", root / "organism.scl")
+    assert nursery.list_organisms(root) == ["Fern", "Replicanta-2_X"]
 
 
 def test_list_organisms_empty_and_sorted(tmp_path):
@@ -118,13 +126,30 @@ def test_rename_rejects_bad_names_and_missing_or_taken(tmp_path):
     nursery.create(root, "fern", root / "organism.scl")
     nursery.create(root, "moss", root / "organism.scl")
     with pytest.raises(ValueError, match="invalid organism name"):
-        nursery.rename(root, "fern", "Willow")
+        nursery.rename(root, "fern", "has space")
     with pytest.raises(ValueError, match="no organism named"):
         nursery.rename(root, "ghost", "willow")
     with pytest.raises(ValueError, match="already exists"):
         nursery.rename(root, "fern", "moss")
     # failed renames leave the nursery untouched
     assert nursery.list_organisms(root) == ["fern", "moss"]
+
+
+def test_rename_to_capitalized_name(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    dest = nursery.rename(root, "fern", "Fern")
+    assert dest == root / "organisms" / "Fern"
+    assert (dest / "organism.scl").read_text() == SEED_SCL
+    assert nursery.list_organisms(root) == ["Fern"]
+
+
+def test_rename_case_change_repoints_current(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    nursery.set_current(root, "fern")
+    nursery.rename(root, "fern", "FERN")
+    assert nursery.current(root) == "FERN"
 
 
 def test_rename_same_name_is_a_noop(tmp_path):

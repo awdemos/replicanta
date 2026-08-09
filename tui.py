@@ -128,7 +128,7 @@ class RenameScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder=f"new name for {self._name} "
-                              "(lowercase, digits, - and _)",
+                              "(letters, digits, - and _)",
                     id="rename-input")
 
     def on_mount(self):
