@@ -477,3 +477,23 @@ def test_tui_narrate_stays_dream_when_sleeping(tmp_path):
     app._narrating = False
     app._maybe_narrate()
     assert calls == ["narrate"]
+
+
+def test_tui_focuses_chat_input_on_mount(monkeypatch, tmp_path):
+    """Regression: the cursor must start in the chat line, not the
+    scrollable log pane (Textual otherwise focuses the first focusable
+    widget, which is the log)."""
+    import asyncio
+
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    monkeypatch.setattr(app, "_probe_voice", lambda: None)
+    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
+
+    async def check():
+        async with app.run_test():
+            assert app.chat_input.has_focus
+
+    asyncio.run(check())

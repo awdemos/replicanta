@@ -135,6 +135,8 @@ class OrganismApp(App):
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
         self._probe_voice()
         self._maybe_narrate()
+        # start with the cursor in the chat line, not the scrollable log
+        self.chat_input.focus()
 
     # -- actions ---------------------------------------------------------
     def action_help(self):
