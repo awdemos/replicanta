@@ -497,3 +497,80 @@ def test_tui_focuses_chat_input_on_mount(monkeypatch, tmp_path):
             assert app.chat_input.has_focus
 
     asyncio.run(check())
+
+
+# -- multi-screen UX ---------------------------------------------------------
+
+
+def _headless_app(monkeypatch, tmp_path):
+    from organism import Organism
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    monkeypatch.setattr(app, "_probe_voice", lambda: None)
+    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
+    return app
+
+
+def test_tui_has_three_tabs(monkeypatch, tmp_path):
+    import asyncio
+
+    from textual.widgets import TabbedContent, TabPane
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            tabs = app.query_one(TabbedContent)
+            assert {p.id for p in tabs.query(TabPane)} == {
+                "chat-pane", "mind-pane", "memory-pane"}
+
+    asyncio.run(check())
+
+
+def test_tui_pending_widget_streams_and_hides(monkeypatch, tmp_path):
+    import asyncio
+
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app._pending_show("org is thinking")
+            assert app._pending_visible
+            app._pending_token("hel")
+            app._pending_token("lo")
+            assert app._pending_text == "hello"
+            app._pending_hide()
+            assert not app._pending_visible
+
+    asyncio.run(check())
+
+
+def test_tui_status_bar_uses_words(monkeypatch, tmp_path):
+    import asyncio
+
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app.refresh_status()
+            assert "awake" in app._status_text
+            assert "beliefs" in app._status_text
+            assert "voice" in app._status_text
+
+    asyncio.run(check())
+
+
+def test_tui_mind_and_memory_views_refresh(monkeypatch, tmp_path):
+    import asyncio
+
+    app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.add(("user", "name", "sam"), 0.8)
+    app.org.store.remember("learned", "your name is sam")
+
+    async def check():
+        async with app.run_test():
+            app._refresh_views()
+            assert "beliefs" in app._mind_text
+            assert "your name is sam" in app._memory_text
+
+    asyncio.run(check())

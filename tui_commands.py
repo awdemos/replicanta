@@ -93,6 +93,7 @@ def help_text():
         "keyboard",
         "ctrl+p  command palette",
         "F1      this help",
+        "F2/F3/F4 chat / mind / memory tabs",
         "ctrl+s  save now",
         "ctrl+t  think now",
         "tab     complete a slash command",
