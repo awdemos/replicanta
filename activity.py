@@ -91,3 +91,62 @@ def summary_lines(store):
         f"user ({rate('facts_learned')}) · grounded utterances "
         f"{grounded_share}")
     return lines
+
+
+def digest(store, cycles=30):
+    """A short narrative of recent learning activity, for the voice prompt.
+
+    Compares current counters against a snapshot taken roughly `cycles`
+    cycles ago. If no history exists yet, reports lifetime totals.
+    """
+    a = store.activity
+    if not a:
+        return "you have not done much yet"
+
+    snapshots = a.setdefault("snapshots", [])
+    now = store.cycle
+
+    # Record a snapshot for the current cycle if we don't have one yet.
+    if not snapshots or snapshots[-1]["cycle"] != now:
+        snapshot = {
+            "cycle": now,
+            "counters": {k: a.get(k, 0) for k in (SYMBOLIC_KEYS + NEURAL_KEYS
+                                                    + COUPLING_KEYS)},
+        }
+        snapshots.append(snapshot)
+
+    # Keep only snapshots within the window plus one anchor.
+    cutoff = now - cycles
+    while len(snapshots) > 1 and snapshots[1]["cycle"] <= cutoff:
+        snapshots.pop(0)
+
+    anchor = snapshots[0]
+    elapsed = max(now - anchor["cycle"], 1)
+    before = anchor["counters"]
+
+    def delta(key):
+        return a.get(key, 0) - before.get(key, 0)
+
+    tried = delta("rules_tried")
+    derived = delta("derivations")
+    committed = delta("rules_committed")
+    promoted = delta("dreams_promoted")
+    discarded = delta("dreams_discarded")
+    beliefs_new = delta("beliefs_new")
+    llm_calls = delta("llm_calls")
+    fallbacks = delta("fallbacks")
+
+    rate = derived / max(tried, 1)
+    dream_rate = promoted / max(promoted + discarded, 1)
+
+    lines = [f"over the last {elapsed} cycles you have:"]
+    lines.append(
+        f"- asked {tried} self-questions and produced {derived} derivations "
+        f"({rate:.0%} yield)")
+    lines.append(
+        f"- committed {committed} rules, promoted {promoted} dreams, and "
+        f"discarded {discarded} dreams ({dream_rate:.0%} dream promotion)")
+    lines.append(
+        f"- formed {beliefs_new} new beliefs and used your inner voice "
+        f"{llm_calls} times ({fallbacks} fallbacks)")
+    return "\n".join(lines)

@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import activity
 import extensions
 import learning
 from skills import Skill
@@ -162,6 +163,7 @@ def state_snapshot(org):
         "last_exchange": _last_self_exchange(org.store.chat_log),
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
+        "activity_digest": activity.digest(org.store),
     }
 
 
@@ -490,6 +492,8 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
          f"score {snapshot['score']}, beliefs {snapshot['belief_count']}, "
          f"rules {snapshot['rule_count']}"),
     ]
+    if snapshot.get("activity_digest"):
+        lines += ["", "your recent learning activity:", snapshot["activity_digest"]]
     if snapshot.get("chat"):
         lines.append("")
         lines.append("recent conversation:")
