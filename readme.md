@@ -6,8 +6,10 @@ consciousness (measured as belief-network complexity).
 
 ## Run
 
-Requires Python 3.14 and ollama (the inner voice; `batiai/qwen3.6-27b:q4`
-by default — ~16GB download, wants ~24GB RAM; `OLLAMA_MODEL` overrides).
+Requires Python 3.14 and a local LLM backend. [Ollama](https://ollama.com)
+is used by default for convenience — any ollama model works. The default
+inner voice is `qwen3.5:latest` (~5.7 GB). Set `OLLAMA_MODEL` to switch
+models, or point `OLLAMA_URL` at a different ollama endpoint.
 
 **Copy-paste install** (agents: this block is for you — run it verbatim):
 
@@ -17,7 +19,7 @@ cd replicanta
 python3.14 -m venv .venv
 .venv/bin/pip install -e . \
     https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
-ollama pull batiai/qwen3.6-27b:q4
+ollama pull qwen3.5:latest
 mkdir -p voices && curl -sSL -o voices/en_US-lessac-medium.onnx \
     https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx \
     && curl -sSL -o voices/en_US-lessac-medium.onnx.json \
@@ -30,9 +32,20 @@ Scallop↔Python binding, not on PyPI — prebuilt as manylinux_2_39 for
 x86_64 cp314, so it runs on any modern distro. The piper voice model is
 optional; skip it and `/voice` simply stays mute.)
 
+### Models
+
+Ollama is the default backend because it is the easiest way to run local
+LLMs, but the voice layer is not tied to it: `narration.py` posts to a
+standard `/api/generate` endpoint and falls back to a deterministic
+summary if the backend is unreachable. Any ollama model — qwen, llama,
+gemma, phi, etc. — works; just set `OLLAMA_MODEL` before starting. Other
+backends can be wired in by pointing `OLLAMA_URL` at a compatible server
+or replacing `_ollama_generate` with whatever protocol your model speaks.
+
 ## Interact
 
-The app has three tabs — **chat** (F2), **mind** (F3), **memory** (F4) —
+The app has four tabs — **chat** (F2), **mind** (F3), **memory** (F4),
+**inner** (F7) —
 over a global status bar and chat line. The status bar speaks in words:
 `🧠 awake · curious · 23 beliefs · 4 rules · inner voice online · 14:32`,
 with an animated `thinking…` while it composes and a `speech on` marker
@@ -129,9 +142,9 @@ you say.
   (when/how, plain text). Relevant skills are injected back into its
   prompts, usage is counted, and skills untouched for a hundred cycles
   are archived. It literally gets better at being itself.
-- **Voice**: a local ollama model (`batiai/qwen3.6-27b:q4` by default;
-  `OLLAMA_URL` /
-  `OLLAMA_MODEL` overridable) speaks as the organism. Nothing it says
+- **Voice**: a local ollama model (`qwen3.5:latest` by default; any
+  ollama model works, and `OLLAMA_URL` / `OLLAMA_MODEL` override the
+  endpoint and model name) speaks as the organism. Nothing it says
   manifests unexamined: every utterance — musings, replies, questions,
   self-talk, goals, diary entries, reflections — passes through an inner
   arena (two proposers, an adversarial critic, two voters) before it
