@@ -2,6 +2,7 @@ import random
 from datetime import datetime, timezone
 from typing import ClassVar
 
+import extensions
 import narration
 import tui_commands
 import tui_views
@@ -434,6 +435,22 @@ class OrganismApp(App):
         self._pending_hide()
         if result["action"] == "none":
             return
+        if result["action"] == "proposal":
+            entry = result["entry"]
+            self.org.store.remember(
+                "skill", f"proposed a patch ({entry['kind']})")
+            if entry["kind"] == "pattern":
+                detail = f"{entry['regex']} -> {entry['template']}"
+            else:
+                detail = entry.get("text", "")
+            body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
+                    "/approve to accept · /reject to discard")
+            self._write_card(f"{self._org_name()} · proposes a patch",
+                             body, "yellow")
+            self.notify("patch proposed — /approve or /reject",
+                        severity="warning")
+            self.refresh_status()
+            return
         self.org.store.remember(
             "skill", f"{result['action']} skill: {result['name']}")
         self._append_log(f"skill {result['action']}: {result['name']}",
@@ -616,6 +633,38 @@ class OrganismApp(App):
                     self._maybe_self_talk()
             else:
                 self._append_log("self-talk off", STYLE_DIM)
+        elif name == "/approve":
+            entry = extensions.approve(
+                self.org.dir_path / "artifacts" / "extensions.json")
+            if entry:
+                self.org.store.remember(
+                    "skill", f"patch applied ({entry['kind']})")
+                self._append_log(
+                    f"patch applied ({entry['kind']}) — live now, no "
+                    "restart needed", STYLE_LEARNED, stamp=True)
+            else:
+                self._append_log("/approve: no pending patch.", STYLE_DIM)
+        elif name == "/reject":
+            entry = extensions.reject(
+                self.org.dir_path / "artifacts" / "extensions.json")
+            if entry:
+                self.org.store.remember(
+                    "skill", f"patch rejected ({entry['kind']})")
+                self._append_log(f"patch rejected ({entry['kind']})",
+                                 STYLE_DIM, stamp=True)
+            else:
+                self._append_log("/reject: no pending patch.", STYLE_DIM)
+        elif name == "/revert":
+            entry = extensions.revert_last(
+                self.org.dir_path / "artifacts" / "extensions.json")
+            if entry:
+                self.org.store.remember(
+                    "skill", f"patch reverted ({entry['kind']})")
+                self._append_log(f"patch reverted ({entry['kind']})",
+                                 STYLE_LEARNED, stamp=True)
+            else:
+                self._append_log("/revert: no applied patches yet.",
+                                 STYLE_DIM)
         elif name == "/help":
             self.action_help()
         else:

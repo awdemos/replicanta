@@ -471,6 +471,12 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
             "how: <the improved technique, one line>",
             "",
             "nothing    - if there is no technique worth keeping yet.",
+            "",
+            "patch-extension:    - or propose a genome patch when you",
+            "kind: pattern|seed|harsh_term|kind_term    keep hitting a",
+            "entry: <regex -> obj:attr:value | seed text | term>    capability",
+            "example: <sentence it should fire on>    (patterns only)",
+            "why: <one line>",
         ]
     elif diary:
         lines += [
@@ -729,6 +735,27 @@ def parse_reflect(text):
     head = lines[0].lower()
     if head.startswith("nothing"):
         return {"action": "none"}
+    if head.startswith("patch-extension"):
+        fields = {}
+        for line in lines[1:]:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                fields[key.strip().lower()] = value.strip()
+        kind = fields.get("kind", "")
+        if kind not in ("pattern", "seed", "harsh_term", "kind_term"):
+            return None
+        entry = {"kind": kind, "why": fields.get("why", "")}
+        if kind == "pattern":
+            raw = fields.get("entry", "")
+            if "->" not in raw:
+                return None
+            regex, template = (p.strip() for p in raw.split("->", 1))
+            entry["regex"] = regex
+            entry["template"] = template
+            entry["example"] = fields.get("example", "")
+        else:
+            entry["text"] = fields.get("entry", "")
+        return {"action": "proposal", "entry": entry}
     action = None
     if head.startswith("skill:"):
         action = "created"
@@ -769,6 +796,14 @@ def reflect(org, model=None, timeout=TIMEOUT, rng=None):
     result = parse_reflect(text)
     if result is None or result["action"] == "none":
         return {"action": "none"}
+    if result["action"] == "proposal":
+        ok, _reason = extensions.validate(result["entry"])
+        if not ok:
+            return {"action": "none"}
+        extensions.propose(
+            org.dir_path / "artifacts" / "extensions.json",
+            result["entry"])
+        return result
     store = getattr(org, "skills", None)
     if store is None:
         return {"action": "none"}

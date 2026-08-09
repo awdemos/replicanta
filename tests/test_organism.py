@@ -801,3 +801,91 @@ def test_tui_set_reflection_nothing_is_quiet(monkeypatch, tmp_path):
     app._append_log = lambda text, style=None, stamp=False: logged.append(text)
     app._set_reflection({"action": "none"})
     assert logged == []
+
+
+# -- tier B: approval commands ---------------------------------------------------
+
+import extensions as ext_mod
+
+
+def _proposal_entry():
+    return {"kind": "pattern", "regex": "i adore ([a-z '-]+)",
+            "template": "user:like_{x}:true", "example": "i adore hiking",
+            "why": "the user says adore"}
+
+
+def _patch_app(monkeypatch, app, logged):
+    class Rec:
+        def write(self, r, *a, **k):
+            pass
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text)
+    app.notify = lambda *a, **k: None
+
+
+def test_tui_set_reflection_proposal_shows_card(monkeypatch, tmp_path):
+    from rich.panel import Panel
+    app = _headless_app(monkeypatch, tmp_path)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app.notify = lambda *a, **k: None
+    app.refresh_status = lambda: None
+    app._set_reflection({"action": "proposal", "entry": _proposal_entry()})
+    panels = [w for w in written if isinstance(w, Panel)]
+    assert panels and "proposes a patch" in str(panels[0].title)
+    assert any(m["kind"] == "skill" for m in app.org.store.memory)
+
+
+def test_tui_approve_applies_pending(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
+                    _proposal_entry())
+    app.handle_command("/approve")
+    assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
+    assert any("applied" in line for line in logged)
+
+
+def test_tui_approve_without_pending(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    app.handle_command("/approve")
+    assert any("no pending" in line for line in logged)
+
+
+def test_tui_reject_discards_pending(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
+                    _proposal_entry())
+    app.handle_command("/reject")
+    assert ext_mod.pending() is None
+    assert ext_mod.active_entries("pattern") == []
+    assert any("rejected" in line for line in logged)
+
+
+def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
+                    _proposal_entry())
+    ext_mod.approve(app.org.dir_path / "artifacts" / "extensions.json")
+    app.handle_command("/revert")
+    assert ext_mod.active_entries("pattern") == []
+    assert any("reverted" in line for line in logged)

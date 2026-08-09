@@ -15,6 +15,9 @@ COMMANDS = [
     ("/save", "/save", "persist state + genome"),
     ("/think", "/think", "narrate thoughts now"),
     ("/self-talk", "/self-talk", "let the organism speak to itself"),
+    ("/approve", "/approve", "apply the organism's pending genome patch"),
+    ("/reject", "/reject", "discard the pending genome patch"),
+    ("/revert", "/revert", "undo the last applied genome patch"),
     ("/help", "/help", "this help screen"),
 ]
 

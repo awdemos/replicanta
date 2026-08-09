@@ -226,3 +226,60 @@ def test_mind_view_shows_skills(tmp_path):
     view = tui_views.mind_view(org)
     assert "skills" in view
     assert "rain talk" in view
+
+
+# -- tier B: patch proposals ----------------------------------------------------
+
+import extensions
+
+
+def test_parse_reflect_extension_proposal():
+    text = ("patch-extension:\n"
+            "kind: pattern\n"
+            "entry: i adore (.+) -> user:like_{x}:true\n"
+            "example: i adore hiking\n"
+            "why: the user says adore and I cannot learn it")
+    result = narration.parse_reflect(text)
+    assert result["action"] == "proposal"
+    entry = result["entry"]
+    assert entry["kind"] == "pattern"
+    assert entry["regex"] == "i adore (.+)"
+    assert entry["template"] == "user:like_{x}:true"
+    assert entry["example"] == "i adore hiking"
+
+
+def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda *a, **k: ("patch-extension:\n"
+                         "kind: pattern\n"
+                         "entry: i adore (.+) -> user:like_{x}:true\n"
+                         "example: i adore hiking\n"
+                         "why: the user says adore"))
+    result = narration.reflect(org)
+    assert result["action"] == "proposal"
+    assert extensions.pending()["regex"] == "i adore (.+)"
+
+
+def test_reflect_invalid_proposal_becomes_none(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda *a, **k: ("patch-extension:\n"
+                         "kind: pattern\n"
+                         "entry: the weather (.+) -> user:like_{x}:true\n"
+                         "example: the weather is nice today\n"
+                         "why: overreach"))
+    assert narration.reflect(org)["action"] == "none"
+    assert extensions.pending() is None
+
+
+def test_reflect_prompt_offers_extension_format(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    captured = {}
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
+    narration.reflect(org)
+    assert "patch-extension:" in captured["p"]

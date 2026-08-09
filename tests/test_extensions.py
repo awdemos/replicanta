@@ -5,6 +5,7 @@ Nothing applies without /approve; /revert rolls back."""
 
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -123,7 +124,7 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
     from organism import BeliefStore, Lifecycle, Metrics
 
     class FakeWindow:
-        pairs = set()
+        pairs: ClassVar[set] = set()
 
     class FakeOrg:
         def __init__(self, tmp_path):
