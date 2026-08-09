@@ -6,6 +6,8 @@ import narration
 import tui_commands
 import tui_views
 from rich.markup import escape
+from rich.panel import Panel
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -343,9 +345,22 @@ class OrganismApp(App):
         self.query_one("#dreams", RichLog).write(line)
 
     def _log_chat(self, role, text, stamp=True):
-        style = STYLE_YOU if role == "user" else STYLE_ORG
-        who = "you" if role == "user" else "org"
-        self._append_log(f"{who}: {text}", style, stamp=stamp)
+        if role == "user":
+            self._write_card("you", text, STYLE_YOU, stamp=stamp)
+        else:
+            self._write_card("org", text, STYLE_ORG, stamp=stamp)
+
+    def _write_card(self, who, text, border_style, stamp=True):
+        """One conversation message as a padded card (role-colored border,
+        timestamped title), preceded by a blank line so exchanges breathe.
+        Content is a plain Rich Text — organism output may contain markup
+        metacharacters."""
+        title = f"{who} · {self._stamp()}" if stamp else who
+        card = Panel(Text(text), title=title, title_align="left",
+                     border_style=border_style, padding=(0, 1))
+        log = self.query_one("#dreams", RichLog)
+        log.write("")
+        log.write(card)
 
     # -- pending (live reply region) --------------------------------------
     def _pending_show(self, label):
@@ -407,7 +422,7 @@ class OrganismApp(App):
     def _set_user_question(self, question):
         self._pending_hide()
         self.org.store.record_chat("org", question)
-        self._append_log(f"org: {question}", STYLE_ORG, stamp=True)
+        self._write_card("org", question, STYLE_ORG)
         self.refresh_status()
 
     # -- self-talk ---------------------------------------------------------
@@ -440,7 +455,7 @@ class OrganismApp(App):
 
     def _set_self_question(self, question):
         self.org.store.record_chat("org", question)
-        self._append_log(f"self: {question}", STYLE_SELF, stamp=True)
+        self._write_card("self", question, "dim yellow")
 
     def _set_self_answer(self, answer):
         self._pending_hide()
@@ -464,7 +479,7 @@ class OrganismApp(App):
 
     def _log_narration(self, text):
         self._pending_hide()
-        self._append_log(f"org: {text}", STYLE_ORG, stamp=True)
+        self._write_card("org", text, STYLE_ORG)
         self.refresh_status()
 
     # -- chat line -------------------------------------------------------

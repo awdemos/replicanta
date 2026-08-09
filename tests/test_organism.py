@@ -574,3 +574,71 @@ def test_tui_mind_and_memory_views_refresh(monkeypatch, tmp_path):
             assert "your name is sam" in app._memory_text
 
     asyncio.run(check())
+
+
+def test_tui_chat_renders_as_card(monkeypatch, tmp_path):
+    from organism import Organism
+    from rich.panel import Panel
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._log_chat("user", "hello there")
+    panels = [w for w in written if isinstance(w, Panel)]
+    assert len(panels) == 1
+    assert panels[0].renderable.plain == "hello there"
+    assert "you" in str(panels[0].title)
+    # a blank spacer precedes the card so exchanges breathe
+    assert written[0] == ""
+
+
+def test_tui_org_reply_renders_as_card(monkeypatch, tmp_path):
+    from organism import Organism
+    from rich.panel import Panel
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._set_reply("I am here.")
+    panels = [w for w in written if isinstance(w, Panel)]
+    assert len(panels) == 1
+    assert panels[0].renderable.plain == "I am here."
+    assert "org" in str(panels[0].title)
+
+
+def test_tui_events_stay_flat_lines(monkeypatch, tmp_path):
+    from organism import Organism
+    from rich.panel import Panel
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    written = []
+
+    class Rec:
+        def write(self, r, *a, **k):
+            written.append(r)
+
+        def update(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(app, "query_one", lambda *a, **k: Rec())
+    app._render_event({"kind": "learned", "text": "your name is sam"})
+    assert not [w for w in written if isinstance(w, Panel)]
