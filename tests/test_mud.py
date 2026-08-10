@@ -373,6 +373,56 @@ def test_choose_reason_none_when_voice_gives_only_command():
     assert reason is None
 
 
+def test_choose_uses_org_voice_when_org_is_given():
+    """When an organism is supplied and no generate stub, the decision is
+    routed through voice.mud_decide (tested here with a patched arena)."""
+    game = MudGame()
+    calls = []
+
+    class FakeArena:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def emerge(self, org, task, user_message, fallback, **kwargs):
+            calls.append((task, user_message))
+            return "because the cave mouth feels safer\ngo north"
+
+    patch = mud.voice
+    old_arena = patch.ThoughtArena
+    try:
+        patch.ThoughtArena = FakeArena
+        cmd, reason = mud.choose_action(game, org=_org(name="Glip",
+                                                        user="Ada"))
+    finally:
+        patch.ThoughtArena = old_arena
+    assert cmd == "go north"
+    assert reason == "because the cave mouth feels safer"
+    assert calls == [("mud", mud.situation_text(game, hint=None))]
+
+
+def test_choose_uses_injected_generate_even_when_org_given():
+    """The explicit generate= parameter still takes precedence so tests
+    and standalone callers can bypass the organism voice."""
+    game = MudGame()
+
+    class FakeArena:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def emerge(self, **kwargs):
+            raise AssertionError("should not call the voice with generate=")
+
+    patch = mud.voice
+    old_arena = patch.ThoughtArena
+    try:
+        patch.ThoughtArena = FakeArena
+        cmd, _reason = mud.choose_action(
+            game, org=_org(), generate=lambda p: "go east")
+    finally:
+        patch.ThoughtArena = old_arena
+    assert cmd == "go east"
+
+
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
     cmd, reason = mud.choose_action(game, rng=random.Random(0),

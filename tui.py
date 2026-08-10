@@ -7,7 +7,7 @@ import os
 import random
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
@@ -39,15 +39,15 @@ import extensions
 import fileutil
 import groupchat
 import listen
-import mud
 import llmclient
+import mud
 import nursery
 import speech
 import tui_commands
 import tui_views
 import voice
-from tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
 from organism import Organism
+from tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
 
 
 class SlashCommands(Provider):
@@ -353,7 +353,7 @@ class OrganismApp(App):
         self.camera = camera.Camera()
         self._mud_game = None
         self._mud_hint = None   # one-shot user nudge for the next move
-        self._mud_paused = False
+        self._mud_paused = True   # start paused; the human plays the MUD
         self._mud_thinking = False   # a move-choice worker is in flight
         self._mud_turn_gen = 0  # bumped by user moves/hints: stales in-flight
         self._quit_hint_time = 0.0
@@ -883,14 +883,15 @@ class OrganismApp(App):
                 game.act_event(command, actor=actor)
             game.session = session
         self._mud_game = game
-        self._mud_paused = False
+        self._mud_paused = True
         if session is not None:
             self._append_log(
                 f"— the organism returns to {game.scenario.title} "
                 f"(turn {game.turns}) —", STYLE_DREAM, stamp=True)
         else:
             self._append_log(
-                "— the organism descends into the dungeon —",
+                "— the dungeon opens for you; the organism stands beside you "
+                "as a companion —",
                 STYLE_DREAM, stamp=True)
             self._append_log(mud.build_premise(self.org, game.scenario),
                              STYLE_DREAM)
@@ -898,7 +899,6 @@ class OrganismApp(App):
         self.org.store.remember("mud", f"started {game.scenario.title}")
         self._mud_save_session(game)
         self.refresh_status()
-        self._mud_next()
 
     def _mud_stop(self):
         """End the current game, persisting its session for a later resume."""
@@ -1401,7 +1401,7 @@ class OrganismApp(App):
             return None
 
     def _stamp(self):
-        return datetime.now(timezone.utc).astimezone().strftime("%H:%M")
+        return datetime.now(UTC).astimezone().strftime("%H:%M")
 
     def _append_log(self, text, style=None, stamp=False):
         """Append one styled line to the scrollable log (markup-escaped),

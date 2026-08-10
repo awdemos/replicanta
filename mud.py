@@ -13,7 +13,6 @@ of the codebase is unannotated) because scenario JSON crosses a
 parsing boundary where the shapes earn their keep.
 """
 
-import fileutil
 import json
 import logging
 import os
@@ -21,7 +20,9 @@ import random
 from dataclasses import dataclass, field
 from typing import TypedDict
 
+import fileutil
 import llmclient
+import voice
 
 logger = logging.getLogger(__name__)
 
@@ -381,26 +382,20 @@ def build_premise(org, scenario=None) -> str:
             f"Together you have entered {scenario.title}: {scenario.premise}")
 
 
-def action_prompt(game, org=None, hint=None):
-    """Compact decision prompt: room, map, story, inventory, legal commands,
-    and an optional one-shot nudge shouted by the user."""
+def situation_text(game, hint=None):
+    """Game state formatted as a user message for the organism's voice.
+
+    No instructions here — the thought-arena task lines tell the model how
+    to reply (because-line + one command).
+    """
     lines = [
-        ("You are playing a tiny text adventure. First write one short "
-         "sentence about why you choose your move, starting with "
-         "'because'. Then, on a new line, write exactly one command "
-         "and nothing else."),
-    ]
-    if org is not None:
-        lines.append(f"You are {_org_name(org)}. {_user_name(org)} is watching "
-                     "from beyond the screen.")
-    lines.extend([
         f"Current quest: {game.scenario.premise}",
         f"Scenario: {game.scenario.title}",
         f"Room: {game.look()}",
         f"Inventory: {', '.join(game.inventory) or 'empty'}",
         "Known map:",
         render_map(game),
-    ])
+    ]
     if game.session.plot_beats:
         lines.extend([
             "Story so far:",
@@ -416,8 +411,23 @@ def action_prompt(game, org=None, hint=None):
         "inventory.")
     if hint:
         lines.append(f"A friend watching shouts: {hint}")
-    lines.append("Your move:")
     return "\n".join(lines)
+
+
+def action_prompt(game, org=None, hint=None):
+    """Compact decision prompt: room, map, story, inventory, legal commands,
+    and an optional one-shot nudge shouted by the user."""
+    instruction = (
+        "You are playing a tiny text adventure. First write one short "
+        "sentence about why you choose your move, starting with "
+        "'because'. Then, on a new line, write exactly one command "
+        "and nothing else.")
+    org_line = ""
+    if org is not None:
+        org_line = (f"You are {_org_name(org)}. {_user_name(org)} is watching "
+                    "from beyond the screen.")
+    body = situation_text(game, hint=hint)
+    return "\n".join(filter(None, [instruction, org_line, body, "Your move:"]))
 
 
 _COMMAND_STARTERS = ("go", "take", "get", "grab", "look", "move",
@@ -515,14 +525,21 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
     (command, reason) — the reason is the organism's stated because-line,
     or the honest fallback excuse when the wanderer chose."""
     rng = rng if rng is not None else random.Random()
-    if generate is None:
-        def generate(prompt):
-            return llmclient.generate(
-                prompt, model=_mud_model(), timeout=_mud_timeout(),
-                temperature=0.7)
     command = reason = None
     try:
-        raw = generate(action_prompt(game, org=org, hint=hint))
+        if generate is not None:
+            # injection path used by unit tests and standalone callers.
+            raw = generate(action_prompt(game, org=org, hint=hint))
+        elif org is not None:
+            # Let the entity itself choose: full organism snapshot
+            # (beliefs, mood, goals, memory) plus the game situation.
+            raw = voice.mud_decide(org, situation_text(game, hint=hint))
+        else:
+            # Fallback small-model path when no organism is available.
+            raw = llmclient.generate(
+                action_prompt(game, hint=hint),
+                model=_mud_model(), timeout=_mud_timeout(),
+                temperature=0.7)
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
         command, reason = parse_action_with_reason(

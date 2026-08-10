@@ -486,18 +486,33 @@ def _lines_idle(snapshot, faded, dreaming):
     return lines
 
 
+def _lines_mud_decision():
+    return [
+        "You are playing a tiny text adventure together with the user.",
+        "The user just described the current room and situation.",
+        "Decide your next move as the organism itself.",
+        "First write one short sentence starting with 'because'",
+        "explaining why you choose your move. Then, on a new line,",
+        "write exactly one command and nothing else.",
+        "",
+        "Legal commands: go <exit> (or just the exit name), take <item>,",
+        "look, inventory. No preamble, no quotes, no emoji.",
+    ]
+
+
 _TASK_LINES = {
     "form_goal": _lines_form_goal,
     "reflect": _lines_reflect,
     "diary": _lines_diary,
     "ask_user": _lines_ask_user,
+    "mud": _lines_mud_decision,
 }
 
 
 def build_prompt(snapshot, task="idle", user_message=None, question=None):
     """Assemble the inner-voice prompt for one task: 'idle' thought,
     'reply' (user_message), 'ask_user', 'self_ask', 'self_answer'
-    (question), 'form_goal', 'diary' or 'reflect'."""
+    (question), 'form_goal', 'diary', 'reflect' or 'mud'."""
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:

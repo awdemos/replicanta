@@ -140,3 +140,21 @@ def self_answer(org, question, model=None, timeout=None, rng=None,
         answer = narration.fallback_self_answer(state_snapshot(org),
                                                 question)
     return answer
+
+
+# -- mud companion --------------------------------------------------------------
+
+def mud_decide(org, user_message, model=None, timeout=None, rng=None,
+                 on_token=None):
+    """One MUD move chosen by the organism itself.
+
+    The game situation is passed as the user message; the thought arena
+    builds the full organism snapshot (beliefs, mood, goals, memory) and
+    asks the inner voice to reply with a because-line plus a single legal
+    command. Returns None when the voice is offline or gives nothing
+    usable, so the caller can fall back to the wanderer.
+    """
+    return ThoughtArena(rng=rng).emerge(
+        org, task="mud", user_message=user_message,
+        fallback=lambda _snap: None, on_token=on_token,
+        model=model, timeout=timeout)

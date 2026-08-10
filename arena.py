@@ -155,7 +155,7 @@ class ThoughtArena:
         the candidate. Empty or degenerate output fails the take so the
         caller falls back, exactly like a failed debate."""
         base = narration.build_prompt(snapshot, **build)
-        draft = self._generate(self._proposal(base, 1), model, timeout,
+        draft = self._generate(self._proposal(base), model, timeout,
                                temperature, org=org)
         draft = _clean_candidate(draft)
         if not draft:
@@ -166,14 +166,14 @@ class ThoughtArena:
                 surprise, temperature):
         base = narration.build_prompt(snapshot, **build)
         drafts = [
-            self._generate(self._proposal(base, 1), model, timeout,
+            self._generate(self._proposal(base), model, timeout,
                            temperature, org=org),
         ]
         if self._rng.random() < surprise:
             drafts.append(self._generate(self._rogue_proposal(base), model,
                                          timeout, temperature, org=org))
         else:
-            drafts.append(self._generate(self._proposal(base, 2), model,
+            drafts.append(self._generate(self._proposal(base), model,
                                          timeout, temperature, org=org))
         # a proposer that only managed meta-narration or special-token
         # loops has no candidate to offer; unwrap what is usable and let
@@ -204,12 +204,10 @@ class ThoughtArena:
         activity.note(org.store, "gen_tokens", stats["gen_tokens"])
 
     # -- prompts ---------------------------------------------------------
-    def _proposal(self, base, which):
-        angle = ("" if which == 1
-                 else " Take the opposite emotional angle from the first.")
+    def _proposal(self, base):
         return (base + "\n\n"
                 "Draft a candidate answer, following the task instruction "
-                f"above exactly.{angle}")
+                "above exactly.")
 
     def _rogue_proposal(self, base):
         return base + "\n\n" + ROGUE_THOUGHT
