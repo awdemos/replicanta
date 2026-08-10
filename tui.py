@@ -991,7 +991,11 @@ class OrganismApp(App):
         return scenario, session
 
     def _mud_load_scenario(self, slug):
-        """A saved generated scenario by slug, or the built-in default."""
+        """A saved generated scenario by slug, or the built-in default.
+        The slug comes from a resumed session on disk, so re-validate it
+        the same way writes produce it before touching the filesystem."""
+        if not slug or mud.slug(slug) != slug:
+            return None
         path = (self._mud_artifacts_dir() / "mud" / "scenarios"
                 / f"{slug}.json")
         try:

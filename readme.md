@@ -87,6 +87,10 @@ ollama pull qwen3.5:latest
 
 ### 4. Optional extras
 
+Runtime extras are opt-in: `uv pip install -e .[voice]` (spoken voice out),
+`.[listen]` (push-to-talk in), `.[vision]` (camera). Lua hooks (lupa) are
+core so the sandbox is always available.
+
 **Spoken voice** — download a piper voice to `voices/`:
 
 ```bash
