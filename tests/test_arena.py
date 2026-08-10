@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from arena import ROGUE_THOUGHT, TEMP_MAX, TEMP_MIN, ThoughtArena
-from narration import narrate, respond
 from organism import BeliefStore, Lifecycle, Metrics
+from voice import narrate, respond
 
 
 class _Window:
@@ -60,7 +60,7 @@ def _scripted(monkeypatch, script):
         calls.append((prompt, temperature))
         return script[len(calls) - 1]
 
-    monkeypatch.setattr("narration._ollama_generate", fake)
+    monkeypatch.setattr("llmclient.generate", fake)
     return calls
 
 
@@ -133,7 +133,7 @@ def test_structured_tasks_never_go_rogue(org, monkeypatch):
     tasks (reflection format, goals, diary), so it is never injected."""
     calls = []
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: calls.append(prompt) or "x")
     org.store.chaos = 1.0
     out = ThoughtArena(rng=_AlwaysZero()).emerge(
@@ -149,7 +149,7 @@ def test_task_fallback_used_on_debate_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
 
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     out = ThoughtArena().emerge(org, prompt_kwargs={"ask_user": True},
                                 fallback=lambda _snap: "fallback question?")
     assert out == "fallback question?"
@@ -208,7 +208,7 @@ def test_rogue_thought_fires_in_high_chaos(org, monkeypatch):
             return "i am a rogue thought, watch me"
         return "ordinary thought"
 
-    monkeypatch.setattr("narration._ollama_generate", fake)
+    monkeypatch.setattr("llmclient.generate", fake)
     org.store.chaos = 0.7
     ThoughtArena(rng=_AlwaysZero()).emerge(org)
     assert len(calls) == 5
@@ -219,7 +219,7 @@ def test_rogue_thought_fires_in_high_chaos(org, monkeypatch):
 def test_no_rogue_thought_in_low_chaos(org, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, model, timeout, temperature=0.95:
             calls.append(prompt) or "ordinary thought")
     org.store.chaos = 0.0
@@ -233,7 +233,7 @@ def test_stress_nudges_surprise_via_effective_chaos(org, monkeypatch):
     (0.05) - so a random() of 0.03 fires the rogue thought."""
     calls = []
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, model, timeout, temperature=0.95:
             calls.append(prompt) or "ordinary thought")
     org.store.chaos = 0.2
@@ -253,7 +253,7 @@ def test_late_round_failure_falls_back(org, monkeypatch):
             raise RuntimeError("critic died")
         return "fur and paws"
 
-    monkeypatch.setattr("narration._ollama_generate", critic_dies)
+    monkeypatch.setattr("llmclient.generate", critic_dies)
     text = ThoughtArena().emerge(org)
     assert "2 beliefs" in text and "wake" in text
 
@@ -262,7 +262,7 @@ def test_respond_falls_back_on_arena_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
 
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     reply = respond(org, "hello there")
     assert "hello there" in reply and "2 beliefs" in reply
 
@@ -305,9 +305,9 @@ def test_special_token_loop_cut(org, monkeypatch):
         "VOTE: 1",
         "VOTE: 1",
     ])
-    # _strip_special lives in narration._ollama_generate; simulate its
+    # _strip_special lives in llmclient.generate; simulate its
     # effect here by checking the cleaner directly
-    from narration import _strip_special
+    from llmclient import _strip_special
     assert _strip_special(
         "hello there<|endoftext|><|im_start|>\n<|im_start|>") == "hello there"
 

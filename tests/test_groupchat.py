@@ -54,7 +54,7 @@ def _scripted(monkeypatch, replies):
         calls.append(prompt)
         return replies.pop(0)
 
-    monkeypatch.setattr("narration._ollama_generate", fake)
+    monkeypatch.setattr("llmclient.generate", fake)
     return calls
 
 

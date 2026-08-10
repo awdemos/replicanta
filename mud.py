@@ -16,6 +16,7 @@ import random
 from dataclasses import dataclass, field
 
 import fileutil
+import llmclient
 
 logger = logging.getLogger(__name__)
 
@@ -493,18 +494,16 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
     rng = rng if rng is not None else random.Random()
     if generate is None:
         def generate(prompt):
-            import narration
-            return narration._ollama_generate(
+            return llmclient.generate(
                 prompt, model=MUD_MODEL, timeout=MUD_TIMEOUT,
                 temperature=0.7)
     command = reason = None
     try:
-        import arena
         raw = generate(action_prompt(game, org=org, hint=hint))
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
         command, reason = parse_action_with_reason(
-            arena._clean_candidate(raw or ""))
+            llmclient.clean_candidate(raw or ""))
     except Exception:  # noqa: BLE001, S110 — a silent voice means wandering
         pass
     if command is None:
@@ -638,8 +637,7 @@ def generate_scenario(description, org, generate=None) -> Scenario:
     """Ask the voice for a scenario, validate it, and fall back on failure."""
     if generate is None:
         def generate(prompt):
-            import narration
-            return narration._ollama_generate(
+            return llmclient.generate(
                 prompt, model=MUD_MODEL, timeout=MUD_TIMEOUT, temperature=0.7)
     prompt = _scenario_generation_prompt(description, org)
     try:

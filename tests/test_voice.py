@@ -94,7 +94,7 @@ def test_voice_unknown_before_any_probe():
 def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda *a, **k: calls.append(1) or "should not happen")
     narration.reset_voice()
     narration.note_voice_failure()
@@ -107,7 +107,7 @@ def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
 def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("connection refused")
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     ThoughtArena().emerge(org)
     assert voice_online() is None       # one failure: still retryable
     ThoughtArena().emerge(org)
@@ -115,7 +115,7 @@ def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
 
 
 def test_arena_success_clears_offline(org, monkeypatch):
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "a clear small thought")
     narration.note_voice_failure()
     narration.note_voice_failure()

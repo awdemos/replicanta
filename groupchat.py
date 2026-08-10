@@ -10,7 +10,7 @@ own episodic memory so relationships with the other members persist.
 Pure orchestration — no textual imports — so it is unit-testable
 without a terminal."""
 
-import narration
+import voice
 
 MAX_CONTEXT = 8        # recent transcript lines folded into each prompt
 MAX_TRANSCRIPT = 200   # hard cap, oldest lines dropped first
@@ -66,7 +66,7 @@ class GroupChat:
         utterances = []
         for name in speakers:
             org = self.members[name]
-            reply = narration.respond(org, self.context(), model=model,
+            reply = voice.respond(org, self.context(), model=model,
                                       timeout=timeout, rng=rng, quick=quick)
             self._append(name, reply)
             org.store.remember("group", f"group chat — I said: {reply}")

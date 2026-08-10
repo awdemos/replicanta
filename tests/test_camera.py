@@ -11,6 +11,7 @@ import pytest
 
 import camera
 import narration
+import llmclient
 from camera import Camera
 
 
@@ -96,7 +97,7 @@ def test_describe_image_posts_base64(monkeypatch):
         seen["timeout"] = timeout
         return _Resp()
 
-    monkeypatch.setattr(narration.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(llmclient.urllib.request, "urlopen", fake_urlopen)
     out = narration.describe_image(b"\xff\xd8fake-jpeg")
     assert out == "a desk with a lamp"
     assert seen["payload"]["images"] == ["/9hmYWtlLWpwZWc="]
@@ -116,7 +117,7 @@ def test_describe_image_raises_on_ollama_error(monkeypatch):
             return j.dumps({"error": "model not found"}).encode()
 
     monkeypatch.setattr(
-        narration.urllib.request, "urlopen", lambda req, timeout: _Resp())
+        llmclient.urllib.request, "urlopen", lambda req, timeout: _Resp())
     with pytest.raises(RuntimeError):
         narration.describe_image(b"x")
 

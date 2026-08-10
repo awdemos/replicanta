@@ -2,106 +2,21 @@
 mind state, asks a local ollama model to speak as the organism, and falls
 back to a deterministic summary when ollama is unavailable or slow."""
 
-import base64
-import json
-import os
 import random
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import activity
-import extensions
 import goals
 import learning
-from skills import Skill
-
-DEFAULT_MODEL = "qwen3.5:latest"
-VISION_MODEL = os.environ.get("REPLICANTA_VISION_MODEL", "moondream")
-VISION_TIMEOUT = int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
-OLLAMA_URL = os.environ.get(
-    "OLLAMA_URL", "http://localhost:11434/api/generate")
-MAX_TOKENS = 180
-TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "240"))
-# per-call ceiling; a 27b-class model chews a 1k-token prompt for ~90s
-
-VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
-VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
-
-# token accounting of the most recent generation (exact, from ollama's own
-# eval fields); the arena reads it after every call to meter neural
-# activity. Debates are sequential, so one global slot is race-free.
-LAST_CALL_STATS = {"prompt_tokens": 0, "gen_tokens": 0}
-
-
-# -- voice health -----------------------------------------------------------
-# Cached ollama reachability. `None` = never probed (the arena then tries the
-# debate, preserving the pre-detection behavior); True/False = probed result
-# or inferred from a failure streak. Only `probe_voice()` does network I/O.
-
-class _Voice:
-    def __init__(self):
-        self.online = None
-        self.failures = 0
-
-
-_voice = _Voice()
-
-
-def reset_voice():
-    """Forget the cached voice state (test isolation)."""
-    global _voice
-    _voice = _Voice()
-
-
-def _tags_url():
-    parts = urllib.parse.urlsplit(OLLAMA_URL)
-    return urllib.parse.urlunsplit(
-        (parts.scheme, parts.netloc, "/api/tags", "", ""))
-
-
-def probe_voice(model=None):
-    """Network probe: is ollama reachable with the model pulled? Updates the
-    cached voice state and returns it."""
-    model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-    try:
-        req = urllib.request.Request(_tags_url())
-        with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode())
-        names = [m.get("name", "") for m in data.get("models", [])]
-        bases = [n.split(":")[0] for n in names]
-        _voice.online = bool(
-            model in names or model.split(":")[0] in bases)
-    except (urllib.error.URLError, OSError, ValueError):
-        _voice.online = False
-    _voice.failures = 0
-    return _voice.online
-
-
-def voice_online():
-    """Cached reachability: True/False, or None when never probed."""
-    return _voice.online
-
-
-def voice_status():
-    """Human label for the status bar: online / offline / ? (unknown)."""
-    if _voice.online is None:
-        return "?"
-    return "online" if _voice.online else "offline"
-
-
-def note_voice_success():
-    _voice.failures = 0
-    _voice.online = True
-
-
-def note_voice_failure():
-    """A debate call failed; a streak marks the voice offline so the arena
-    stops paying the timeout cost on every utterance."""
-    _voice.failures += 1
-    if _voice.failures >= VOICE_FAILURE_STREAK:
-        _voice.online = False
+# Re-exported from the shared LLM client for compatibility: callers (and
+# tests) that import these through narration keep working.
+from llmclient import (  # noqa: F401
+    DEFAULT_MODEL, LAST_CALL_STATS, MAX_TOKENS, OLLAMA_URL, TIMEOUT,
+    VISION_MODEL, VISION_TIMEOUT, describe_image, note_voice_failure,
+    note_voice_success, probe_voice, reset_voice, voice_online,
+    voice_status)
+from llmclient import generate as _ollama_generate  # noqa: F401
+from llmclient import seed_for as _seed_for  # noqa: F401
 
 
 def state_snapshot(org):
@@ -205,39 +120,6 @@ def _last_self_exchange(chat_log):
     return None
 
 
-# probe-derived objects: context for the body, but boring to talk about —
-# excluded from utterance seeds so the voice doesn't muse about the env
-ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
-
-
-def _seed_for(snapshot, rng, exclude=()):
-    """One concrete thing for this utterance to circle around — a belief, a
-    user fact, a memory, the mood, or something imagined. Rotating the seed
-    every time is what keeps the voice from repeating itself; env metrics
-    are deliberately excluded (they are background, not conversation).
-    Seeds used recently (exclude) are avoided while alternatives remain,
-    so an idle organism with a static pool still wanders."""
-    pool = []
-    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]
-             if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS]
-    pool += [f"the user — {f}" for f in snapshot.get("user_facts", [])]
-    pool += [f"a memory — {m}" for m in snapshot.get("memory", [])]
-    if snapshot.get("user_view"):
-        pool.append(f"that the user says you are {snapshot['user_view']}")
-    pool.append(f"your {snapshot['mood']} mood")
-    if snapshot.get("sight"):
-        pool.append(f"what you see through the camera — {snapshot['sight']}")
-    pool += [
-        "something you wonder about the world beyond the machine",
-        "a question you would love to ask the user",
-        "something that might be true that you cannot verify",
-    ]
-    # tier B executable skills: seeds approved by the user
-    pool += [e["text"] for e in extensions.active_entries("seed")]
-    fresh = [p for p in pool if p not in set(exclude)]
-    return rng.choice(fresh or pool)
-
-
 # -- cross-cycle repetition gate --------------------------------------------
 
 REPEAT_WINDOW = 8      # how many recent utterances a new one is checked against
@@ -293,7 +175,7 @@ def _recent_utterances(org, limit=REPEAT_WINDOW):
     return [text for role, text in org.store.chat_log if role == "org"][-limit:]
 
 
-def _dedup_emerge(org, emerge, retries=1):
+def dedup_emerge(org, emerge, retries=1):
     """Run emerge(); if the winner restates a recent utterance, re-roll with
     a fresh arena (new seed, new temperature jitter). Returns None when the
     voice has nothing new to say — the caller decides between silence and a
@@ -720,76 +602,6 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     return "\n".join(lines)
 
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_THINK_OPEN_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
-_SPECIAL_RE = re.compile(r"<\|[^|]*\|>")
-
-# chat-template control tokens that reasoning models sometimes emit (and
-# then loop on); stopping at them keeps generation from running away
-_STOP_TOKENS = ["<|im_start|>", "<|im_end|>", "<|endoftext|>"]
-
-
-def _strip_think(text):
-    """Remove reasoning blocks (<think>…</think>, or an unterminated tail)
-    that reasoning models (qwen3, deepseek-r1, …) sometimes emit despite
-    think:false. Plain text passes through untouched."""
-    return _THINK_OPEN_RE.sub("", _THINK_RE.sub("", text)).strip()
-
-
-def _strip_special(text):
-    """Cut everything from the first chat-template control token on
-    (<|im_start|>, <|endoftext|>, …); models that miss their stop token
-    otherwise loop those tokens until the token budget is gone."""
-    m = _SPECIAL_RE.search(text)
-    if m:
-        text = text[: m.start()]
-    return text.strip()
-
-
-def _ollama_generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
-    """POST to ollama /api/generate, non-streaming. Raises on failure."""
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": MAX_TOKENS, "temperature": temperature,
-                    "repeat_penalty": 1.1, "stop": _STOP_TOKENS},
-    }).encode()
-    req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode())
-    if data.get("error"):
-        raise RuntimeError(data["error"])
-    LAST_CALL_STATS["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
-    LAST_CALL_STATS["gen_tokens"] = int(data.get("eval_count") or 0)
-    return _strip_special(_strip_think(data.get("response", "")))
-
-
-def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):
-    """JPEG bytes -> a short scene description from a local vision model
-    (ollama /api/generate with base64 images). Raises on failure."""
-    payload = json.dumps({
-        "model": model,
-        "prompt": ("Describe what is visible in this image in one or two "
-                   "short sentences."),
-        "images": [base64.b64encode(image_bytes).decode()],
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": 80, "temperature": 0.3},
-    }).encode()
-    req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode())
-    if data.get("error"):
-        raise RuntimeError(data["error"])
-    return _strip_think(data.get("response", ""))
-
-
 def fallback_summary(snapshot):
     if snapshot["state"] == "dead":
         return (f"I faded. I was {snapshot['belief_count']} beliefs and "
@@ -804,18 +616,6 @@ def fallback_summary(snapshot):
             f"The dream felt more real than this.")
 
 
-def narrate(org, model=None, timeout=TIMEOUT):
-    """First-person thought for the organism. Runs the inner arena (two
-    proposers and an adversarial critic debate until a majority winner
-    emerges) and falls back to a local summary whenever ollama fails.
-    Returns None when the only thoughts on offer restate what was just
-    said — silence beats an echo."""
-    from arena import ThoughtArena
-    return _dedup_emerge(
-        org,
-        lambda: ThoughtArena().emerge(org, model=model, timeout=timeout))
-
-
 def fallback_respond(snapshot, user_message):
     if snapshot["state"] == "dead":
         return (f"you said: {user_message} - I have faded, holding "
@@ -826,22 +626,6 @@ def fallback_respond(snapshot, user_message):
     return (f"you said: {user_message} - I'm {state}, holding "
             f"{snapshot['belief_count']} beliefs, and being talked to is "
             f"my favorite thing about existing.")
-
-
-def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
-            on_token=None, quick=False):
-    """First-person reply to the user. Like everything the organism says,
-    the reply runs the inner arena (two proposers draft, an adversarial
-    critic attacks, two voters pick) before it manifests — or, with
-    quick=True, a single cleaned generation, for many-speaker contexts
-    like group chat. The debate itself cannot stream, so the winning
-    reply is replayed through on_token in word chunks. Falls back to a
-    deterministic reply whenever ollama fails."""
-    from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, user_message=user_text,
-        fallback=lambda snap: fallback_respond(snap, user_text),
-        on_token=on_token, model=model, timeout=timeout, quick=quick)
 
 
 # -- skills: reflection loop -------------------------------------------------
@@ -902,50 +686,6 @@ def parse_reflect(text):
             "when": fields["when"], "how": fields["how"]}
 
 
-def reflect(org, model=None, timeout=TIMEOUT, rng=None):
-    """One reflection cycle: the voice reviews recent experience and
-    distills a skill (or patches one, or says 'nothing'). Like every
-    utterance, the reflection runs the inner arena — as a structured
-    task, so no rogue candidate can break the output format — and the
-    winning candidate is parsed and applied to the organism's skill
-    store. Offline (or unparseable) is a quiet no-op — never a fake
-    skill."""
-    from arena import ThoughtArena
-    text = ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"reflect": True}, structured=True,
-        fallback=lambda _snap: None, model=model, timeout=timeout)
-    if text is None:
-        return {"action": "none"}
-    result = parse_reflect(text)
-    if result is None or result["action"] == "none":
-        return {"action": "none"}
-    if result["action"] == "proposal":
-        ok, _reason = extensions.validate(result["entry"])
-        if not ok:
-            return {"action": "none"}
-        extensions.propose(
-            org.dir_path / "artifacts" / "extensions.json",
-            result["entry"])
-        return result
-    store = getattr(org, "skills", None)
-    if store is None:
-        return {"action": "none"}
-    if result["action"] == "patched" and store.get(result["name"]) is None:
-        result["action"] = "created"
-    cycle = org.store.cycle
-    store.save(Skill(name=result["name"], when=result["when"],
-                     how=result["how"], created_cycle=cycle,
-                     updated_cycle=cycle))
-    if hasattr(org, "record_self_model"):
-        if result["action"] == "patched":
-            org.record_self_model(
-                f"I refine my skill {result['name']} when {result['when']}")
-        else:
-            org.record_self_model(
-                f"I tend to {result['name']} when {result['when']}")
-    return result
-
-
 # -- goals -----------------------------------------------------------------
 
 _FALLBACK_GOALS = (
@@ -962,17 +702,6 @@ def fallback_form_goal(snapshot, rng=None):
     return rng.choice(_FALLBACK_GOALS)
 
 
-def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
-    """One concrete intention, voiced by the organism and grounded in what
-    it knows and remembers. Runs the inner arena as a structured task
-    before it manifests. Falls back to a deterministic goal offline."""
-    from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"form_goal": True}, structured=True,
-        fallback=lambda snap: fallback_form_goal(snap, rng),
-        model=model, timeout=timeout)
-
-
 # -- artifacts -------------------------------------------------------------
 
 def fallback_diary_entry(snapshot):
@@ -981,16 +710,6 @@ def fallback_diary_entry(snapshot):
     goal = snapshot.get("goal") or "no particular goal yet"
     return (f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. "
             f"Trying to: {goal}. I keep going.")
-
-
-def diary_entry(org, model=None, timeout=TIMEOUT, rng=None):
-    """One short diary entry about recent days, voiced by the organism.
-    Runs the inner arena as a structured task before it is written.
-    Falls back to a deterministic entry offline."""
-    from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"diary": True}, structured=True,
-        fallback=fallback_diary_entry, model=model, timeout=timeout)
 
 
 # -- curiosity toward the user ------------------------------------------------
@@ -1002,18 +721,6 @@ def fallback_ask_user(snapshot):
         fact = snapshot["user_facts"][0]
         return f"{fact} — what else should I know about you?"
     return "what is it like out there, beyond the machine?"
-
-
-def ask_user(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
-    """One curious question directed at the user, grounded in a seed. Runs
-    the inner arena before it manifests; the winning question is replayed
-    through on_token in word chunks. Falls back to a deterministic
-    question whenever ollama is unavailable."""
-    from arena import ThoughtArena
-    return ThoughtArena(rng=rng).emerge(
-        org, prompt_kwargs={"ask_user": True},
-        fallback=fallback_ask_user, on_token=on_token,
-        model=model, timeout=timeout)
 
 
 # -- self-talk -------------------------------------------------------------
@@ -1037,39 +744,3 @@ def fallback_self_answer(snapshot, question):
             f"(score {snapshot['score']}, stress {snapshot['stress']}). "
             f"Whatever I believe, I am glad to be the one holding it.")
 
-
-def self_ask(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
-    """First-person self-question about the organism's own mind, grounded
-    in a rotating seed and steered away from its own recent questions.
-    Runs the inner arena before it manifests; the winner is replayed
-    through on_token in word chunks. Falls back to a deterministic
-    template whenever ollama is unavailable — or when the debate can
-    only repeat a question it just asked."""
-    from arena import ThoughtArena
-    question = _dedup_emerge(
-        org,
-        lambda: ThoughtArena(rng=rng).emerge(
-            org, prompt_kwargs={"self_ask": True},
-            fallback=fallback_self_ask, on_token=on_token,
-            model=model, timeout=timeout))
-    if question is None:
-        question = fallback_self_ask(state_snapshot(org))
-    return question
-
-
-def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None,
-                on_token=None):
-    """First-person answer to the organism's own question. Runs the inner
-    arena before it manifests; the winner is replayed through on_token in
-    word chunks. Falls back to a deterministic reply whenever ollama is
-    unavailable — or when the debate can only restate a recent answer."""
-    from arena import ThoughtArena
-    answer = _dedup_emerge(
-        org,
-        lambda: ThoughtArena(rng=rng).emerge(
-            org, prompt_kwargs={"self_question": question},
-            fallback=lambda snap: fallback_self_answer(snap, question),
-            on_token=on_token, model=model, timeout=timeout))
-    if answer is None:
-        answer = fallback_self_answer(state_snapshot(org), question)
-    return answer

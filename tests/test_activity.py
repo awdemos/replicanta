@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import activity
 import narration
+import llmclient
 from arena import ThoughtArena
 from organism import BeliefStore, Organism
 from probe import SystemProbe
@@ -101,7 +102,7 @@ def _scripted_arena(monkeypatch, script, gen_tokens=3, prompt_tokens=11):
         narration.LAST_CALL_STATS["gen_tokens"] = gen_tokens
         return script.pop(0)
 
-    monkeypatch.setattr("narration._ollama_generate", fake)
+    monkeypatch.setattr("llmclient.generate", fake)
 
 
 def test_arena_meters_calls_tokens_and_utterance(tmp_path, monkeypatch):
@@ -123,7 +124,7 @@ def test_arena_counts_fallbacks(tmp_path, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
 
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     ThoughtArena().emerge(org)
     assert org.store.activity["fallbacks"] == 1
 
@@ -138,9 +139,9 @@ def test_grounded_utterance_counted_when_seed_words_reused(tmp_path, monkeypatch
             return seen.setdefault("winner", "thinking about the cat today")
         return seen.setdefault("winner", "thinking about the cat today")
 
-    monkeypatch.setattr("narration._ollama_generate", fake)
+    monkeypatch.setattr("llmclient.generate", fake)
     # craft the seed deterministically: the belief itself
-    monkeypatch.setattr(narration, "_seed_for",
+    monkeypatch.setattr(llmclient, "seed_for",
                         lambda snap, rng, exclude=():
                         "this belief: 0.90 cat:has_fur=true")
     text = ThoughtArena().emerge(org)

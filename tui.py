@@ -45,6 +45,7 @@ import nursery
 import speech
 import tui_commands
 import tui_views
+import voice
 from tui_views import STYLE_DIM, STYLE_ORG
 from organism import Organism
 
@@ -1449,7 +1450,7 @@ class OrganismApp(App):
         try:
             self.call_from_thread(
                 self._pending_show, "org is setting itself a goal")
-            text = narration.form_goal(org)
+            text = voice.form_goal(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "goal", exc)
         if text is not None and org is self.org:
@@ -1469,7 +1470,7 @@ class OrganismApp(App):
         try:
             self.call_from_thread(
                 self._pending_show, "org is writing in its diary")
-            entry = narration.diary_entry(org)
+            entry = voice.diary_entry(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "diary", exc)
         if entry is not None and org is self.org:
@@ -1489,7 +1490,7 @@ class OrganismApp(App):
         result = None
         try:
             self.call_from_thread(self._pending_show, "org is reflecting")
-            result = narration.reflect(org)
+            result = voice.reflect(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reflection", exc)
         if result is not None and org is self.org:
@@ -1569,7 +1570,7 @@ class OrganismApp(App):
         question = None
         try:
             self.call_from_thread(self._pending_show, "org is wondering")
-            question = narration.ask_user(
+            question = voice.ask_user(
                 org,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))
@@ -1601,13 +1602,13 @@ class OrganismApp(App):
         try:
             self.call_from_thread(
                 self._pending_show, "org is asking itself")
-            question = narration.self_ask(org)
+            question = voice.self_ask(org)
             if org is not self.org:
                 return
             self.call_from_thread(self._pending_hide)
             self.call_from_thread(self._set_self_question, question)
             self.call_from_thread(self._pending_show, "org is answering")
-            answer = narration.self_answer(
+            answer = voice.self_answer(
                 org, question,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))
@@ -1637,7 +1638,7 @@ class OrganismApp(App):
         text = None
         try:
             self.call_from_thread(self._pending_show, "org is musing")
-            text = narration.narrate(org)
+            text = voice.narrate(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "narration", exc)
         finally:
@@ -1915,7 +1916,7 @@ class OrganismApp(App):
         reply = None
         try:
             self.call_from_thread(self._pending_show, "org is thinking")
-            reply = narration.respond(
+            reply = voice.respond(
                 org, text,
                 on_token=lambda tok: self.call_from_thread(
                     self._pending_token, tok))

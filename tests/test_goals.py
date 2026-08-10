@@ -8,6 +8,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import narration
+import llmclient
+import voice
 from organism import BeliefStore, Organism
 from probe import SystemProbe
 
@@ -103,16 +105,16 @@ def test_form_goal_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
-    narration.form_goal(org)
+    voice.form_goal(org)
     assert "one thing you want" in captured["p"]
 
 
 def test_form_goal_fallback_deterministic(tmp_path):
     org = _organism(tmp_path)
-    narration._voice.online = False
-    goal = narration.form_goal(org)
+    llmclient._voice.online = False
+    goal = voice.form_goal(org)
     assert goal
     assert len(goal.split()) >= 3
 

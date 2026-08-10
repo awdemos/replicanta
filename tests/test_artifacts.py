@@ -7,7 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import narration
+import llmclient
+import voice
 from organism import Organism
 from probe import SystemProbe
 
@@ -59,15 +60,15 @@ def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
-    narration.diary_entry(org)
+    voice.diary_entry(org)
     assert "diary entry" in captured["p"]
 
 
 def test_diary_entry_fallback_offline(tmp_path):
     org = _organism(tmp_path)
-    narration._voice.online = False
-    entry = narration.diary_entry(org)
+    llmclient._voice.online = False
+    entry = voice.diary_entry(org)
     assert entry
     assert "cycle" in entry or "mood" in entry

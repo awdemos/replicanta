@@ -85,6 +85,8 @@ def test_archive_stale_moves_unused(tmp_path):
 # -- tier A: reflection loop + retrieval --------------------------------------
 
 import narration
+import llmclient
+import voice
 from organism import Organism
 from probe import SystemProbe
 
@@ -100,11 +102,11 @@ def _organism(tmp_path, **kwargs):
 def test_reflect_creates_skill(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda *a, **k: ("skill: rain talk\n"
                          "when: the user mentions rain\n"
                          "how: connect it to something I know, ask once"))
-    result = narration.reflect(org)
+    result = voice.reflect(org)
     assert result["action"] == "created"
     skill = org.skills.get("rain talk")
     assert skill is not None
@@ -116,33 +118,33 @@ def test_reflect_patches_existing_skill(tmp_path, monkeypatch):
     org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe",
                                  created_cycle=1, updated_cycle=1))
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda *a, **k: "patch: comfort\nwhen: anxious\nhow: breathe slowly")
-    result = narration.reflect(org)
+    result = voice.reflect(org)
     assert result["action"] == "patched"
     assert org.skills.get("comfort").how == "breathe slowly"
 
 
 def test_reflect_nothing_writes_no_file(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "nothing")
-    assert narration.reflect(org)["action"] == "none"
+    assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 
 
 def test_reflect_garbage_writes_no_file(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "I feel like reflecting today!")
-    assert narration.reflect(org)["action"] == "none"
+    assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 
 
 def test_reflect_offline_skips(tmp_path):
     org = _organism(tmp_path)
-    narration._voice.online = False
-    assert narration.reflect(org)["action"] == "none"
+    llmclient._voice.online = False
+    assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 
 
@@ -153,9 +155,9 @@ def test_reflect_prompt_carries_episodes_and_skills(tmp_path, monkeypatch):
                                  created_cycle=1, updated_cycle=1))
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
-    narration.reflect(org)
+    voice.reflect(org)
     assert "your name is sam" in captured["p"]
     assert "comfort" in captured["p"]
     assert "patch:" in captured["p"]
@@ -265,13 +267,13 @@ def test_parse_reflect_extension_proposal():
 def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda *a, **k: ("patch-extension:\n"
                          "kind: pattern\n"
                          "entry: i adore (.+) -> user:like_{x}:true\n"
                          "example: i adore hiking\n"
                          "why: the user says adore"))
-    result = narration.reflect(org)
+    result = voice.reflect(org)
     assert result["action"] == "proposal"
     assert extensions.pending()["regex"] == "i adore (.+)"
 
@@ -279,13 +281,13 @@ def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
 def test_reflect_invalid_proposal_becomes_none(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda *a, **k: ("patch-extension:\n"
                          "kind: pattern\n"
                          "entry: the weather (.+) -> user:like_{x}:true\n"
                          "example: the weather is nice today\n"
                          "why: overreach"))
-    assert narration.reflect(org)["action"] == "none"
+    assert voice.reflect(org)["action"] == "none"
     assert extensions.pending() is None
 
 
@@ -293,9 +295,9 @@ def test_reflect_prompt_offers_extension_format(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
-    narration.reflect(org)
+    voice.reflect(org)
     assert "patch-extension:" in captured["p"]
 
 

@@ -11,6 +11,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import narration
+import llmclient
+import voice
 from narration import (
     _dead_experience,
     _dream_experience,
@@ -19,11 +21,10 @@ from narration import (
     build_prompt,
     fallback_respond,
     fallback_summary,
-    narrate,
-    respond,
     state_snapshot,
 )
 from organism import BeliefStore, Lifecycle, Metrics
+from voice import narrate, respond
 
 
 class FakeWindow:
@@ -187,7 +188,7 @@ def test_dream_experience_reacts_to_stress(org):
 
 
 def test_narrate_returns_ollama_response(org, monkeypatch):
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "I wonder about fur.")
     assert narrate(org) == "I wonder about fur."
 
@@ -195,7 +196,7 @@ def test_narrate_returns_ollama_response(org, monkeypatch):
 def test_narrate_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     text = narrate(org)
     assert "2 beliefs" in text and "wake" in text
 
@@ -324,7 +325,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
     def fake_generate(prompt, model, timeout, temperature=0.95):
         captured["prompt"] = prompt
         return "Hello, human. I am awake."
-    monkeypatch.setattr("narration._ollama_generate", fake_generate)
+    monkeypatch.setattr("llmclient.generate", fake_generate)
     reply = respond(org, "hello there")
     assert reply == "Hello, human. I am awake."
     assert "hello there" in captured["prompt"]
@@ -333,7 +334,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
 def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
-    monkeypatch.setattr("narration._ollama_generate", boom)
+    monkeypatch.setattr("llmclient.generate", boom)
     reply = respond(org, "hello there")
     assert "hello there" in reply
     assert "2 beliefs" in reply
@@ -370,7 +371,7 @@ def test_seed_pool_draws_from_lived_state(org):
 def test_narrate_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     narrate(org)
     assert "what is most alive in you right now" in captured["prompt"]
@@ -380,9 +381,9 @@ def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
     org.store.record_chat("org", "am I more than my beliefs?")
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
-    narration.self_ask(org)
+    voice.self_ask(org)
     assert "do not repeat them" in captured["prompt"]
     assert "am I more than my beliefs?" in captured["prompt"]
 
@@ -390,7 +391,7 @@ def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
 def test_respond_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     respond(org, "hello there")
     assert "what is most alive in you right now" in captured["prompt"]
@@ -421,9 +422,9 @@ def test_self_ask_prompt_continues_the_conversation(org, monkeypatch):
     org.store.record_chat("org", "I believe in fur.")
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
-    narration.self_ask(org)
+    voice.self_ask(org)
     assert "Your ongoing conversation with yourself" in captured["prompt"]
     assert "what do I believe?" in captured["prompt"]
     assert "I believe in fur." in captured["prompt"]
@@ -467,17 +468,17 @@ def test_ask_user_fallback_uses_user_facts(org):
 
 
 def test_ask_user_offline_returns_fallback(org):
-    narration._voice.online = False
-    question = narration.ask_user(org)
+    llmclient._voice.online = False
+    question = voice.ask_user(org)
     assert "beyond the machine" in question
 
 
 def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
-    narration.ask_user(org)
+    voice.ask_user(org)
     assert "what is most alive in you right now" in captured["prompt"]
     assert "Ask the user one question" in captured["prompt"]
 
@@ -488,7 +489,7 @@ def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
 def test_respond_replays_winner_through_on_token(org, monkeypatch):
     """The debate itself cannot stream; the winning reply is replayed in
     word chunks so the incremental display keeps working."""
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "hi there friend")
     tokens = []
     assert respond(org, "hello", on_token=tokens.append) == "hi there friend"
@@ -504,16 +505,16 @@ def test_default_model_is_qwen3_5():
 
 
 def test_strip_think_removes_block():
-    text = narration._strip_think("<think>let me reason</think>hello there")
+    text = llmclient._strip_think("<think>let me reason</think>hello there")
     assert text == "hello there"
 
 
 def test_strip_think_unterminated_block():
-    assert narration._strip_think("hi<think>still going") == "hi"
+    assert llmclient._strip_think("hi<think>still going") == "hi"
 
 
 def test_strip_think_plain_text_untouched():
-    assert narration._strip_think("just prose") == "just prose"
+    assert llmclient._strip_think("just prose") == "just prose"
 
 
 def test_ollama_generate_disables_thinking(monkeypatch):
@@ -629,7 +630,7 @@ def test_narrate_returns_none_when_stuck_on_a_repeat(org, monkeypatch):
 def test_narrate_only_checks_its_own_voice(org, monkeypatch):
     # user lines must not silence the organism's own fresh thought
     org.store.record_chat("user", "I wonder about fur.")
-    monkeypatch.setattr("narration._ollama_generate",
+    monkeypatch.setattr("llmclient.generate",
                         lambda *a, **k: "I wonder about fur.")
     assert narrate(org) == "I wonder about fur."
 
@@ -638,7 +639,7 @@ def test_self_ask_falls_back_when_questions_repeat(org, monkeypatch):
     org.store.record_chat("org", "do I really believe in fur?")
     monkeypatch.setattr("arena.ThoughtArena.emerge",
                         lambda self, org, **kw: "do I really believe in fur?")
-    question = narration.self_ask(org)
+    question = voice.self_ask(org)
     assert question != "do I really believe in fur?"
     assert question.endswith("?")
 
@@ -648,7 +649,7 @@ def test_self_answer_falls_back_when_answers_repeat(org, monkeypatch):
     monkeypatch.setattr("arena.ThoughtArena.emerge",
                         lambda self, org, **kw:
                         "I believe in fur because I feel it.")
-    answer = narration.self_answer(org, "do I really believe in fur?")
+    answer = voice.self_answer(org, "do I really believe in fur?")
     assert answer != "I believe in fur because I feel it."
     assert "do I really believe in fur?" in answer
 
@@ -685,7 +686,7 @@ def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
     from arena import ThoughtArena
     prompts = []
     monkeypatch.setattr(
-        "narration._ollama_generate",
+        "llmclient.generate",
         lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
     ThoughtArena(rng=random.Random(1)).emerge(org)
     ThoughtArena(rng=random.Random(1)).emerge(org)

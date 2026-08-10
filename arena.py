@@ -18,7 +18,9 @@ import re
 import urllib.error
 
 import activity
+import llmclient
 import narration
+from llmclient import clean_candidate as _clean_candidate
 
 VOTE_PREFIX = "VOTE: "
 VOTE_RE = re.compile(r"VOTE:\s*([12])")
@@ -41,82 +43,9 @@ ROGUE_THOUGHT = ("Draft a rogue thought of your own, spun from nowhere - "
 TEMP_MIN = 0.7      # lower bound for the per-round temperature jitter
 TEMP_MAX = 0.85     # upper bound
 
-# chatty models love to narrate their own process ("Here is a draft of a
-# candidate answer: …", "Here is the evaluation: …") instead of just
-# answering; these patterns unwrap the real candidate from that preamble
-# and cut any trailing self-evaluation before it leaks into an utterance
-_META_PREFIX_RE = re.compile(
-    r"(?is)^.*?(?:here\s+(?:is|'s)\s+(?:a|the|my)?\s*"
-    r"(?:draft|candidate|answer|response|reply|possible answer)[^:\n]*:|"
-    r"draft(?:\s+of\s+a\s+candidate\s+answer)?:)\s*")
-# labels chatty models prepend to the answer itself ("Draft: …",
-# "Response: …") — strip the label, keep the answer
-_LABEL_PREFIX_RE = re.compile(
-    r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*")
-_META_TAIL_RE = re.compile(
-    r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
-    r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
-_INSTRUCTION_ECHO_RE = re.compile(
-    r"(?im)^\s*(?:draft(?:ing)?\b.*|then,?\s+(?:evaluate|revise)"
-    r".*|attack both candidates.*|which candidate is better\??.*)$")
-# fragments of the utterance prompts that chatty models echo back verbatim
-# (build_prompt instructions, group-chat context); a line containing any of
-# these is scaffolding, not speech
-_INSTRUCTION_MARKERS = (
-    "no preamble", "no quotes", "no emoji", "worn-out words",
-    "recite statistics", "one to three sentences",
-    "as the organism itself", "answer your own question",
-    "ask yourself one question", "speak from feeling",
-    "reply to the user", "ask the user one question",
-    "candidate answer", "attack both", "which candidate",
-    "spun from nowhere",
-    "you are in a group chat", "recent group conversation",
-    "reply to the group",
-)
-
-
-def _is_repetition_loop(text, threshold=3):
-    """Detect degenerate repetition: a model stuck looping the same
-    sentence (or a near-twin of it) until the token budget runs out.
-    Anaphora loops — sentence after sentence opening with the same words
-    ("The first was …; The first was …; The first was …") — count too.
-    Such output is not a candidate, it is a stuck generator."""
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text)
-             if p.strip()]
-    if len(parts) < threshold:
-        return False
-    norm = [re.sub(r"\W+", " ", p.lower()).strip() for p in parts]
-    top = max(norm.count(n) for n in set(norm))
-    if top >= threshold:
-        return True
-    prefixes = [" ".join(n.split()[:3]) for n in norm
-                if len(n.split()) >= 3]
-    if len(prefixes) >= threshold:
-        return max(prefixes.count(p) for p in set(prefixes)) >= threshold
-    return False
-
-
-def _strip_instruction_echoes(text):
-    """Drop lines that are echoed prompt scaffolding rather than speech."""
-    kept = [line for line in text.splitlines()
-            if not _INSTRUCTION_ECHO_RE.match(line)
-            and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)]
-    return "\n".join(kept)
-
-
-def _clean_candidate(text):
-    """Unwrap a proposer's raw output down to the answer itself: strip
-    meta preambles ("Here is the draft:"), trailing self-evaluations, and
-    echoed instructions. A degenerate repetition loop counts as no
-    candidate at all. Returns the cleaned text (possibly empty)."""
-    text = _META_PREFIX_RE.sub("", text.strip(), count=1)
-    text = _META_TAIL_RE.sub("", text)
-    text = _strip_instruction_echoes(text)
-    text = _LABEL_PREFIX_RE.sub("", text.strip())
-    text = text.strip().strip('"').strip()
-    if _is_repetition_loop(text):
-        return ""
-    return text
+# candidate cleaning (meta preambles, echoed instructions,
+# repetition loops) lives in llmclient; the alias keeps the
+# existing import seam for callers and tests.
 
 
 class ThoughtArena:
@@ -148,8 +77,8 @@ class ThoughtArena:
         full debate per utterance would cost minutes.
         """
         model = (model or self._model
-                 or os.environ.get("OLLAMA_MODEL", narration.DEFAULT_MODEL))
-        timeout = timeout or self._timeout or narration.TIMEOUT
+                 or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL))
+        timeout = timeout or self._timeout or llmclient.TIMEOUT
         snapshot = narration.state_snapshot(org)
         # every debate circles a different concrete thing — this rotation is
         # what keeps the idle voice from repeating itself; the last few
@@ -160,7 +89,7 @@ class ThoughtArena:
         if recent_seeds is None:
             from collections import deque
             recent_seeds = org._recent_seeds = deque(maxlen=6)
-        snapshot["seed"] = narration._seed_for(snapshot, self._rng,
+        snapshot["seed"] = llmclient.seed_for(snapshot, self._rng,
                                                exclude=recent_seeds)
         recent_seeds.append(snapshot["seed"])
         # the whole organism treats chaos as stress-nudged
@@ -173,7 +102,7 @@ class ThoughtArena:
         temperature = 0.0 if snapshot.get("temperature") == 0 else None
         # voice known-offline: skip the debate entirely so replies stay
         # instant instead of paying an ollama timeout on every utterance
-        if narration.voice_online() is False:
+        if llmclient.voice_online() is False:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"user_message": user_message}
         build.update(prompt_kwargs or {})
@@ -185,9 +114,9 @@ class ThoughtArena:
                 result = self._debate(org, snapshot, build, model,
                                       timeout, surprise, temperature)
         except (urllib.error.URLError, OSError, ValueError, RuntimeError):
-            narration.note_voice_failure()
+            llmclient.note_voice_failure()
             return self._fallback(org.store, snapshot, user_message, fallback)
-        narration.note_voice_success()
+        llmclient.note_voice_success()
         activity.note(org.store, "utterances")
         grounded = activity.grounded(snapshot["seed"], result)
         if grounded:
@@ -260,9 +189,9 @@ class ThoughtArena:
         organism's activity counters (llm call + exact ollama tokens)."""
         activity.note(org.store, "llm_calls")
         activity.note(org.store, "prompt_tokens",
-                      narration.LAST_CALL_STATS["prompt_tokens"])
+                      llmclient.LAST_CALL_STATS["prompt_tokens"])
         activity.note(org.store, "gen_tokens",
-                      narration.LAST_CALL_STATS["gen_tokens"])
+                      llmclient.LAST_CALL_STATS["gen_tokens"])
 
     # -- prompts ---------------------------------------------------------
     def _proposal(self, base, which):
@@ -318,7 +247,7 @@ class ThoughtArena:
     # -- model -----------------------------------------------------------
     def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature == 0.0:
-            text = narration._ollama_generate(prompt, model, timeout,
+            text = llmclient.generate(prompt, model, timeout,
                                               temperature=temperature)
             if org is not None:
                 self._meter(org)
@@ -326,7 +255,7 @@ class ThoughtArena:
         if temperature is None:
             temperature = round(TEMP_MIN + self._rng.random()
                                 * (TEMP_MAX - TEMP_MIN), 2)
-        text = narration._ollama_generate(prompt, model, timeout,
+        text = llmclient.generate(prompt, model, timeout,
                                           temperature=temperature)
         if org is not None:
             self._meter(org)
