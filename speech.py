@@ -29,7 +29,7 @@ MODEL_PATH = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
 
 HF_VOICE_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/"
                 "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}")
-_VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-(.+)-([a-z]+)$")
+_VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-([a-z0-9_]+)-([a-z]+)$")
 
 enabled = False
 _queue = queue.Queue()

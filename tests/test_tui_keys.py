@@ -152,3 +152,15 @@ def test_ctrl_q_binding_exists_and_saves_before_quit(monkeypatch, tmp_path):
     assert flushed["called"], "action_quit did not flush organism state"
     assert armed["called"], "action_quit did not arm the hard-exit fallback"
     assert quit_called["called"], "action_quit did not call exit"
+
+
+def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
+    """--org names must pass nursery.NAME_RE before organism_dir is built —
+    otherwise '--org ../otherdir' opens a directory outside the nursery."""
+    import pytest
+    import tui
+
+    monkeypatch.setattr(
+        "sys.argv", ["replicanta", "--dir", str(tmp_path), "--org", "../evil"])
+    with pytest.raises(SystemExit):
+        tui.main()

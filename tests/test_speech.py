@@ -150,6 +150,9 @@ def test_voice_urls_rejects_bad_names():
     assert speech.voice_urls("lessac") is None
     assert speech.voice_urls("../etc/passwd") is None
     assert speech.voice_urls("EN_US-lessac-medium") is None
+    # Prefix-valid spec embedding traversal must not reach curl -o.
+    assert speech.voice_urls("en_US-x/../../../tmp/evil-low") is None
+    assert speech.voice_urls("en_US-x/../evil-low") is None
 
 
 def test_download_voice_invalid_name_never_calls_curl(monkeypatch):

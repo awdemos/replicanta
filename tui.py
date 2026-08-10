@@ -2069,6 +2069,8 @@ def main():
     root = Path(args.dir)
     nursery.migrate(root)
     name = args.org or nursery.current(root)
+    if not nursery.NAME_RE.match(name):
+        parser.error(f"invalid organism name: {name!r}")
     org_dir = nursery.organism_dir(root, name)
     if not org_dir.exists():
         nursery.create(root, name, root / "organism.scl")
