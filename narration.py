@@ -11,7 +11,7 @@ import learning
 # Re-exported from the shared LLM client for compatibility: callers (and
 # tests) that import these through narration keep working.
 from llmclient import (  # noqa: F401
-    DEFAULT_MODEL, LAST_CALL_STATS, MAX_TOKENS, OLLAMA_URL, TIMEOUT,
+    DEFAULT_MODEL, MAX_TOKENS, OLLAMA_URL, TIMEOUT,
     VISION_MODEL, VISION_TIMEOUT, describe_image, note_voice_failure,
     note_voice_success, probe_voice, reset_voice, voice_online,
     voice_status)

@@ -6,6 +6,7 @@ import json
 import random
 import re
 import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import ClassVar
 
@@ -768,6 +769,10 @@ class Organism:
         self._last_stress_band = 0
         self._sentiment = None   # (tone, timestamp): "harsh" | "kind" | "learn"
         self._mood = None
+        # arena seed history: the last few utterance seeds, excluded from
+        # the next pick so an idle voice keeps wandering (per-organism,
+        # resets naturally on swap or restart)
+        self._recent_seeds = deque(maxlen=6)
         self.last_sight = None   # latest camera scene description (transient)
 
     def load(self):

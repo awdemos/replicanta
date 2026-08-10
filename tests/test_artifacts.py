@@ -11,6 +11,7 @@ import llmclient
 import voice
 from organism import Organism
 from probe import SystemProbe
+from conftest import patch_generate
 
 
 def _organism(tmp_path, **kwargs):
@@ -59,9 +60,7 @@ def test_write_diary_remembers_episode(tmp_path):
 def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
     voice.diary_entry(org)
     assert "diary entry" in captured["p"]
 

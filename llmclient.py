@@ -28,11 +28,6 @@ TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "240"))
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
 VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
 
-# token accounting of the most recent generation (exact, from ollama's own
-# eval fields); the arena reads it after every call to meter neural
-# activity. Debates are sequential, so one global slot is race-free.
-LAST_CALL_STATS = {"prompt_tokens": 0, "gen_tokens": 0}
-
 # belief objects that are env metrics (background, not conversation)
 ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
 
@@ -134,8 +129,10 @@ def _strip_special(text):
     return text.strip()
 
 
-def generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
-    """POST to ollama /api/generate, non-streaming. Raises on failure."""
+def generate_with_stats(prompt, model, timeout=TIMEOUT, temperature=0.95):
+    """(text, stats) from ollama /api/generate, non-streaming; stats are
+    the exact prompt/gen token counts from ollama's eval fields. Raises
+    on failure."""
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
@@ -151,9 +148,14 @@ def generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
         data = json.loads(resp.read().decode())
     if data.get("error"):
         raise RuntimeError(data["error"])
-    LAST_CALL_STATS["prompt_tokens"] = int(data.get("prompt_eval_count") or 0)
-    LAST_CALL_STATS["gen_tokens"] = int(data.get("eval_count") or 0)
-    return _strip_special(_strip_think(data.get("response", "")))
+    stats = {"prompt_tokens": int(data.get("prompt_eval_count") or 0),
+             "gen_tokens": int(data.get("eval_count") or 0)}
+    return _strip_special(_strip_think(data.get("response", ""))), stats
+
+
+def generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
+    """POST to ollama /api/generate, non-streaming. Raises on failure."""
+    return generate_with_stats(prompt, model, timeout, temperature)[0]
 
 
 def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):

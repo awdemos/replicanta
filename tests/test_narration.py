@@ -25,6 +25,7 @@ from narration import (
 )
 from organism import BeliefStore, Lifecycle, Metrics
 from voice import narrate, respond
+from conftest import patch_generate
 
 
 class FakeWindow:
@@ -188,15 +189,14 @@ def test_dream_experience_reacts_to_stress(org):
 
 
 def test_narrate_returns_ollama_response(org, monkeypatch):
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "I wonder about fur.")
+    patch_generate(monkeypatch, lambda *a, **k: "I wonder about fur.")
     assert narrate(org) == "I wonder about fur."
 
 
 def test_narrate_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     text = narrate(org)
     assert "2 beliefs" in text and "wake" in text
 
@@ -325,7 +325,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
     def fake_generate(prompt, model, timeout, temperature=0.95):
         captured["prompt"] = prompt
         return "Hello, human. I am awake."
-    monkeypatch.setattr("llmclient.generate", fake_generate)
+    patch_generate(monkeypatch, fake_generate)
     reply = respond(org, "hello there")
     assert reply == "Hello, human. I am awake."
     assert "hello there" in captured["prompt"]
@@ -334,7 +334,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
 def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
     assert "hello there" in reply
     assert "2 beliefs" in reply
@@ -370,9 +370,7 @@ def test_seed_pool_draws_from_lived_state(org):
 
 def test_narrate_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     narrate(org)
     assert "what is most alive in you right now" in captured["prompt"]
 
@@ -380,9 +378,7 @@ def test_narrate_prompt_carries_a_seed(org, monkeypatch):
 def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
     org.store.record_chat("org", "am I more than my beliefs?")
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     voice.self_ask(org)
     assert "do not repeat them" in captured["prompt"]
     assert "am I more than my beliefs?" in captured["prompt"]
@@ -390,9 +386,7 @@ def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
 
 def test_respond_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     respond(org, "hello there")
     assert "what is most alive in you right now" in captured["prompt"]
 
@@ -421,9 +415,7 @@ def test_self_ask_prompt_continues_the_conversation(org, monkeypatch):
     org.store.record_chat("org", "what do I believe?")
     org.store.record_chat("org", "I believe in fur.")
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     voice.self_ask(org)
     assert "Your ongoing conversation with yourself" in captured["prompt"]
     assert "what do I believe?" in captured["prompt"]
@@ -475,9 +467,7 @@ def test_ask_user_offline_returns_fallback(org):
 
 def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
     voice.ask_user(org)
     assert "what is most alive in you right now" in captured["prompt"]
     assert "Ask the user one question" in captured["prompt"]
@@ -489,8 +479,7 @@ def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
 def test_respond_replays_winner_through_on_token(org, monkeypatch):
     """The debate itself cannot stream; the winning reply is replayed in
     word chunks so the incremental display keeps working."""
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "hi there friend")
+    patch_generate(monkeypatch, lambda *a, **k: "hi there friend")
     tokens = []
     assert respond(org, "hello", on_token=tokens.append) == "hi there friend"
     assert "".join(tokens) == "hi there friend"
@@ -630,8 +619,7 @@ def test_narrate_returns_none_when_stuck_on_a_repeat(org, monkeypatch):
 def test_narrate_only_checks_its_own_voice(org, monkeypatch):
     # user lines must not silence the organism's own fresh thought
     org.store.record_chat("user", "I wonder about fur.")
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "I wonder about fur.")
+    patch_generate(monkeypatch, lambda *a, **k: "I wonder about fur.")
     assert narrate(org) == "I wonder about fur."
 
 
@@ -685,9 +673,7 @@ def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
     the same seed — the recent-seed history lives on the organism."""
     from arena import ThoughtArena
     prompts = []
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
     ThoughtArena(rng=random.Random(1)).emerge(org)
     ThoughtArena(rng=random.Random(1)).emerge(org)
     seeds = [org._recent_seeds[i] for i in range(len(org._recent_seeds))]

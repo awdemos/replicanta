@@ -9,11 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import activity
-import narration
 import llmclient
 from arena import ThoughtArena
 from organism import BeliefStore, Organism
 from probe import SystemProbe
+from conftest import patch_generate
 
 FEELING = ("cat", "has_fur", "true")
 PAWS = ("cat", "has_paws", "true")
@@ -98,11 +98,10 @@ def test_hear_counts_facts_learned(tmp_path):
 
 def _scripted_arena(monkeypatch, script, gen_tokens=3, prompt_tokens=11):
     def fake(prompt, model, timeout, temperature=0.95):
-        narration.LAST_CALL_STATS["prompt_tokens"] = prompt_tokens
-        narration.LAST_CALL_STATS["gen_tokens"] = gen_tokens
-        return script.pop(0)
+        return (script.pop(0), {"prompt_tokens": prompt_tokens,
+                                "gen_tokens": gen_tokens})
 
-    monkeypatch.setattr("llmclient.generate", fake)
+    monkeypatch.setattr("llmclient.generate_with_stats", fake)
 
 
 def test_arena_meters_calls_tokens_and_utterance(tmp_path, monkeypatch):
@@ -124,7 +123,7 @@ def test_arena_counts_fallbacks(tmp_path, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
 
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     ThoughtArena().emerge(org)
     assert org.store.activity["fallbacks"] == 1
 
@@ -139,7 +138,7 @@ def test_grounded_utterance_counted_when_seed_words_reused(tmp_path, monkeypatch
             return seen.setdefault("winner", "thinking about the cat today")
         return seen.setdefault("winner", "thinking about the cat today")
 
-    monkeypatch.setattr("llmclient.generate", fake)
+    patch_generate(monkeypatch, fake)
     # craft the seed deterministically: the belief itself
     monkeypatch.setattr(llmclient, "seed_for",
                         lambda snap, rng, exclude=():

@@ -83,8 +83,8 @@ class ThoughtArena:
         # every debate circles a different concrete thing — this rotation is
         # what keeps the idle voice from repeating itself; the last few
         # seeds are excluded so a static pool (idle organism) still varies.
-        # The history lives on the organism object: per-organism, and it
-        # resets naturally on swap or restart.
+        # The history is declared on the organism (Organism.__init__); the
+        # getattr fallback covers duck-typed stand-ins in tests.
         recent_seeds = getattr(org, "_recent_seeds", None)
         if recent_seeds is None:
             from collections import deque
@@ -184,14 +184,12 @@ class ThoughtArena:
         return self._pick(drafts, votes, critique)
 
     # -- metering ----------------------------------------------------------
-    def _meter(self, org):
-        """Fold the token accounting of the last generation into the
-        organism's activity counters (llm call + exact ollama tokens)."""
+    def _meter(self, org, stats):
+        """Fold the token accounting of one generation into the organism's
+        activity counters (llm call + exact ollama tokens)."""
         activity.note(org.store, "llm_calls")
-        activity.note(org.store, "prompt_tokens",
-                      llmclient.LAST_CALL_STATS["prompt_tokens"])
-        activity.note(org.store, "gen_tokens",
-                      llmclient.LAST_CALL_STATS["gen_tokens"])
+        activity.note(org.store, "prompt_tokens", stats["prompt_tokens"])
+        activity.note(org.store, "gen_tokens", stats["gen_tokens"])
 
     # -- prompts ---------------------------------------------------------
     def _proposal(self, base, which):
@@ -246,19 +244,13 @@ class ThoughtArena:
 
     # -- model -----------------------------------------------------------
     def _generate(self, prompt, model, timeout, temperature, org=None):
-        if temperature == 0.0:
-            text = llmclient.generate(prompt, model, timeout,
-                                              temperature=temperature)
-            if org is not None:
-                self._meter(org)
-            return text
         if temperature is None:
             temperature = round(TEMP_MIN + self._rng.random()
                                 * (TEMP_MAX - TEMP_MIN), 2)
-        text = llmclient.generate(prompt, model, timeout,
-                                          temperature=temperature)
+        text, stats = llmclient.generate_with_stats(
+            prompt, model, timeout, temperature=temperature)
         if org is not None:
-            self._meter(org)
+            self._meter(org, stats)
         return text
 
     def _fallback(self, store, snapshot, user_message, fallback):

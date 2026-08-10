@@ -12,6 +12,7 @@ import llmclient
 import voice
 from organism import BeliefStore, Organism
 from probe import SystemProbe
+from conftest import patch_generate
 
 
 def _null_probe():
@@ -104,9 +105,7 @@ def test_add_goal_remembers_episode(tmp_path):
 def test_form_goal_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
     voice.form_goal(org)
     assert "one thing you want" in captured["p"]
 

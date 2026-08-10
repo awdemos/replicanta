@@ -14,6 +14,7 @@ import pytest
 from arena import ThoughtArena
 from narration import probe_voice, voice_online, voice_status
 from organism import BeliefStore, Lifecycle, Metrics
+from conftest import patch_generate
 
 
 class _FakeWindow:
@@ -93,9 +94,7 @@ def test_voice_unknown_before_any_probe():
 
 def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda *a, **k: calls.append(1) or "should not happen")
+    patch_generate(monkeypatch, lambda *a, **k: calls.append(1) or "should not happen")
     narration.reset_voice()
     narration.note_voice_failure()
     narration.note_voice_failure()   # streak -> offline
@@ -107,7 +106,7 @@ def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
 def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("connection refused")
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     ThoughtArena().emerge(org)
     assert voice_online() is None       # one failure: still retryable
     ThoughtArena().emerge(org)
@@ -115,8 +114,7 @@ def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
 
 
 def test_arena_success_clears_offline(org, monkeypatch):
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "a clear small thought")
+    patch_generate(monkeypatch, lambda *a, **k: "a clear small thought")
     narration.note_voice_failure()
     narration.note_voice_failure()
     assert voice_online() is False

@@ -19,6 +19,7 @@ from narration import (
 )
 from organism import BeliefStore, Lifecycle, Metrics
 from voice import self_answer, self_ask
+from conftest import patch_generate
 
 
 class _FakeWindow:
@@ -79,7 +80,7 @@ def test_fallback_self_answer_echoes_question(org):
 def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("down")
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     q = self_ask(org)
     assert q.endswith("?")
     assert "believe" in q
@@ -88,20 +89,18 @@ def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
 def test_self_answer_falls_back_when_ollama_down(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("down")
-    monkeypatch.setattr("llmclient.generate", boom)
+    patch_generate(monkeypatch, boom)
     assert "why am I here?" in self_answer(org, "why am I here?")
 
 
 def test_self_ask_uses_ollama_when_up(org, monkeypatch):
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "am I more than my beliefs?")
+    patch_generate(monkeypatch, lambda *a, **k: "am I more than my beliefs?")
     assert self_ask(org) == "am I more than my beliefs?"
 
 
 def test_self_ask_skips_ollama_when_voice_offline(org, monkeypatch):
     calls = []
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: calls.append(1))
+    patch_generate(monkeypatch, lambda *a, **k: calls.append(1))
     narration.note_voice_failure()
     narration.note_voice_failure()   # streak -> offline
     assert self_ask(org).endswith("?")

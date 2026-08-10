@@ -101,9 +101,7 @@ def _organism(tmp_path, **kwargs):
 
 def test_reflect_creates_skill(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda *a, **k: ("skill: rain talk\n"
+    patch_generate(monkeypatch, lambda *a, **k: ("skill: rain talk\n"
                          "when: the user mentions rain\n"
                          "how: connect it to something I know, ask once"))
     result = voice.reflect(org)
@@ -117,9 +115,7 @@ def test_reflect_patches_existing_skill(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe",
                                  created_cycle=1, updated_cycle=1))
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda *a, **k: "patch: comfort\nwhen: anxious\nhow: breathe slowly")
+    patch_generate(monkeypatch, lambda *a, **k: "patch: comfort\nwhen: anxious\nhow: breathe slowly")
     result = voice.reflect(org)
     assert result["action"] == "patched"
     assert org.skills.get("comfort").how == "breathe slowly"
@@ -127,16 +123,14 @@ def test_reflect_patches_existing_skill(tmp_path, monkeypatch):
 
 def test_reflect_nothing_writes_no_file(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "nothing")
+    patch_generate(monkeypatch, lambda *a, **k: "nothing")
     assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 
 
 def test_reflect_garbage_writes_no_file(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr("llmclient.generate",
-                        lambda *a, **k: "I feel like reflecting today!")
+    patch_generate(monkeypatch, lambda *a, **k: "I feel like reflecting today!")
     assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 
@@ -154,9 +148,7 @@ def test_reflect_prompt_carries_episodes_and_skills(tmp_path, monkeypatch):
     org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe",
                                  created_cycle=1, updated_cycle=1))
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
     voice.reflect(org)
     assert "your name is sam" in captured["p"]
     assert "comfort" in captured["p"]
@@ -247,6 +239,7 @@ def test_mind_view_shows_skills(tmp_path):
 # -- tier B: patch proposals ----------------------------------------------------
 
 import extensions
+from conftest import patch_generate
 
 
 def test_parse_reflect_extension_proposal():
@@ -266,9 +259,7 @@ def test_parse_reflect_extension_proposal():
 
 def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda *a, **k: ("patch-extension:\n"
+    patch_generate(monkeypatch, lambda *a, **k: ("patch-extension:\n"
                          "kind: pattern\n"
                          "entry: i adore (.+) -> user:like_{x}:true\n"
                          "example: i adore hiking\n"
@@ -280,9 +271,7 @@ def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
 
 def test_reflect_invalid_proposal_becomes_none(tmp_path, monkeypatch):
     org = _organism(tmp_path)
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda *a, **k: ("patch-extension:\n"
+    patch_generate(monkeypatch, lambda *a, **k: ("patch-extension:\n"
                          "kind: pattern\n"
                          "entry: the weather (.+) -> user:like_{x}:true\n"
                          "example: the weather is nice today\n"
@@ -294,9 +283,7 @@ def test_reflect_invalid_proposal_becomes_none(tmp_path, monkeypatch):
 def test_reflect_prompt_offers_extension_format(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    monkeypatch.setattr(
-        "llmclient.generate",
-        lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "nothing")
     voice.reflect(org)
     assert "patch-extension:" in captured["p"]
 

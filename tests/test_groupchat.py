@@ -13,6 +13,7 @@ import pytest
 import groupchat
 from groupchat import GroupChat
 from organism import BeliefStore, Lifecycle, Metrics
+from conftest import patch_generate
 
 
 class _Window:
@@ -54,7 +55,7 @@ def _scripted(monkeypatch, replies):
         calls.append(prompt)
         return replies.pop(0)
 
-    monkeypatch.setattr("llmclient.generate", fake)
+    patch_generate(monkeypatch, fake)
     return calls
 
 
