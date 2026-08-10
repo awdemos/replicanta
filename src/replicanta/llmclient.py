@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import extensions
+from replicanta import extensions
 
 DEFAULT_MODEL = "qwen3.5:latest"
 MAX_TOKENS = 180
@@ -33,17 +33,18 @@ def vision_timeout():
 def ollama_url():
     """Ollama generate endpoint (env: OLLAMA_URL, read per call so tests
     and runtime overrides are not frozen at import)."""
-    return os.environ.get(
-        "OLLAMA_URL", "http://localhost:11434/api/generate")
+    return os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
 
 
 def default_timeout():
     """Generation timeout seconds (env: OLLAMA_TIMEOUT, read per call)."""
     return int(os.environ.get("OLLAMA_TIMEOUT", "240"))
+
+
 # per-call ceiling; a 27b-class model chews a 1k-token prompt for ~90s
 
-VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
-VOICE_FAILURE_STREAK = 2     # consecutive debate failures -> voice offline
+VOICE_PROBE_TIMEOUT = 2  # seconds for the /api/tags reachability probe
+VOICE_FAILURE_STREAK = 2  # consecutive debate failures -> voice offline
 
 # belief objects that are env metrics (background, not conversation)
 ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
@@ -53,6 +54,7 @@ ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
 # Cached ollama reachability. `None` = never probed (the arena then tries the
 # debate, preserving the pre-detection behavior); True/False = probed result
 # or inferred from a failure streak. Only `probe_voice()` does network I/O.
+
 
 class _Voice:
     def __init__(self):
@@ -71,8 +73,7 @@ def reset_voice():
 
 def _tags_url():
     parts = urllib.parse.urlsplit(ollama_url())
-    return urllib.parse.urlunsplit(
-        (parts.scheme, parts.netloc, "/api/tags", "", ""))
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/api/tags", "", ""))
 
 
 def probe_voice(model=None):
@@ -85,8 +86,7 @@ def probe_voice(model=None):
             data = json.loads(resp.read().decode())
         names = [m.get("name", "") for m in data.get("models", [])]
         bases = [n.split(":")[0] for n in names]
-        _voice.online = bool(
-            model in names or model.split(":")[0] in bases)
+        _voice.online = bool(model in names or model.split(":")[0] in bases)
     except (urllib.error.URLError, OSError, ValueError):
         _voice.online = False
     _voice.failures = 0
@@ -152,23 +152,31 @@ def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     on failure."""
     if timeout is None:
         timeout = default_timeout()
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": MAX_TOKENS, "temperature": temperature,
-                    "repeat_penalty": 1.1, "stop": _STOP_TOKENS},
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "think": False,
+            "options": {
+                "num_predict": MAX_TOKENS,
+                "temperature": temperature,
+                "repeat_penalty": 1.1,
+                "stop": _STOP_TOKENS,
+            },
+        }
+    ).encode()
     req = urllib.request.Request(
-        ollama_url(), data=payload,
-        headers={"Content-Type": "application/json"})
+        ollama_url(), data=payload, headers={"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
     if data.get("error"):
         raise RuntimeError(data["error"])
-    stats = {"prompt_tokens": int(data.get("prompt_eval_count") or 0),
-             "gen_tokens": int(data.get("eval_count") or 0)}
+    stats = {
+        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
+        "gen_tokens": int(data.get("eval_count") or 0),
+    }
     return _strip_special(_strip_think(data.get("response", ""))), stats
 
 
@@ -184,18 +192,21 @@ def describe_image(image_bytes, model=None, timeout=None):
         model = vision_model()
     if timeout is None:
         timeout = vision_timeout()
-    payload = json.dumps({
-        "model": model,
-        "prompt": ("Describe what is visible in this image in one or two "
-                   "short sentences."),
-        "images": [base64.b64encode(image_bytes).decode()],
-        "stream": False,
-        "think": False,
-        "options": {"num_predict": 80, "temperature": 0.3},
-    }).encode()
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": (
+                "Describe what is visible in this image in one or two short sentences."
+            ),
+            "images": [base64.b64encode(image_bytes).decode()],
+            "stream": False,
+            "think": False,
+            "options": {"num_predict": 80, "temperature": 0.3},
+        }
+    ).encode()
     req = urllib.request.Request(
-        ollama_url(), data=payload,
-        headers={"Content-Type": "application/json"})
+        ollama_url(), data=payload, headers={"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
     if data.get("error"):
@@ -205,6 +216,7 @@ def describe_image(image_bytes, model=None, timeout=None):
 
 # -- seeds -------------------------------------------------------------------
 
+
 def seed_for(snapshot, rng, exclude=()):
     """One concrete thing for this utterance to circle around — a belief, a
     user fact, a memory, the mood, or something imagined. Rotating the seed
@@ -213,8 +225,11 @@ def seed_for(snapshot, rng, exclude=()):
     Seeds used recently (exclude) are avoided while alternatives remain,
     so an idle organism with a static pool still wanders."""
     pool = []
-    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]
-             if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS]
+    pool += [
+        f"this belief: {b}"
+        for b in snapshot["beliefs"][:4]
+        if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS
+    ]
     pool += [f"the user — {f}" for f in snapshot.get("user_facts", [])]
     pool += [f"a memory — {m}" for m in snapshot.get("memory", [])]
     if snapshot.get("user_view"):
@@ -241,29 +256,43 @@ def seed_for(snapshot, rng, exclude=()):
 _META_PREFIX_RE = re.compile(
     r"(?is)^.*?(?:here\s+(?:is|'s)\s+(?:a|the|my)?\s*"
     r"(?:draft|candidate|answer|response|reply|possible answer)[^:\n]*:|"
-    r"draft(?:\s+of\s+a\s+candidate\s+answer)?:)\s*")
+    r"draft(?:\s+of\s+a\s+candidate\s+answer)?:)\s*"
+)
 # labels chatty models prepend to the answer itself ("Draft: …",
 # "Response: …") — strip the label, keep the answer
 _LABEL_PREFIX_RE = re.compile(
-    r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*")
+    r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*"
+)
 _META_TAIL_RE = re.compile(
     r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
-    r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
+    r"revised)|evaluation:|critique:|assessment:|weakness).*$",
+)
 _INSTRUCTION_ECHO_RE = re.compile(
     r"(?im)^\s*(?:draft(?:ing)?\b.*|then,?\s+(?:evaluate|revise)"
-    r".*|attack both candidates.*|which candidate is better\??.*)$")
+    r".*|attack both candidates.*|which candidate is better\??.*)$"
+)
 # fragments of the utterance prompts that chatty models echo back verbatim
 # (build_prompt instructions, group-chat context); a line containing any of
 # these is scaffolding, not speech
 _INSTRUCTION_MARKERS = (
-    "no preamble", "no quotes", "no emoji", "worn-out words",
-    "recite statistics", "one to three sentences",
-    "as the organism itself", "answer your own question",
-    "ask yourself one question", "speak from feeling",
-    "reply to the user", "ask the user one question",
-    "candidate answer", "attack both", "which candidate",
+    "no preamble",
+    "no quotes",
+    "no emoji",
+    "worn-out words",
+    "recite statistics",
+    "one to three sentences",
+    "as the organism itself",
+    "answer your own question",
+    "ask yourself one question",
+    "speak from feeling",
+    "reply to the user",
+    "ask the user one question",
+    "candidate answer",
+    "attack both",
+    "which candidate",
     "spun from nowhere",
-    "you are in a group chat", "recent group conversation",
+    "you are in a group chat",
+    "recent group conversation",
     "reply to the group",
 )
 
@@ -274,16 +303,14 @@ def _is_repetition_loop(text, threshold=3):
     Anaphora loops — sentence after sentence opening with the same words
     ("The first was …; The first was …; The first was …") — count too.
     Such output is not a candidate, it is a stuck generator."""
-    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text)
-             if p.strip()]
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text) if p.strip()]
     if len(parts) < threshold:
         return False
     norm = [re.sub(r"\W+", " ", p.lower()).strip() for p in parts]
     top = max(norm.count(n) for n in set(norm))
     if top >= threshold:
         return True
-    prefixes = [" ".join(n.split()[:3]) for n in norm
-                if len(n.split()) >= 3]
+    prefixes = [" ".join(n.split()[:3]) for n in norm if len(n.split()) >= 3]
     if len(prefixes) >= threshold:
         return max(prefixes.count(p) for p in set(prefixes)) >= threshold
     return False
@@ -291,9 +318,12 @@ def _is_repetition_loop(text, threshold=3):
 
 def _strip_instruction_echoes(text):
     """Drop lines that are echoed prompt scaffolding rather than speech."""
-    kept = [line for line in text.splitlines()
-            if not _INSTRUCTION_ECHO_RE.match(line)
-            and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)]
+    kept = [
+        line
+        for line in text.splitlines()
+        if not _INSTRUCTION_ECHO_RE.match(line)
+        and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)
+    ]
     return "\n".join(kept)
 
 

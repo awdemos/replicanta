@@ -3,15 +3,11 @@ focus off the chat input (typing would be lost), completion must still
 work, and F-pane switches must not strand a following Tab."""
 
 import asyncio
-import sys
-from pathlib import Path
 
 from textual.widgets import TabbedContent
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from organism import Organism
-from tui import OrganismApp
+from replicanta.organism import Organism
+from replicanta.tui import OrganismApp
 
 
 def _headless_app(monkeypatch, tmp_path):
@@ -146,8 +142,7 @@ def test_ctrl_q_binding_exists_and_saves_before_quit(monkeypatch, tmp_path):
     # stub the hard-exit timer: the real one would os._exit the pytest
     # process two seconds after this test runs
     armed = {"called": False}
-    monkeypatch.setattr(
-        app, "_arm_hard_exit", lambda: armed.update(called=True))
+    monkeypatch.setattr(app, "_arm_hard_exit", lambda: armed.update(called=True))
     app.action_quit()
     assert flushed["called"], "action_quit did not flush organism state"
     assert armed["called"], "action_quit did not arm the hard-exit fallback"
@@ -158,9 +153,11 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
     """--org names must pass nursery.NAME_RE before organism_dir is built —
     otherwise '--org ../otherdir' opens a directory outside the nursery."""
     import pytest
-    import tui
+
+    from replicanta import tui
 
     monkeypatch.setattr(
-        "sys.argv", ["replicanta", "--dir", str(tmp_path), "--org", "../evil"])
+        "sys.argv", ["replicanta", "--dir", str(tmp_path), "--org", "../evil"]
+    )
     with pytest.raises(SystemExit):
         tui.main()

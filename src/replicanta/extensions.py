@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-from fileutil import atomic_write_text
+from replicanta.fileutil import atomic_write_text
 
 _EMPTY = {"version": 0, "entries": [], "pending": None}
 
@@ -57,6 +57,7 @@ def validate(entry):
 
 # -- registry io ----------------------------------------------------------------
 
+
 def _read(path):
     path = Path(path)
     if not path.exists():
@@ -98,6 +99,7 @@ def pending():
 
 
 # -- proposal lifecycle -----------------------------------------------------------
+
 
 def propose(path, entry, auto_apply=False):
     """Stage an entry as pending, or apply it immediately if auto_apply is True."""

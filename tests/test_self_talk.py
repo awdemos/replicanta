@@ -2,24 +2,21 @@
 build_prompt ask/answer branches, self_ask/self_answer with deterministic
 fallbacks, and the /self-talk TUI toggle routing the periodic narration."""
 
-import sys
 import urllib.error
-from pathlib import Path
 from typing import ClassVar
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import llmclient
 import pytest
-from narration import (
+from conftest import patch_generate
+
+from replicanta import llmclient
+from replicanta.narration import (
     build_prompt,
     fallback_self_answer,
     fallback_self_ask,
     state_snapshot,
 )
-from organism import BeliefStore, Lifecycle, Metrics
-from voice import self_answer, self_ask
-from conftest import patch_generate
+from replicanta.organism import BeliefStore, Lifecycle, Metrics
+from replicanta.voice import self_answer, self_ask
 
 
 class _FakeWindow:
@@ -45,6 +42,7 @@ def org(tmp_path):
 
 # -- build_prompt branches -----------------------------------------------------
 
+
 def test_build_prompt_self_ask_instruction(org):
     prompt = build_prompt(state_snapshot(org), task="self_ask")
     assert "Ask yourself one question" in prompt
@@ -52,12 +50,15 @@ def test_build_prompt_self_ask_instruction(org):
 
 
 def test_build_prompt_self_answer_includes_question(org):
-    prompt = build_prompt(state_snapshot(org), task="self_answer", question="why am I here?")
+    prompt = build_prompt(
+        state_snapshot(org), task="self_answer", question="why am I here?"
+    )
     assert "why am I here?" in prompt
     assert "Answer your own question" in prompt
 
 
 # -- fallbacks -----------------------------------------------------------------
+
 
 def test_fallback_self_ask_ends_in_question(org):
     q = fallback_self_ask(state_snapshot(org))
@@ -67,8 +68,7 @@ def test_fallback_self_ask_ends_in_question(org):
 
 def test_fallback_self_ask_empty_beliefs(org):
     org.store.beliefs_map.clear()
-    assert fallback_self_ask(state_snapshot(org)) == \
-        "what do I really believe?"
+    assert fallback_self_ask(state_snapshot(org)) == "what do I really believe?"
 
 
 def test_fallback_self_answer_echoes_question(org):
@@ -80,6 +80,7 @@ def test_fallback_self_answer_echoes_question(org):
 def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("down")
+
     patch_generate(monkeypatch, boom)
     q = self_ask(org)
     assert q.endswith("?")
@@ -89,6 +90,7 @@ def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
 def test_self_answer_falls_back_when_ollama_down(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("down")
+
     patch_generate(monkeypatch, boom)
     assert "why am I here?" in self_answer(org, "why am I here?")
 
@@ -102,6 +104,6 @@ def test_self_ask_skips_ollama_when_voice_offline(org, monkeypatch):
     calls = []
     patch_generate(monkeypatch, lambda *a, **k: calls.append(1))
     llmclient.note_voice_failure()
-    llmclient.note_voice_failure()   # streak -> offline
+    llmclient.note_voice_failure()  # streak -> offline
     assert self_ask(org).endswith("?")
     assert calls == []

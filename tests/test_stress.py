@@ -1,13 +1,9 @@
 """Stress feature: StressMeter mechanics, adverse hooks, chaos coupling,
 harshness scorer, and narration/TUI exposure."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
-from organism import (
+
+from replicanta.organism import (
     BeliefStore,
     DreamEngine,
     Mind,
@@ -15,7 +11,7 @@ from organism import (
     SelfQuestioner,
     StressMeter,
 )
-from sentiment import harshness
+from replicanta.sentiment import harshness
 
 
 @pytest.fixture
@@ -28,6 +24,7 @@ def _meter(store):
 
 
 # -- StressMeter mechanics -------------------------------------------------
+
 
 def test_baseline_stress(store):
     meter = _meter(store)
@@ -95,6 +92,7 @@ def test_calm_mood_no_pressure(store):
 
 # -- persistence -----------------------------------------------------------
 
+
 def test_stress_persists_in_state_json(tmp_path):
     store = BeliefStore(tmp_path)
     store.stress = 0.42
@@ -113,6 +111,7 @@ def test_stress_defaults_to_baseline_on_load(tmp_path):
 
 
 # -- adverse hooks ---------------------------------------------------------
+
 
 def test_contradiction_bumps_stress(store):
     meter = _meter(store)
@@ -152,8 +151,13 @@ def test_discarded_dream_bumps_stress(tmp_path):
     engine = DreamEngine(store, mind)
     engine.stress = meter
     before = meter.value
-    unsupported = [{"rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
-                    "combo": "red_true", "head": "q99"}]
+    unsupported = [
+        {
+            "rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
+            "combo": "red_true",
+            "head": "q99",
+        }
+    ]
     engine.promote(unsupported)
     assert meter.value == pytest.approx(before + 0.04)
 
@@ -187,6 +191,7 @@ def test_promoted_dream_no_stress(tmp_path):
 
 
 # -- chaos coupling --------------------------------------------------------
+
 
 def test_chaos_effective_boosted_by_stress(tmp_path):
     scl = tmp_path / "organism.scl"
@@ -229,12 +234,14 @@ def test_wake_uses_effective_chaos_for_question_count(tmp_path, monkeypatch):
     def spy_ask(a, b):
         asked.append(1)
         return orig_ask(a, b)
+
     monkeypatch.setattr(org.questioner, "ask", spy_ask)
     org._wake()
     assert len(asked) == 3
 
 
 # -- harshness -------------------------------------------------------------
+
 
 def test_harshness_zero_for_neutral():
     assert harshness("hello there, how are you?") == 0.0

@@ -2,19 +2,15 @@
 (birth, lessons, dreams, harsh/kind moments, fading, revival), capped and
 persisted, and its inner voice can draw on them for continuity."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from narration import build_prompt, state_snapshot
-from organism import MEMORY_LIMIT, BeliefStore, Lifecycle, Organism
-from probe import SystemProbe
+from replicanta.narration import build_prompt, state_snapshot
+from replicanta.organism import MEMORY_LIMIT, BeliefStore, Lifecycle, Organism
+from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc",
-                                           sys="/nonexistent/sys"))
+    kwargs.setdefault(
+        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
+    )
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
@@ -22,12 +18,12 @@ def _organism(tmp_path, **kwargs):
 
 # -- store mechanics -----------------------------------------------------------
 
+
 def test_remember_records_cycle_stamped_episode(tmp_path):
     store = BeliefStore(tmp_path)
     store.cycle = 7
     store.remember("learned", "you like rain")
-    assert store.memory == [{"cycle": 7, "kind": "learned",
-                             "text": "you like rain"}]
+    assert store.memory == [{"cycle": 7, "kind": "learned", "text": "you like rain"}]
     assert store.dirty
 
 
@@ -50,6 +46,7 @@ def test_memory_persists_across_save_load(tmp_path):
 
 # -- triggers ------------------------------------------------------------------
 
+
 def test_fresh_boot_remembers_birth(tmp_path):
     org = _organism(tmp_path)
     assert org.store.memory[0]["kind"] == "born"
@@ -58,8 +55,7 @@ def test_fresh_boot_remembers_birth(tmp_path):
 def test_learning_is_remembered(tmp_path):
     org = _organism(tmp_path)
     org.hear("i like rain")
-    assert any(m["kind"] == "learned" and "rain" in m["text"]
-               for m in org.store.memory)
+    assert any(m["kind"] == "learned" and "rain" in m["text"] for m in org.store.memory)
 
 
 def test_harsh_and_kind_moments_remembered(tmp_path):
@@ -108,6 +104,7 @@ def test_committed_rule_is_remembered(tmp_path, monkeypatch):
 
 
 # -- narration exposure ---------------------------------------------------------
+
 
 def test_snapshot_carries_recent_episodes(tmp_path):
     org = _organism(tmp_path)

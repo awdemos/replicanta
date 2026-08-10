@@ -17,10 +17,8 @@ import random
 import re
 import urllib.error
 
-import activity
-import llmclient
-import narration
-from llmclient import clean_candidate as _clean_candidate
+from replicanta import activity, llmclient, narration
+from replicanta.llmclient import clean_candidate as _clean_candidate
 
 VOTE_PREFIX = "VOTE: "
 VOTE_RE = re.compile(r"VOTE:\s*([12])")
@@ -35,13 +33,15 @@ CHAOS_SURPRISE_DEFAULT = 0.02
 # The rogue thought is a prompt fragment: when it fires, the second
 # proposer is replaced by this instruction so the model actually
 # generates the rogue thought instead of the draft being a literal.
-ROGUE_THOUGHT = ("Draft a rogue thought of your own, spun from nowhere - "
-                 "it may contradict your beliefs, your rules, even "
-                 "yourself. Keep it to one to three sentences. No "
-                 "preamble, no quotes, no emoji.")
+ROGUE_THOUGHT = (
+    "Draft a rogue thought of your own, spun from nowhere - "
+    "it may contradict your beliefs, your rules, even "
+    "yourself. Keep it to one to three sentences. No "
+    "preamble, no quotes, no emoji."
+)
 
-TEMP_MIN = 0.7      # lower bound for the per-round temperature jitter
-TEMP_MAX = 0.85     # upper bound
+TEMP_MIN = 0.7  # lower bound for the per-round temperature jitter
+TEMP_MAX = 0.85  # upper bound
 
 
 class NoUsableCandidateError(ValueError):
@@ -49,6 +49,7 @@ class NoUsableCandidateError(ValueError):
     failure, not a transport failure, so it must not mark the voice
     offline. Subclasses ValueError so existing except-ValueError callers
     still catch it."""
+
 
 # candidate cleaning (meta preambles, echoed instructions,
 # repetition loops) lives in llmclient; the alias keeps the
@@ -65,9 +66,19 @@ class ThoughtArena:
         self._timeout = timeout
 
     # -- public ----------------------------------------------------------
-    def emerge(self, org, user_message=None, task="idle", question=None,
-               fallback=None, structured=False, on_token=None,
-               model=None, timeout=None, quick=False):
+    def emerge(
+        self,
+        org,
+        user_message=None,
+        task="idle",
+        question=None,
+        fallback=None,
+        structured=False,
+        on_token=None,
+        model=None,
+        timeout=None,
+        quick=False,
+    ):
         """Run a full debate and return the winning candidate.
 
         task selects the prompt shape (idle, ask_user, self_ask,
@@ -84,8 +95,11 @@ class ThoughtArena:
         contexts (group chat) where a full debate per utterance would
         cost minutes.
         """
-        model = (model or self._model
-                 or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL))
+        model = (
+            model
+            or self._model
+            or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL)
+        )
         timeout = timeout or self._timeout or llmclient.default_timeout()
         snapshot = narration.state_snapshot(org)
         # every debate circles a different concrete thing — this rotation is
@@ -96,9 +110,9 @@ class ThoughtArena:
         recent_seeds = getattr(org, "_recent_seeds", None)
         if recent_seeds is None:
             from collections import deque
+
             recent_seeds = org._recent_seeds = deque(maxlen=6)
-        snapshot["seed"] = llmclient.seed_for(snapshot, self._rng,
-                                               exclude=recent_seeds)
+        snapshot["seed"] = llmclient.seed_for(snapshot, self._rng, exclude=recent_seeds)
         recent_seeds.append(snapshot["seed"])
         # the whole organism treats chaos as stress-nudged
         # (organism.chaos_effective()); the arena should too, so surprise
@@ -112,15 +126,16 @@ class ThoughtArena:
         # instant instead of paying an ollama timeout on every utterance
         if llmclient.voice_online() is False:
             return self._fallback(org.store, snapshot, user_message, fallback)
-        build = {"task": task, "user_message": user_message,
-                 "question": question}
+        build = {"task": task, "user_message": user_message, "question": question}
         try:
             if quick:
-                result = self._quick_take(org, snapshot, build, model,
-                                          timeout, temperature)
+                result = self._quick_take(
+                    org, snapshot, build, model, timeout, temperature
+                )
             else:
-                result = self._debate(org, snapshot, build, model,
-                                      timeout, surprise, temperature)
+                result = self._debate(
+                    org, snapshot, build, model, timeout, surprise, temperature
+                )
         except NoUsableCandidateError:
             # content failure (model answered, nothing usable) — the
             # voice itself is fine, so don't mark it offline
@@ -142,39 +157,44 @@ class ThoughtArena:
             }
             for skill in snapshot.get("relevant_skills", []):
                 skill_store.record_use(
-                    skill.name, cycle=org.store.cycle, outcome=outcome)
+                    skill.name, cycle=org.store.cycle, outcome=outcome
+                )
         if on_token is not None:
             for piece in re.findall(r"\S+\s*", result):
                 on_token(piece)
         return result
 
     # -- debate ----------------------------------------------------------
-    def _quick_take(self, org, snapshot, build, model, timeout,
-                    temperature):
+    def _quick_take(self, org, snapshot, build, model, timeout, temperature):
         """One proposer, no debate: a single generation cleaned down to
         the candidate. Empty or degenerate output fails the take so the
         caller falls back, exactly like a failed debate."""
         base = narration.build_prompt(snapshot, **build)
-        draft = self._generate(self._proposal(base), model, timeout,
-                               temperature, org=org)
+        draft = self._generate(
+            self._proposal(base), model, timeout, temperature, org=org
+        )
         draft = _clean_candidate(draft)
         if not draft:
             raise NoUsableCandidateError("quick take produced no usable candidate")
         return draft
 
-    def _debate(self, org, snapshot, build, model, timeout,
-                surprise, temperature):
+    def _debate(self, org, snapshot, build, model, timeout, surprise, temperature):
         base = narration.build_prompt(snapshot, **build)
         drafts = [
-            self._generate(self._proposal(base), model, timeout,
-                           temperature, org=org),
+            self._generate(self._proposal(base), model, timeout, temperature, org=org),
         ]
         if self._rng.random() < surprise:
-            drafts.append(self._generate(self._rogue_proposal(base), model,
-                                         timeout, temperature, org=org))
+            drafts.append(
+                self._generate(
+                    self._rogue_proposal(base), model, timeout, temperature, org=org
+                )
+            )
         else:
-            drafts.append(self._generate(self._proposal(base), model,
-                                         timeout, temperature, org=org))
+            drafts.append(
+                self._generate(
+                    self._proposal(base), model, timeout, temperature, org=org
+                )
+            )
         # a proposer that only managed meta-narration or special-token
         # loops has no candidate to offer; unwrap what is usable and let
         # a single surviving draft win outright (saving the critique and
@@ -186,11 +206,12 @@ class ThoughtArena:
         if len(drafts) == 1:
             return drafts[0]
         critique = self._generate(
-            self._critique(base, drafts), model, timeout, temperature,
-            org=org)
+            self._critique(base, drafts), model, timeout, temperature, org=org
+        )
         votes = [
-            self._generate(self._vote(base, drafts, critique),
-                           model, timeout, temperature, org=org)
+            self._generate(
+                self._vote(base, drafts, critique), model, timeout, temperature, org=org
+            )
             for _ in range(2)
         ]
         return self._pick(drafts, votes, critique)
@@ -205,28 +226,34 @@ class ThoughtArena:
 
     # -- prompts ---------------------------------------------------------
     def _proposal(self, base):
-        return (base + "\n\n"
-                "Draft a candidate answer, following the task instruction "
-                "above exactly.")
+        return (
+            base + "\n\n"
+            "Draft a candidate answer, following the task instruction "
+            "above exactly."
+        )
 
     def _rogue_proposal(self, base):
         return base + "\n\n" + ROGUE_THOUGHT
 
     def _critique(self, base, drafts):
-        return (base
-                + f"\n\nCandidate 1:\n{drafts[0]}"
-                + f"\n\nCandidate 2:\n{drafts[1]}"
-                + "\n\nAttack both candidates. Point out the weakness in "
-                  "each, in one or two sentences. Do not draft a new "
-                  "candidate.")
+        return (
+            base
+            + f"\n\nCandidate 1:\n{drafts[0]}"
+            + f"\n\nCandidate 2:\n{drafts[1]}"
+            + "\n\nAttack both candidates. Point out the weakness in "
+            "each, in one or two sentences. Do not draft a new "
+            "candidate."
+        )
 
     def _vote(self, base, drafts, critique):
-        return (base
-                + f"\n\nCandidate 1:\n{drafts[0]}"
-                + f"\n\nCandidate 2:\n{drafts[1]}"
-                + f"\n\nCritique:\n{critique}"
-                + "\n\nWhich candidate is better? Reply exactly with "
-                  f"{VOTE_PREFIX}1 or {VOTE_PREFIX}2")
+        return (
+            base
+            + f"\n\nCandidate 1:\n{drafts[0]}"
+            + f"\n\nCandidate 2:\n{drafts[1]}"
+            + f"\n\nCritique:\n{critique}"
+            + "\n\nWhich candidate is better? Reply exactly with "
+            f"{VOTE_PREFIX}1 or {VOTE_PREFIX}2"
+        )
 
     # -- resolution ------------------------------------------------------
     def _surprise_for(self, chaos):
@@ -255,10 +282,12 @@ class ThoughtArena:
     # -- model -----------------------------------------------------------
     def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature is None:
-            temperature = round(TEMP_MIN + self._rng.random()
-                                * (TEMP_MAX - TEMP_MIN), 2)
+            temperature = round(
+                TEMP_MIN + self._rng.random() * (TEMP_MAX - TEMP_MIN), 2
+            )
         text, stats = llmclient.generate_with_stats(
-            prompt, model, timeout, temperature=temperature)
+            prompt, model, timeout, temperature=temperature
+        )
         if org is not None:
             self._meter(org, stats)
         return text

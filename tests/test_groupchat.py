@@ -3,17 +3,12 @@ broadcast to every member (or just the addressed one), each speaker
 replies through its own arena in quick mode, and utterances persist in
 each speaker's episodic memory."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
-
-import groupchat
-from groupchat import GroupChat
-from organism import BeliefStore, Lifecycle, Metrics
 from conftest import patch_generate
+
+from replicanta import groupchat
+from replicanta.groupchat import GroupChat
+from replicanta.organism import BeliefStore, Lifecycle, Metrics
 
 
 class _Window:
@@ -40,10 +35,12 @@ def _org(tmp_path, name):
 
 @pytest.fixture
 def group(tmp_path):
-    return GroupChat({
-        "fern": _org(tmp_path, "fern"),
-        "willow": _org(tmp_path, "willow"),
-    })
+    return GroupChat(
+        {
+            "fern": _org(tmp_path, "fern"),
+            "willow": _org(tmp_path, "willow"),
+        }
+    )
 
 
 def _scripted(monkeypatch, replies):
@@ -67,8 +64,7 @@ def test_needs_two_members(tmp_path):
 def test_broadcast_round_robin_in_speaking_order(group, monkeypatch):
     calls = _scripted(monkeypatch, ["hi from fern", "hi from willow"])
     utterances = group.broadcast("hello everyone")
-    assert utterances == [("fern", "hi from fern"),
-                          ("willow", "hi from willow")]
+    assert utterances == [("fern", "hi from fern"), ("willow", "hi from willow")]
     # quick mode: exactly one ollama call per speaker
     assert len(calls) == 2
     speakers = [s for s, _ in group.transcript]
@@ -100,13 +96,13 @@ def test_context_names_the_roster_and_recent_lines(group):
 def test_utterances_persist_in_speaker_memory(group, monkeypatch):
     _scripted(monkeypatch, ["hi from fern", "hi from willow"])
     group.broadcast("hello everyone")
-    fern_said = [e["text"] for e in group.members["fern"].store.memory
-                 if e["kind"] == "group"]
+    fern_said = [
+        e["text"] for e in group.members["fern"].store.memory if e["kind"] == "group"
+    ]
     assert any("I said: hi from fern" in t for t in fern_said)
     # every member also remembers the user's line
     for org in group.members.values():
-        heard = [e["text"] for e in org.store.memory
-                 if e["kind"] == "group"]
+        heard = [e["text"] for e in org.store.memory if e["kind"] == "group"]
         assert any("user: hello everyone" in t for t in heard)
 
 
@@ -119,8 +115,7 @@ def test_transcript_capped(group):
 
 def test_full_debate_opt_in(group, monkeypatch):
     """quick=False runs the whole five-call arena per speaker."""
-    script = (["fur and paws", "fur and quiet", "both weak",
-               "VOTE: 1", "VOTE: 1"]) * 2
+    script = (["fur and paws", "fur and quiet", "both weak", "VOTE: 1", "VOTE: 1"]) * 2
     calls = _scripted(monkeypatch, script)
     group.broadcast("hello everyone", quick=False)
     assert len(calls) == 10

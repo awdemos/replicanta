@@ -2,14 +2,9 @@
 the insane flag at extreme stress + incoherence, mood override, TUI/narration
 exposure, and persistence."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
 
-from organism import BeliefStore, MentalState, Organism
+from replicanta.organism import BeliefStore, MentalState, Organism
 
 
 @pytest.fixture
@@ -27,6 +22,7 @@ def _drive(store, mental, chaos, ticks=40, sleeping=False):
 
 
 # -- attribute mechanics ----------------------------------------------------
+
 
 def test_defaults(store):
     assert store.arousal == pytest.approx(0.3)
@@ -53,7 +49,7 @@ def test_high_stress_and_chaos_raise_irrationality(store):
 
 def test_sleep_lowers_arousal(store):
     mental = _mental(store)
-    _drive(store, mental, chaos=0.9)          # get aroused first
+    _drive(store, mental, chaos=0.9)  # get aroused first
     awake_arousal = store.arousal
     _drive(store, mental, chaos=0.1, sleeping=True)
     assert store.arousal < awake_arousal
@@ -69,11 +65,11 @@ def test_grounded_utterances_raise_rationality(store):
 
 # -- insanity ----------------------------------------------------------------
 
+
 def test_extreme_stress_with_incoherence_goes_insane(store):
     mental = _mental(store)
     store.stress = 0.9
-    flipped = [mental.tick(sleeping=False, chaos=0.9, dt=1.0)
-               for _ in range(40)]
+    flipped = [mental.tick(sleeping=False, chaos=0.9, dt=1.0) for _ in range(40)]
     assert store.insane is True
     assert any(flipped)  # the flip was reported exactly at the transition
 
@@ -101,6 +97,7 @@ def test_insanity_hysteresis(store):
 
 
 # -- organism integration -----------------------------------------------------
+
 
 def test_insane_mood_wins(tmp_path):
     org = Organism(tmp_path)
@@ -139,13 +136,16 @@ def test_mental_attributes_persist(tmp_path):
 
 # -- narration ----------------------------------------------------------------
 
+
 def test_mood_line_insane():
-    from narration import _mood_line
+    from replicanta.narration import _mood_line
+
     assert "incoherent" in _mood_line("insane")
 
 
 def test_snapshot_includes_mental_attributes(tmp_path):
-    from narration import state_snapshot
+    from replicanta.narration import state_snapshot
+
     org = Organism(tmp_path)
     org.load()
     snap = state_snapshot(org)

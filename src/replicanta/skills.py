@@ -8,10 +8,29 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from fileutil import atomic_write_text, slug
+from replicanta.fileutil import atomic_write_text, slug
 
-_STOP = {"the", "a", "an", "is", "to", "of", "and", "it", "i", "you",
-         "my", "me", "when", "how", "on", "in", "at", "be", "are"}
+_STOP = {
+    "the",
+    "a",
+    "an",
+    "is",
+    "to",
+    "of",
+    "and",
+    "it",
+    "i",
+    "you",
+    "my",
+    "me",
+    "when",
+    "how",
+    "on",
+    "in",
+    "at",
+    "be",
+    "are",
+}
 
 
 @dataclass
@@ -39,10 +58,12 @@ class SkillStore:
         return self.dir_path / f"{slug(name)}.md"
 
     def _render(self, s):
-        return (f"# {s.name}\nwhen: {s.when}\nhow: {s.how}\n"
-                f"meta: uses={s.uses} created={s.created_cycle} "
-                f"updated={s.updated_cycle} "
-                f"effectiveness={s.effectiveness:.2f}\n")
+        return (
+            f"# {s.name}\nwhen: {s.when}\nhow: {s.how}\n"
+            f"meta: uses={s.uses} created={s.created_cycle} "
+            f"updated={s.updated_cycle} "
+            f"effectiveness={s.effectiveness:.2f}\n"
+        )
 
     def _parse(self, text):
         lines = text.splitlines()
@@ -53,8 +74,7 @@ class SkillStore:
             if ": " in line:
                 key, value = line.split(": ", 1)
                 fields[key.strip()] = value.strip()
-        meta = dict(p.split("=", 1) for p in fields.get("meta", "").split()
-                    if "=" in p)
+        meta = dict(p.split("=", 1) for p in fields.get("meta", "").split() if "=" in p)
         try:
             return Skill(
                 name=lines[0][2:].strip(),
@@ -63,7 +83,8 @@ class SkillStore:
                 uses=int(meta.get("uses", 0)),
                 created_cycle=int(meta.get("created", 0)),
                 updated_cycle=int(meta.get("updated", 0)),
-                effectiveness=float(meta.get("effectiveness", 0.5)))
+                effectiveness=float(meta.get("effectiveness", 0.5)),
+            )
         except ValueError:
             return None  # a corrupt meta line skips the file, not the store
 
@@ -150,8 +171,7 @@ class SkillStore:
         context_words = _words(context)
         scored = []
         for skill in self.list():
-            overlap = len(context_words
-                         & _words(f"{skill.name} {skill.when}"))
+            overlap = len(context_words & _words(f"{skill.name} {skill.when}"))
             if overlap:
                 scored.append((overlap, skill))
         scored.sort(key=lambda t: -t[0])

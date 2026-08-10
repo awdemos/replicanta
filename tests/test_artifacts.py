@@ -2,21 +2,17 @@
 outside the chat. narration.diary_entry voices entries (fallback offline),
 Organism.write_diary persists them, tick() emits want_diary on cadence."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import llmclient
-import voice
-from organism import Organism
-from probe import SystemProbe
 from conftest import patch_generate
+
+from replicanta import llmclient, voice
+from replicanta.organism import Organism
+from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path, **kwargs):
     kwargs.setdefault(
-        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
+        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
+    )
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
@@ -60,7 +56,9 @@ def test_write_diary_remembers_episode(tmp_path):
 def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
+    patch_generate(
+        monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x"
+    )
     voice.diary_entry(org)
     assert "diary entry" in captured["p"]
 

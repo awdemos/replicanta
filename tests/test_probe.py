@@ -5,30 +5,26 @@ distress() stress coupling, BeliefStore.observe(), Organism.sense(),
 and migration away from legacy object beliefs."""
 
 import shutil
-import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
-from organism import BeliefStore, Organism
-from probe import SystemProbe
+
+from replicanta.organism import BeliefStore, Organism
+from replicanta.probe import SystemProbe
 
 STAT_SAMPLE = (
     "cpu  22477106 4036 7338939 541387304 409658 964615 308654 0 0 0\n"
     "cpu0 2042889 1755 503532 33117919 30077 54521 32055 0 0 0\n"
 )
-MEMINFO = (
-    "MemTotal:       200000 kB\n"
-    "MemAvailable:   100000 kB\n"
-)
+MEMINFO = "MemTotal:       200000 kB\nMemAvailable:   100000 kB\n"
 LOADAVG = "0.50 0.55 0.60 2/100 1000\n"
 UPTIME = "3600.00 5000.00\n"
 
 
 # -- fake /proc + /sys trees ---------------------------------------------
+
 
 def _write(path: Path, content: str):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -55,20 +51,19 @@ def sys_tree(tmp_path):
 
 
 def _probe(proc, sys_tree, ncpu=4, statvfs=None, clock=None):
-    return SystemProbe(proc=proc, sys=sys_tree, ncpu=ncpu, statvfs=statvfs,
-                       clock=clock)
+    return SystemProbe(proc=proc, sys=sys_tree, ncpu=ncpu, statvfs=statvfs, clock=clock)
 
 
 def _utc_midnight():
-    return datetime(2026, 8, 7, 0, 5, tzinfo=timezone.utc)
+    return datetime(2026, 8, 7, 0, 5, tzinfo=UTC)
 
 
 def _disk(blocks, bavail, frsize=1024):
-    return lambda _p: SimpleNamespace(
-        f_blocks=blocks, f_bavail=bavail, f_frsize=frsize)
+    return lambda _p: SimpleNamespace(f_blocks=blocks, f_bavail=bavail, f_frsize=frsize)
 
 
 # -- raw metric parsing ---------------------------------------------------
+
 
 def test_cpu_percent_needs_two_samples(proc, sys_tree):
     probe = _probe(proc, sys_tree)
@@ -79,7 +74,10 @@ def test_cpu_percent_delta(proc, sys_tree):
     probe = _probe(proc, sys_tree)
     probe.snapshot()  # warm
     # Second read: idle delta 0, total delta 100 -> 100% busy
-    _write(proc / "stat", "cpu  22478106 4036 7338939 541387304 409658 964615 308654 0 0 0\n")
+    _write(
+        proc / "stat",
+        "cpu  22478106 4036 7338939 541387304 409658 964615 308654 0 0 0\n",
+    )
     snap = probe.snapshot()
     assert snap["cpu_percent"] == pytest.approx(100.0)
 
@@ -124,6 +122,7 @@ def test_missing_files_yield_none(tmp_path):
 
 
 # -- quantization to beliefs ----------------------------------------------
+
 
 def test_load_level_thresholds(proc, sys_tree):
     probe = _probe(proc, sys_tree, ncpu=4)
@@ -186,26 +185,30 @@ def test_uptime_level_thresholds(proc, sys_tree):
 def test_all_belief_values_are_valid_symbols(proc, sys_tree):
     """Every quantized value must pass the store's VALID_VALUE_RE so beliefs
     can be added without raising ValueError."""
-    from organism import VALID_VALUE_RE
+    from replicanta.organism import VALID_VALUE_RE
+
     b = probe_beliefs(proc, sys_tree)
-    for (_o, _a, v) in b:
+    for _o, _a, v in b:
         assert VALID_VALUE_RE.match(v), f"invalid belief value {v!r}"
 
 
 # -- UTC clock ---------------------------------------------------------------
 
+
 def test_clock_utc_formats_hhmm(proc, sys_tree):
-    probe = _probe(proc, sys_tree,
-                   clock=lambda: datetime(2026, 8, 7, 14, 30,
-                                          tzinfo=timezone.utc))
+    probe = _probe(
+        proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 14, 30, tzinfo=UTC)
+    )
     assert probe.clock_utc() == "14:30 UTC"
 
 
 def test_clock_naive_is_treated_as_utc(proc, sys_tree):
     """A naive clock (no tzinfo) is assumed to already be UTC."""
-    snap = _probe(proc, sys_tree,
-                  clock=lambda: datetime(2026, 8, 7, 14, 30)  # noqa: DTZ001
-                  ).snapshot()
+    snap = _probe(
+        proc,
+        sys_tree,
+        clock=lambda: datetime(2026, 8, 7, 14, 30),  # noqa: DTZ001
+    ).snapshot()
     assert snap["clock_hour"] == 14
     assert snap["clock_minute"] == 30
 
@@ -224,15 +227,16 @@ def test_clock_midnight_belief(proc, sys_tree):
 
 
 def test_clock_hour_belief_is_a_word_not_digits(proc, sys_tree):
-    probe = _probe(proc, sys_tree,
-                   clock=lambda: datetime(2026, 8, 7, 17, 42,
-                                          tzinfo=timezone.utc))
+    probe = _probe(
+        proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 17, 42, tzinfo=UTC)
+    )
     b = probe.beliefs(probe.snapshot())
     assert b[("time", "hour", "seventeen")] == 0.9
     assert ("time", "hour", "17") not in b
 
 
 # -- distress() stress coupling -------------------------------------------
+
 
 def test_distress_zero_on_calm_system(proc, sys_tree):
     # statvfs is injected: the real disk's free space must not leak into
@@ -242,11 +246,11 @@ def test_distress_zero_on_calm_system(proc, sys_tree):
 
 
 def test_distress_from_adverse_metrics(proc, sys_tree):
-    _write(proc / "loadavg", "10.00 10.00 10.00 2/100 1000\n")      # high load
+    _write(proc / "loadavg", "10.00 10.00 10.00 2/100 1000\n")  # high load
     _write(proc / "meminfo", "MemTotal: 100000 kB\nMemAvailable: 5000 kB\n")  # high mem
-    _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "95000\n")   # hot
-    probe2 = _probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))          # low disk
-    _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")       # low battery
+    _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "95000\n")  # hot
+    probe2 = _probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))  # low disk
+    _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")  # low battery
     amount = probe2.distress(probe2.snapshot())
     assert amount > 0.0
     assert amount <= 0.15  # capped
@@ -256,9 +260,9 @@ def test_distress_is_edge_triggered_not_stacked(proc, sys_tree):
     """Persistently adverse conditions bump stress once, then stay quiet:
     a busy host alone must never be able to pin stress in the fade zone
     (regression: per-tick distress killed the organism on load spikes)."""
-    _write(proc / "loadavg", "10.00 10.00 10.00 2/100 1000\n")      # high load
-    _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "95000\n")   # hot
-    _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")       # low battery
+    _write(proc / "loadavg", "10.00 10.00 10.00 2/100 1000\n")  # high load
+    _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "95000\n")  # hot
+    _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")  # low battery
     probe2 = _probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))
     first = probe2.distress(probe2.snapshot())
     assert first > 0.0
@@ -273,12 +277,17 @@ def test_distress_is_edge_triggered_not_stacked(proc, sys_tree):
 
 # -- BeliefStore.observe() -------------------------------------------------
 
+
 def test_observe_replaces_prior_reading(store):
     store.add(("mem", "usage", "low"), 0.9)
     store.observe(("mem", "usage", "high"), 0.9)
     assert store.conf(("mem", "usage", "high")) == pytest.approx(0.9)
     assert store.conf(("mem", "usage", "low")) is None
-    assert ("mem", "usage", "low") not in store.archived()  # perception, not contradiction
+    assert (
+        "mem",
+        "usage",
+        "low",
+    ) not in store.archived()  # perception, not contradiction
 
 
 def test_observe_persists_across_save_load(store):
@@ -291,9 +300,11 @@ def test_observe_persists_across_save_load(store):
 
 # -- Organism.sense() ------------------------------------------------------
 
+
 def test_sense_folds_metrics_into_store(proc, sys_tree):
-    org = Organism(proc.parent,
-                   probe=_probe(proc, sys_tree, ncpu=4, clock=_utc_midnight))
+    org = Organism(
+        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, clock=_utc_midnight)
+    )
     org.load()
     org.sense()
     b = org.store.beliefs()
@@ -308,8 +319,9 @@ def test_sense_bumps_stress_on_adverse_system(proc, sys_tree):
     _write(proc / "loadavg", "20.00 20.00 20.00 2/100 1000\n")
     _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "99000\n")
     _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")
-    org = Organism(proc.parent, probe=_probe(proc, sys_tree, ncpu=4,
-                                             statvfs=_disk(1000, 10)))
+    org = Organism(
+        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))
+    )
     org.load()
     org.sense()
     assert org.store.stress > org.meter.BASELINE
@@ -322,8 +334,9 @@ def test_sense_does_not_stack_stress_on_persistent_adverse(proc, sys_tree):
     _write(proc / "loadavg", "20.00 20.00 20.00 2/100 1000\n")
     _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "99000\n")
     _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")
-    org = Organism(proc.parent, probe=_probe(proc, sys_tree, ncpu=4,
-                                             statvfs=_disk(1000, 10)))
+    org = Organism(
+        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))
+    )
     org.load()
     for _ in range(20):
         org.sense()
@@ -342,49 +355,65 @@ def test_sense_replaces_stale_metric_readings(proc, sys_tree):
 
 # -- migration away from the toy object world ------------------------------
 
+
 def test_load_migrates_legacy_object_beliefs(store):
     store.add(("apple", "color", "red"), 0.9)
     store.add(("ball", "shape", "round"), 0.9)
     store.add(("self", "mood", "calm"), 0.9)
     store.save()
-    org = Organism(store.dir_path, probe=_probe(Path("/nonexistent/proc"),
-                                                Path("/nonexistent/sys")))
+    org = Organism(
+        store.dir_path,
+        probe=_probe(Path("/nonexistent/proc"), Path("/nonexistent/sys")),
+    )
     org.load()
     beliefs = org.store.beliefs()
     assert ("self", "mood", "calm") in beliefs
-    assert not any(obj in ("apple", "ball", "milk", "water")
-                   for (obj, _a, _v) in beliefs)
+    assert not any(
+        obj in ("apple", "ball", "milk", "water") for (obj, _a, _v) in beliefs
+    )
 
 
 def test_fresh_boot_seeds_self_core_not_objects(tmp_path):
-    shutil.copy(Path(__file__).parent.parent / "organism.scl", tmp_path / "organism.scl")
-    org = Organism(tmp_path, probe=_probe(Path("/nonexistent/proc"),
-                                          Path("/nonexistent/sys")))
+    shutil.copy(
+        Path(__file__).parent.parent / "organism.scl", tmp_path / "organism.scl"
+    )
+    org = Organism(
+        tmp_path, probe=_probe(Path("/nonexistent/proc"), Path("/nonexistent/sys"))
+    )
     org.load()
     assert ("self", "mood", "calm") in org.store.beliefs()
-    assert not any(obj in ("apple", "ball", "milk", "water")
-                   for (obj, _a, _v) in org.store.beliefs())
+    assert not any(
+        obj in ("apple", "ball", "milk", "water")
+        for (obj, _a, _v) in org.store.beliefs()
+    )
 
 
 # -- uname: the host's identity --------------------------------------------
 
+
 def test_uname_default_runs_the_shell_command(tmp_path):
     import platform
+
     probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys")
     assert probe.uname().startswith(platform.system())
 
 
 def test_uname_injectable(tmp_path):
-    probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys",
-                        uname=lambda: "Linux testhost 6.1 x86_64")
+    probe = SystemProbe(
+        proc=tmp_path / "noproc",
+        sys=tmp_path / "nosys",
+        uname=lambda: "Linux testhost 6.1 x86_64",
+    )
     assert probe.uname() == "Linux testhost 6.1 x86_64"
 
 
 # -- helper ----------------------------------------------------------------
 
+
 def probe_beliefs(proc, sys_tree):
     return _probe(proc, sys_tree, ncpu=4).beliefs(
-        _probe(proc, sys_tree, ncpu=4).snapshot())
+        _probe(proc, sys_tree, ncpu=4).snapshot()
+    )
 
 
 @pytest.fixture

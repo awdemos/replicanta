@@ -31,8 +31,10 @@ VOICES_DIR = Path(__file__).parent / "voices"
 _DEFAULT_MODEL = VOICES_DIR / "en_US-lessac-medium.onnx"
 _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
 
-HF_VOICE_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/"
-                "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}")
+HF_VOICE_URL = (
+    "https://huggingface.co/rhasspy/piper-voices/resolve/"
+    "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}"
+)
 _VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-([a-z0-9_]+)-([a-z]+)$")
 
 enabled = False
@@ -78,7 +80,7 @@ def set_voice(spec):
     for cand in candidates:
         if cand.suffix == ".onnx" and cand.exists():
             _model_path = cand
-            _voice = None          # next speak loads the new model
+            _voice = None  # next speak loads the new model
             return cand
     return None
 
@@ -93,9 +95,11 @@ def voice_urls(spec):
     lang = locale.split("_")[0]
     full = f"{locale}-{name}-{quality}"
     return tuple(
-        HF_VOICE_URL.format(lang=lang, locale=locale, name=name,
-                            quality=quality, full=full, ext=ext)
-        for ext in (".onnx", ".onnx.json"))
+        HF_VOICE_URL.format(
+            lang=lang, locale=locale, name=name, quality=quality, full=full, ext=ext
+        )
+        for ext in (".onnx", ".onnx.json")
+    )
 
 
 def download_voice(spec):
@@ -111,11 +115,10 @@ def download_voice(spec):
     for url, dest in zip(urls, (model, VOICES_DIR / f"{spec}.onnx.json")):
         try:
             subprocess.run(
-                ["curl", "-sfSL", "-o", str(dest), url],
-                check=True, timeout=300)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
-                OSError):
-            model.unlink(missing_ok=True)     # don't leave half a voice
+                ["curl", "-sfSL", "-o", str(dest), url], check=True, timeout=300
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            model.unlink(missing_ok=True)  # don't leave half a voice
             return None
     return model
 
@@ -132,8 +135,7 @@ def say(text):
         return
     global _worker
     if _worker is None or not _worker.is_alive():
-        _worker = threading.Thread(
-            target=_drain, daemon=True, name="speech")
+        _worker = threading.Thread(target=_drain, daemon=True, name="speech")
         _worker.start()
     _queue.put(text)
 
@@ -155,6 +157,7 @@ def _load_voice():
     with _voice_lock:
         if _voice is None:
             from piper import PiperVoice
+
             _voice = PiperVoice.load(str(_model_path))
     return _voice
 
@@ -162,6 +165,7 @@ def _load_voice():
 def _speak(text):
     import numpy as np
     import soundcard as sc
+
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         _load_voice().synthesize_wav(text, w)
@@ -180,8 +184,7 @@ def reset():
     global enabled, _voice, _model_path
     enabled = False
     _voice = None
-    _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL")
-                      or _DEFAULT_MODEL)
+    _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
     while True:
         try:
             _queue.get_nowait()

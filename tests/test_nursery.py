@@ -3,16 +3,11 @@ a `current` pointer file remembers who is awake, /new births from the
 seed genome, and a legacy root-level organism migrates into
 organisms/default/."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
 
-import nursery
+from replicanta import nursery
 
-SEED_SCL = 'type bel(x: String, a: String, v: String)\n'
+SEED_SCL = "type bel(x: String, a: String, v: String)\n"
 
 
 def _root(tmp_path):
@@ -78,22 +73,23 @@ def test_migrate_moves_legacy_root_organism(tmp_path):
     assert (dest / "state.json").read_text() == '{"cycle": 42}'
     assert (dest / "artifacts" / "diary.md").read_text() == "dear diary"
     assert (dest / "organism.scl").read_text() == SEED_SCL
-    assert not (root / "state.json").exists()      # moved, not copied
+    assert not (root / "state.json").exists()  # moved, not copied
     assert not (root / "artifacts").exists()
-    assert (root / "organism.scl").exists()        # template stays
+    assert (root / "organism.scl").exists()  # template stays
     assert nursery.current(root) == "default"
 
 
 def test_migrate_noop_without_state_or_when_default_exists(tmp_path):
     root = _root(tmp_path)
-    assert nursery.migrate(root) is False          # nothing to migrate
+    assert nursery.migrate(root) is False  # nothing to migrate
     (root / "state.json").write_text("{}")
     nursery.create(root, "default", root / "organism.scl")
-    assert nursery.migrate(root) is False          # default already there
-    assert (root / "state.json").exists()          # untouched
+    assert nursery.migrate(root) is False  # default already there
+    assert (root / "state.json").exists()  # untouched
 
 
 # -- rename -----------------------------------------------------------------
+
 
 def test_rename_moves_directory(tmp_path):
     root = _root(tmp_path)
@@ -160,6 +156,7 @@ def test_rename_same_name_is_a_noop(tmp_path):
 
 
 # -- nursery groups -----------------------------------------------------------
+
 
 def _root_with(root, *names):
     for name in names:
@@ -244,6 +241,7 @@ def test_load_groups_prunes_deleted_organisms(tmp_path):
     nursery.assign(root, "fern", "a")
     nursery.assign(root, "willow", "a")
     import shutil
+
     shutil.rmtree(root / "organisms" / "willow")
     assert nursery.load_groups(root) == {"a": ["fern"]}
 

@@ -18,21 +18,69 @@ these are activity counters, deliberately not a sentience score."""
 
 import re
 
-SYMBOLIC_KEYS = ("rules_tried", "derivations", "beliefs_new",
-                 "beliefs_strengthened", "beliefs_archived",
-                 "rules_committed", "dreams_promoted", "dreams_discarded")
-NEURAL_KEYS = ("llm_calls", "prompt_tokens", "gen_tokens",
-               "utterances", "fallbacks")
+SYMBOLIC_KEYS = (
+    "rules_tried",
+    "derivations",
+    "beliefs_new",
+    "beliefs_strengthened",
+    "beliefs_archived",
+    "rules_committed",
+    "dreams_promoted",
+    "dreams_discarded",
+)
+NEURAL_KEYS = ("llm_calls", "prompt_tokens", "gen_tokens", "utterances", "fallbacks")
 COUPLING_KEYS = ("facts_learned", "grounded_utterances")
 
 # scaffolding words that appear in every seed — not evidence of grounding
 _SEED_SCAFFOLD = {
-    "this", "belief", "that", "your", "mood", "user", "says", "memory",
-    "cycle", "what", "most", "alive", "right", "now", "question", "would",
-    "love", "something", "wonder", "about", "world", "beyond", "machine",
-    "cannot", "verify", "might", "true", "them", "their", "life",
-    "the", "and", "for", "you", "are", "its", "all", "any", "out",
-    "who", "why", "how", "did", "can", "but", "not", "yet", "too",
+    "this",
+    "belief",
+    "that",
+    "your",
+    "mood",
+    "user",
+    "says",
+    "memory",
+    "cycle",
+    "what",
+    "most",
+    "alive",
+    "right",
+    "now",
+    "question",
+    "would",
+    "love",
+    "something",
+    "wonder",
+    "about",
+    "world",
+    "beyond",
+    "machine",
+    "cannot",
+    "verify",
+    "might",
+    "true",
+    "them",
+    "their",
+    "life",
+    "the",
+    "and",
+    "for",
+    "you",
+    "are",
+    "its",
+    "all",
+    "any",
+    "out",
+    "who",
+    "why",
+    "how",
+    "did",
+    "can",
+    "but",
+    "not",
+    "yet",
+    "too",
 }
 
 _WORD_RE = re.compile(r"[a-z_]{3,}")
@@ -47,8 +95,7 @@ def grounded(seed, text):
     """Lexical-grounding proxy: True when the utterance reuses at least
     one content word from the seed it was drafted from. A cheap signal
     that the voice was shaped by the logic it was shown, not a proof."""
-    seed_words = {w for w in _WORD_RE.findall(seed.lower())
-                  } - _SEED_SCAFFOLD
+    seed_words = {w for w in _WORD_RE.findall(seed.lower())} - _SEED_SCAFFOLD
     if not seed_words:
         return False
     text_words = set(_WORD_RE.findall(text.lower()))
@@ -77,19 +124,23 @@ def summary_lines(store):
         f"{a.get('beliefs_new', 0)} new + {a.get('beliefs_strengthened', 0)} "
         f"strengthened beliefs · {a.get('rules_committed', 0)} rules "
         f"committed · dreams {a.get('dreams_promoted', 0)} promoted / "
-        f"{a.get('dreams_discarded', 0)} discarded")
+        f"{a.get('dreams_discarded', 0)} discarded"
+    )
     lines.append(
         f"neural: {a.get('llm_calls', 0)} llm calls · "
         f"{a.get('prompt_tokens', 0)} tokens in / "
         f"{a.get('gen_tokens', 0)} out · {a.get('utterances', 0)} "
-        f"utterances manifested ({a.get('fallbacks', 0)} fallbacks)")
+        f"utterances manifested ({a.get('fallbacks', 0)} fallbacks)"
+    )
     utterances = a.get("utterances", 0)
-    grounded_share = (f"{a.get('grounded_utterances', 0)}/{utterances}"
-                      if utterances else "—")
+    grounded_share = (
+        f"{a.get('grounded_utterances', 0)}/{utterances}" if utterances else "—"
+    )
     lines.append(
         f"coupling: {a.get('facts_learned', 0)} facts learned from the "
         f"user ({rate('facts_learned')}) · grounded utterances "
-        f"{grounded_share}")
+        f"{grounded_share}"
+    )
     return lines
 
 
@@ -112,8 +163,9 @@ def record_digest(store, cycles=30):
     if not snapshots or snapshots[-1]["cycle"] != now:
         snapshot = {
             "cycle": now,
-            "counters": {k: a.get(k, 0) for k in (SYMBOLIC_KEYS + NEURAL_KEYS
-                                                    + COUPLING_KEYS)},
+            "counters": {
+                k: a.get(k, 0) for k in (SYMBOLIC_KEYS + NEURAL_KEYS + COUPLING_KEYS)
+            },
         }
         snapshots.append(snapshot)
 
@@ -144,11 +196,14 @@ def record_digest(store, cycles=30):
     lines = [f"over the last {elapsed} cycles you have:"]
     lines.append(
         f"- asked {tried} self-questions and produced {derived} derivations "
-        f"({rate:.0%} yield)")
+        f"({rate:.0%} yield)"
+    )
     lines.append(
         f"- committed {committed} rules, promoted {promoted} dreams, and "
-        f"discarded {discarded} dreams ({dream_rate:.0%} dream promotion)")
+        f"discarded {discarded} dreams ({dream_rate:.0%} dream promotion)"
+    )
     lines.append(
         f"- formed {beliefs_new} new beliefs and used your inner voice "
-        f"{llm_calls} times ({fallbacks} fallbacks)")
+        f"{llm_calls} times ({fallbacks} fallbacks)"
+    )
     return "\n".join(lines)

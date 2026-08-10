@@ -2,7 +2,7 @@
 
 import re
 
-import learning
+from replicanta import learning
 
 LEARN_GOAL_PREFIXES = ("learn", "know", "understand")
 
@@ -12,10 +12,7 @@ STALLED_CYCLES = 10
 
 def formulate_subgoals(goal_text):
     """Return a short strategy string for a goal."""
-    return (
-        f"strategy: break '{goal_text}' into small questions "
-        "and ask one at a time."
-    )
+    return f"strategy: break '{goal_text}' into small questions and ask one at a time."
 
 
 def _target_count(text):

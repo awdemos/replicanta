@@ -2,14 +2,10 @@
 typed events at lifecycle transitions, debounced persistence (flush),
 and the public force_state()/revive() commands the TUI drives."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
-from organism import BeliefStore, Lifecycle, Organism
-from probe import SystemProbe
+
+from replicanta.organism import BeliefStore, Lifecycle, Organism
+from replicanta.probe import SystemProbe
 
 
 def _null_probe():
@@ -25,6 +21,7 @@ def _organism(tmp_path, **kwargs):
 
 
 # -- tick events ------------------------------------------------------------
+
 
 def test_tick_emits_sleep_and_dream_events_at_boundary(tmp_path):
     org = _organism(tmp_path, wake_seconds=0, sleep_seconds=999)
@@ -84,6 +81,7 @@ def test_tick_no_stress_event_crossing_downward(tmp_path):
 
 # -- debounced persistence ----------------------------------------------------
 
+
 def test_flush_is_noop_when_clean(tmp_path):
     org = _organism(tmp_path)
     org.store.dirty = False
@@ -128,11 +126,13 @@ def test_commit_rule_marks_genome_dirty(tmp_path):
     assert store.dirty and store.genome_dirty
     store.save()
     assert not store.dirty and not store.genome_dirty
-    assert 'rel q1(x) = bel(x, "color", "blue")' in \
-        (tmp_path / "organism.scl").read_text()
+    assert (
+        'rel q1(x) = bel(x, "color", "blue")' in (tmp_path / "organism.scl").read_text()
+    )
 
 
 # -- front-end commands -------------------------------------------------------
+
 
 def test_force_state_sleep_returns_events(tmp_path):
     org = _organism(tmp_path)

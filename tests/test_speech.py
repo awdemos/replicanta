@@ -4,14 +4,11 @@ daemon thread, and swallows synthesis/playback failures so speech can
 never take the organism down. Piper and soundcard are never imported in
 these tests: _speak is patched out."""
 
-import sys
 import threading
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import speech
+from replicanta import speech
 
 
 def _drain_until_empty(timeout=2.0):
@@ -77,7 +74,7 @@ def test_speech_failures_are_contained(monkeypatch):
     speech.say("boom")
     speech.say("still alive")
     assert done.wait(2.0)
-    assert said == ["still alive"]      # failure didn't kill the worker
+    assert said == ["still alive"]  # failure didn't kill the worker
 
 
 def test_speech_ignores_empty_text(monkeypatch):
@@ -93,6 +90,7 @@ def test_speech_ignores_empty_text(monkeypatch):
 
 # -- voice management: list / switch / download ---------------------------
 
+
 def _fake_voices_dir(tmp_path, monkeypatch, names=("en_US-lessac-medium",)):
     vdir = tmp_path / "voices"
     vdir.mkdir()
@@ -104,8 +102,7 @@ def _fake_voices_dir(tmp_path, monkeypatch, names=("en_US-lessac-medium",)):
 
 
 def test_list_voices_scans_voices_dir(tmp_path, monkeypatch):
-    _fake_voices_dir(tmp_path, monkeypatch,
-                     ("en_US-lessac-medium", "en_GB-alan-low"))
+    _fake_voices_dir(tmp_path, monkeypatch, ("en_US-lessac-medium", "en_GB-alan-low"))
     assert speech.list_voices() == ["en_GB-alan-low", "en_US-lessac-medium"]
 
 
@@ -126,21 +123,23 @@ def test_set_voice_unknown_keeps_current(tmp_path, monkeypatch):
     _fake_voices_dir(tmp_path, monkeypatch)
     before = speech.model_path()
     assert speech.set_voice("en_GB-nope-low") is None
-    assert speech.model_path() == before     # unchanged
+    assert speech.model_path() == before  # unchanged
 
 
 def test_set_voice_drops_cached_model(tmp_path, monkeypatch):
     _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
-    speech._voice = object()                 # pretend a model is loaded
+    speech._voice = object()  # pretend a model is loaded
     speech.set_voice("en_GB-alan-low")
-    assert speech._voice is None             # reloads on next speak
+    assert speech._voice is None  # reloads on next speak
 
 
 def test_voice_urls_parses_hf_layout():
     model, config = speech.voice_urls("en_US-lessac-medium")
-    assert model == ("https://huggingface.co/rhasspy/piper-voices/resolve/"
-                     "v1.0.0/en/en_US/lessac/medium/"
-                     "en_US-lessac-medium.onnx")
+    assert model == (
+        "https://huggingface.co/rhasspy/piper-voices/resolve/"
+        "v1.0.0/en/en_US/lessac/medium/"
+        "en_US-lessac-medium.onnx"
+    )
     assert config.endswith("en_US-lessac-medium.onnx.json")
     model, _ = speech.voice_urls("en_US-libritts_r-medium")
     assert "/en_US/libritts_r/medium/en_US-libritts_r-medium.onnx" in model
@@ -158,6 +157,7 @@ def test_voice_urls_rejects_bad_names():
 def test_download_voice_invalid_name_never_calls_curl(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("curl must not run for an invalid name")
+
     monkeypatch.setattr(speech.subprocess, "run", boom)
     assert speech.download_voice("not a voice") is None
 
@@ -173,11 +173,12 @@ def test_download_voice_success(tmp_path, monkeypatch):
     monkeypatch.setattr(speech.subprocess, "run", fake_run)
     model = speech.download_voice("en_GB-alan-low")
     assert model == tmp_path / "voices" / "en_GB-alan-low.onnx"
-    assert len(written) == 2                 # model + config
+    assert len(written) == 2  # model + config
 
 
 def test_download_voice_curl_failure_cleans_up(tmp_path, monkeypatch):
     import subprocess
+
     vdir = _fake_voices_dir(tmp_path, monkeypatch, ())
 
     def failing(cmd, check, timeout):
@@ -185,4 +186,4 @@ def test_download_voice_curl_failure_cleans_up(tmp_path, monkeypatch):
 
     monkeypatch.setattr(speech.subprocess, "run", failing)
     assert speech.download_voice("en_GB-alan-low") is None
-    assert list(vdir.glob("*.onnx")) == []   # no half-downloaded voice
+    assert list(vdir.glob("*.onnx")) == []  # no half-downloaded voice

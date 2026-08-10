@@ -5,16 +5,9 @@ and sentiment vocabulary in artifacts/extensions.json.
 By default patches auto-apply; manual approve/reject is available when
 auto_apply is False. /revert rolls back the last applied entry."""
 
-import sys
-from pathlib import Path
 from typing import ClassVar
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import extensions
-import llmclient
-import learning
-import sentiment
+from replicanta import extensions, learning, llmclient, sentiment
 
 
 def _path(tmp_path):
@@ -22,12 +15,17 @@ def _path(tmp_path):
 
 
 def _good_pattern():
-    return {"kind": "pattern", "regex": "i adore ([a-z '-]+)",
-            "template": "user:like_{x}:true", "example": "i adore hiking",
-            "why": "the user says adore"}
+    return {
+        "kind": "pattern",
+        "regex": "i adore ([a-z '-]+)",
+        "template": "user:like_{x}:true",
+        "example": "i adore hiking",
+        "why": "the user says adore",
+    }
 
 
 # -- validation ---------------------------------------------------------------
+
 
 def test_validate_accepts_good_pattern():
     ok, _reason = extensions.validate(_good_pattern())
@@ -53,8 +51,10 @@ def test_validate_rejects_pattern_not_firing_on_example():
 
 
 def test_validate_rejects_pattern_firing_on_controls():
-    entry = _good_pattern() | {"regex": "the weather (.+)",
-                               "example": "the weather is nice today"}
+    entry = _good_pattern() | {
+        "regex": "the weather (.+)",
+        "example": "the weather is nice today",
+    }
     ok, reason = extensions.validate(entry)
     assert not ok and "unrelated" in reason
 
@@ -68,6 +68,7 @@ def test_validate_seed_and_terms():
 
 
 # -- registry round trips -------------------------------------------------------
+
 
 def test_propose_auto_applies_by_default(tmp_path):
     path = _path(tmp_path)
@@ -102,8 +103,9 @@ def test_revert_removes_last_applied(tmp_path):
     path = _path(tmp_path)
     extensions.propose(path, _good_pattern(), auto_apply=False)
     extensions.approve(path)
-    extensions.propose(path, {"kind": "seed", "text": "a quiet thought"},
-                       auto_apply=False)
+    extensions.propose(
+        path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=False
+    )
     extensions.approve(path)
     reverted = extensions.revert_last(path)
     assert reverted["kind"] == "seed"
@@ -115,6 +117,7 @@ def test_revert_removes_last_applied(tmp_path):
 
 # -- consumers ------------------------------------------------------------------
 
+
 def test_learning_extract_uses_registry_pattern(tmp_path):
     extensions.load_global(_path(tmp_path))
     extensions.propose(_path(tmp_path), _good_pattern(), auto_apply=True)
@@ -124,16 +127,16 @@ def test_learning_extract_uses_registry_pattern(tmp_path):
 
 def test_sentiment_uses_registry_terms(tmp_path):
     extensions.load_global(_path(tmp_path))
-    extensions.propose(_path(tmp_path),
-                       {"kind": "harsh_term", "text": "blork"},
-                       auto_apply=True)
+    extensions.propose(
+        _path(tmp_path), {"kind": "harsh_term", "text": "blork"}, auto_apply=True
+    )
     assert sentiment.harshness("you are a blork") > 0.0
     assert sentiment.harshness("you are lovely") == 0.0
 
 
 def test_seed_pool_uses_registry_seeds(tmp_path):
-    import narration
-    from organism import BeliefStore, Lifecycle, Metrics
+    from replicanta import narration
+    from replicanta.organism import BeliefStore, Lifecycle, Metrics
 
     class FakeWindow:
         pairs: ClassVar[set] = set()
@@ -148,10 +151,13 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
             return Metrics(self.store)
 
     extensions.load_global(_path(tmp_path))
-    extensions.propose(_path(tmp_path),
-                       {"kind": "seed", "text": "a question about gravity"},
-                       auto_apply=True)
+    extensions.propose(
+        _path(tmp_path),
+        {"kind": "seed", "text": "a question about gravity"},
+        auto_apply=True,
+    )
     import random
+
     snap = narration.state_snapshot(FakeOrg(tmp_path))
     seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(80)}
     assert "a question about gravity" in seeds

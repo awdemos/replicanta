@@ -30,8 +30,16 @@ to "lua"."""
 import threading
 from pathlib import Path
 
-EVENTS = ("birth", "cycle", "learned", "utterance", "fade",
-          "mud_turn", "mud_win", "mud_end")
+EVENTS = (
+    "birth",
+    "cycle",
+    "learned",
+    "utterance",
+    "fade",
+    "mud_turn",
+    "mud_win",
+    "mud_end",
+)
 
 _BLOCKED_GLOBALS = ("os", "io", "load", "loadstring", "require", "dofile")
 
@@ -45,18 +53,20 @@ class HookEngine:
         self.emit = emit if emit is not None else (lambda _msg: None)
         self._lock = threading.Lock()
         self._lua = None
-        self._available = None   # None = untested, False = lupa missing
+        self._available = None  # None = untested, False = lupa missing
         self.reload()
 
     def reload(self):
         """Re-read the scripts directory (drop + rebuild the runtime)."""
-        self.scripts = (sorted(self.scripts_dir.glob("*.lua"))
-                        if self.scripts_dir.is_dir() else [])
+        self.scripts = (
+            sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
+        )
         self._lua = None
 
     # -- runtime -----------------------------------------------------------
     def _runtime(self):
         from lupa import LuaRuntime
+
         lua = LuaRuntime(register_eval=False, register_builtins=False)
         for name in _BLOCKED_GLOBALS:
             lua.execute(f"{name} = nil")

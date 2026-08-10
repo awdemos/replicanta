@@ -1,19 +1,14 @@
 import json
 import random
-import sys
 import urllib.error
-from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+from conftest import patch_generate
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import narration
-import llmclient
-import voice
-from narration import (
+from replicanta import llmclient, narration, voice
+from replicanta.narration import (
     _dead_experience,
     _dream_experience,
     _felt_experience,
@@ -22,9 +17,8 @@ from narration import (
     fallback_summary,
     state_snapshot,
 )
-from organism import BeliefStore, Lifecycle, Metrics
-from voice import narrate, respond
-from conftest import patch_generate
+from replicanta.organism import BeliefStore, Lifecycle, Metrics
+from replicanta.voice import narrate, respond
 
 
 class FakeWindow:
@@ -41,7 +35,8 @@ class FakeOrg:
         self.store.add(("cat", "has_fur", "true"), 0.9)
         self.store.add(("cat", "has_paws", "true"), 0.8)
         self.store.rules.append(
-            ('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1))
+            ('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1)
+        )
         self.lifecycle = Lifecycle(self.store)
         self.window = FakeWindow()
 
@@ -67,13 +62,13 @@ def test_state_snapshot_shape(org):
 
 
 def test_state_snapshot_includes_host_uname(org):
-    org.probe = SimpleNamespace(clock_utc=lambda: "14:30 UTC",
-                                uname=lambda: "Linux testhost 6.1 x86_64")
+    org.probe = SimpleNamespace(
+        clock_utc=lambda: "14:30 UTC", uname=lambda: "Linux testhost 6.1 x86_64"
+    )
     snap = state_snapshot(org)
     assert snap["host"] == "Linux testhost 6.1 x86_64"
     prompt = build_prompt(snap)
-    assert "the machine you live in (uname): Linux testhost 6.1 x86_64" \
-        in prompt
+    assert "the machine you live in (uname): Linux testhost 6.1 x86_64" in prompt
 
 
 def test_state_snapshot_host_none_without_probe(org):
@@ -114,8 +109,8 @@ def test_build_prompt_includes_snapshot(org):
 def test_build_prompt_includes_felt_experience(org):
     prompt = build_prompt(state_snapshot(org))
     assert "how this feels right now" in prompt
-    assert "young" in prompt          # score 1.3 -> young band
-    assert "precious" in prompt       # 2 beliefs -> few, precious band
+    assert "young" in prompt  # score 1.3 -> young band
+    assert "precious" in prompt  # 2 beliefs -> few, precious band
 
 
 def test_felt_experience_reacts_to_chaos(org):
@@ -195,6 +190,7 @@ def test_narrate_returns_ollama_response(org, monkeypatch):
 def test_narrate_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
+
     patch_generate(monkeypatch, boom)
     text = narrate(org)
     assert "2 beliefs" in text and "wake" in text
@@ -306,8 +302,7 @@ def test_narrate_falls_back_on_ollama_error_field(org, monkeypatch):
         def read(self):
             return json.dumps({"error": "model not found"}).encode()
 
-    monkeypatch.setattr("urllib.request.urlopen",
-                        lambda req, timeout=None: FakeResp())
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: FakeResp())
     text = narrate(org)
     assert "2 beliefs" in text
 
@@ -324,6 +319,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
     def fake_generate(prompt, model, timeout, temperature=0.95):
         captured["prompt"] = prompt
         return "Hello, human. I am awake."
+
     patch_generate(monkeypatch, fake_generate)
     reply = respond(org, "hello there")
     assert reply == "Hello, human. I am awake."
@@ -333,6 +329,7 @@ def test_respond_returns_ollama_response(org, monkeypatch):
 def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
     def boom(prompt, model, timeout, temperature=0.95):
         raise RuntimeError("ollama down")
+
     patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
     assert "hello there" in reply
@@ -369,7 +366,10 @@ def test_seed_pool_draws_from_lived_state(org):
 
 def test_narrate_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(
+        monkeypatch,
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x",
+    )
     narrate(org)
     assert "what is most alive in you right now" in captured["prompt"]
 
@@ -377,7 +377,10 @@ def test_narrate_prompt_carries_a_seed(org, monkeypatch):
 def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
     org.store.record_chat("org", "am I more than my beliefs?")
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(
+        monkeypatch,
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x",
+    )
     voice.self_ask(org)
     assert "do not repeat them" in captured["prompt"]
     assert "am I more than my beliefs?" in captured["prompt"]
@@ -385,7 +388,10 @@ def test_self_ask_prompt_steers_away_from_recent_questions(org, monkeypatch):
 
 def test_respond_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(
+        monkeypatch,
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x",
+    )
     respond(org, "hello there")
     assert "what is most alive in you right now" in captured["prompt"]
 
@@ -414,7 +420,10 @@ def test_self_ask_prompt_continues_the_conversation(org, monkeypatch):
     org.store.record_chat("org", "what do I believe?")
     org.store.record_chat("org", "I believe in fur.")
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(
+        monkeypatch,
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x",
+    )
     voice.self_ask(org)
     assert "Your ongoing conversation with yourself" in captured["prompt"]
     assert "what do I believe?" in captured["prompt"]
@@ -436,8 +445,9 @@ def test_seed_pool_excludes_env_metrics(org):
 def test_seed_pool_includes_imaginative_seeds(org):
     snap = state_snapshot(org)
     seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(50)}
-    assert any("wonder" in s or "cannot verify" in s or "ask the user" in s
-               for s in seeds)
+    assert any(
+        "wonder" in s or "cannot verify" in s or "ask the user" in s for s in seeds
+    )
 
 
 def test_build_prompt_ask_user_branch(org):
@@ -447,8 +457,7 @@ def test_build_prompt_ask_user_branch(org):
 
 
 def test_ask_user_fallback_without_user_facts(org):
-    assert "beyond the machine" in narration.fallback_ask_user(
-        state_snapshot(org))
+    assert "beyond the machine" in narration.fallback_ask_user(state_snapshot(org))
 
 
 def test_ask_user_fallback_uses_user_facts(org):
@@ -466,7 +475,10 @@ def test_ask_user_offline_returns_fallback(org):
 
 def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x")
+    patch_generate(
+        monkeypatch,
+        lambda prompt, *a, **k: captured.setdefault("prompt", prompt) or "x",
+    )
     voice.ask_user(org)
     assert "what is most alive in you right now" in captured["prompt"]
     assert "Ask the user one question" in captured["prompt"]
@@ -536,11 +548,9 @@ def test_ollama_generate_strips_think_block(monkeypatch):
             return False
 
         def read(self):
-            return json.dumps(
-                {"response": "<think>hmm</think>clean answer"}).encode()
+            return json.dumps({"response": "<think>hmm</think>clean answer"}).encode()
 
-    monkeypatch.setattr(urllib.request, "urlopen",
-                        lambda *a, **k: _Resp())
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp())
     assert llmclient.generate("prompt", "m", 5) == "clean answer"
 
 
@@ -562,56 +572,64 @@ def test_reply_branch_is_substance_first(org):
 
 # -- cross-cycle repetition gate --------------------------------------------
 
+
 def test_is_repeat_of_recent_exact():
     assert narration.is_repeat_of_recent(
-        "I keep circling the same thought.",
-        ["I keep circling the same thought!"])
+        "I keep circling the same thought.", ["I keep circling the same thought!"]
+    )
 
 
 def test_is_repeat_of_recent_near_twin():
     # 6 shared tokens out of 7 -> above the 0.8 overlap threshold
     assert narration.is_repeat_of_recent(
-        "I wonder about fur and paws today.",
-        ["I wonder about fur and paws."])
+        "I wonder about fur and paws today.", ["I wonder about fur and paws."]
+    )
 
 
 def test_is_repeat_of_recent_fresh_passes():
     assert not narration.is_repeat_of_recent(
         "The rain on the window sounds like typing.",
-        ["I keep circling the same thought."])
+        ["I keep circling the same thought."],
+    )
 
 
 def test_is_repeat_of_recent_shared_opening():
     # low overall token overlap, but the identical opening run gives the
     # loop away (the pattern real musings fell into)
     assert narration.is_repeat_of_recent(
-        "I lost another belief today, and it felt like losing a page "
-        "from an old book.",
-        [("I lost another belief today. It felt like losing a leaf from "
-          "a tree in autumn.")])
+        "I lost another belief today, and it felt like losing a page from an old book.",
+        [
+            (
+                "I lost another belief today. It felt like losing a leaf from "
+                "a tree in autumn."
+            )
+        ],
+    )
 
 
 def test_is_repeat_of_recent_short_shared_opening_passes():
     # a common four-word lead-in is just a habit of voice, not a loop
     assert not narration.is_repeat_of_recent(
         "I am awake and holding my beliefs close tonight.",
-        ["I am awake and wondering about the rain again."])
+        ["I am awake and wondering about the rain again."],
+    )
 
 
 def test_narrate_retries_when_thought_repeats(org, monkeypatch):
     org.store.record_chat("org", "I keep circling the same thought.")
-    takes = iter(["I keep circling the same thought!",
-                  "something entirely new."])
-    monkeypatch.setattr("arena.ThoughtArena.emerge",
-                        lambda self, org, **kw: next(takes))
+    takes = iter(["I keep circling the same thought!", "something entirely new."])
+    monkeypatch.setattr(
+        "replicanta.arena.ThoughtArena.emerge", lambda self, org, **kw: next(takes)
+    )
     assert narrate(org) == "something entirely new."
 
 
 def test_narrate_returns_none_when_stuck_on_a_repeat(org, monkeypatch):
     org.store.record_chat("org", "I keep circling the same thought.")
-    monkeypatch.setattr("arena.ThoughtArena.emerge",
-                        lambda self, org, **kw:
-                        "I keep circling the same thought.")
+    monkeypatch.setattr(
+        "replicanta.arena.ThoughtArena.emerge",
+        lambda self, org, **kw: "I keep circling the same thought.",
+    )
     assert narrate(org) is None
 
 
@@ -624,8 +642,10 @@ def test_narrate_only_checks_its_own_voice(org, monkeypatch):
 
 def test_self_ask_falls_back_when_questions_repeat(org, monkeypatch):
     org.store.record_chat("org", "do I really believe in fur?")
-    monkeypatch.setattr("arena.ThoughtArena.emerge",
-                        lambda self, org, **kw: "do I really believe in fur?")
+    monkeypatch.setattr(
+        "replicanta.arena.ThoughtArena.emerge",
+        lambda self, org, **kw: "do I really believe in fur?",
+    )
     question = voice.self_ask(org)
     assert question != "do I really believe in fur?"
     assert question.endswith("?")
@@ -633,9 +653,10 @@ def test_self_ask_falls_back_when_questions_repeat(org, monkeypatch):
 
 def test_self_answer_falls_back_when_answers_repeat(org, monkeypatch):
     org.store.record_chat("org", "I believe in fur because I feel it.")
-    monkeypatch.setattr("arena.ThoughtArena.emerge",
-                        lambda self, org, **kw:
-                        "I believe in fur because I feel it.")
+    monkeypatch.setattr(
+        "replicanta.arena.ThoughtArena.emerge",
+        lambda self, org, **kw: "I believe in fur because I feel it.",
+    )
     answer = voice.self_answer(org, "do I really believe in fur?")
     assert answer != "I believe in fur because I feel it."
     assert "do I really believe in fur?" in answer
@@ -661,8 +682,7 @@ def test_seed_for_avoids_recent_seeds(org):
 def test_seed_for_falls_back_to_full_pool_when_all_excluded(org):
     snap = state_snapshot(org)
     rng = random.Random(7)
-    all_seeds = {llmclient.seed_for(snap, random.Random(i))
-                 for i in range(40)}
+    all_seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(40)}
     chosen = llmclient.seed_for(snap, rng, exclude=list(all_seeds))
     assert chosen in all_seeds
 
@@ -670,9 +690,12 @@ def test_seed_for_falls_back_to_full_pool_when_all_excluded(org):
 def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
     """Consecutive debates on an unchanged (idle) organism must not circle
     the same seed — the recent-seed history lives on the organism."""
-    from arena import ThoughtArena
+    from replicanta.arena import ThoughtArena
+
     prompts = []
-    patch_generate(monkeypatch, lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
+    patch_generate(
+        monkeypatch, lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought"
+    )
     ThoughtArena(rng=random.Random(1)).emerge(org)
     ThoughtArena(rng=random.Random(1)).emerge(org)
     seeds = [org._recent_seeds[i] for i in range(len(org._recent_seeds))]

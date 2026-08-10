@@ -2,15 +2,9 @@
 state and the extension registry are module-global, so reset them around
 every test to keep reachability, speech and registry deterministic."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import extensions
-import llmclient
 import pytest
-import speech
+
+from replicanta import extensions, llmclient, speech
 
 
 def patch_generate(monkeypatch, fake):
@@ -21,9 +15,11 @@ def patch_generate(monkeypatch, fake):
     classic str-returning fake and supplies zeroed token stats. Fakes
     that raise still raise. Tests asserting metered token counts should
     patch generate_with_stats directly with their own stats dict."""
+
     def wrapper(*a, **k):
         return fake(*a, **k), {"prompt_tokens": 0, "gen_tokens": 0}
-    monkeypatch.setattr("llmclient.generate_with_stats", wrapper)
+
+    monkeypatch.setattr("replicanta.llmclient.generate_with_stats", wrapper)
 
 
 @pytest.fixture(autouse=True)

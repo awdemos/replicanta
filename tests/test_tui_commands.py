@@ -1,9 +1,4 @@
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from tui_commands import (
+from replicanta.tui_commands import (
     COMMAND_NAMES,
     complete_command,
     help_text,
@@ -77,8 +72,17 @@ def test_help_text_lists_all_commands_and_keys():
     text = help_text()
     for name in COMMAND_NAMES:
         assert name in text
-    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "F7", "F8", "ctrl+q",
-                "tab", "up/down"):
+    for key in (
+        "ctrl+p",
+        "F1",
+        "ctrl+s",
+        "ctrl+t",
+        "F7",
+        "F8",
+        "ctrl+q",
+        "tab",
+        "up/down",
+    ):
         assert key in text
     assert "mental-state gauges" in text
     assert "thought metabolism" in text

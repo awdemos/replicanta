@@ -10,7 +10,7 @@ import re
 import shutil
 from pathlib import Path
 
-from fileutil import atomic_write_text
+from replicanta.fileutil import atomic_write_text
 
 NURSERY_DIR = "organisms"
 CURRENT_FILE = "current"
@@ -27,8 +27,8 @@ def _nursery(root):
 def _validate(name):
     if not NAME_RE.match(name):
         raise ValueError(
-            f"invalid organism name {name!r} — use letters, "
-            "digits, - and _")
+            f"invalid organism name {name!r} — use letters, digits, - and _"
+        )
 
 
 def list_organisms(root):
@@ -140,8 +140,8 @@ GROUP_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,31}$")
 def _validate_group(name):
     if not GROUP_NAME_RE.match(name):
         raise ValueError(
-            f"invalid group name {name!r} — use letters, digits, "
-            "spaces, -, _ and .")
+            f"invalid group name {name!r} — use letters, digits, spaces, -, _ and ."
+        )
 
 
 def load_groups(root):
@@ -160,15 +160,19 @@ def load_groups(root):
     for name, members in raw.items():
         if not GROUP_NAME_RE.match(str(name)):
             continue
-        kept = sorted(m for m in members if m in existing) \
-            if isinstance(members, list) else []
+        kept = (
+            sorted(m for m in members if m in existing)
+            if isinstance(members, list)
+            else []
+        )
         groups[str(name)] = kept
     return groups
 
 
 def save_groups(root, groups):
-    atomic_write_text(Path(root) / GROUPS_FILE,
-                      json.dumps(groups, indent=2, sort_keys=True) + "\n")
+    atomic_write_text(
+        Path(root) / GROUPS_FILE, json.dumps(groups, indent=2, sort_keys=True) + "\n"
+    )
 
 
 def list_groups(root):

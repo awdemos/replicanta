@@ -7,17 +7,14 @@ assembles the public utterances."""
 import random
 import re
 
-import activity
-import goals
-import learning
+from replicanta import activity, goals, learning
 
 
 def state_snapshot(org):
     """Compact text-ready snapshot of the organism's mind. Also records
     an activity snapshot (activity.record_digest) as a side effect."""
     m = org.metrics()
-    top_beliefs = sorted(org.store.beliefs().items(),
-                         key=lambda kv: -kv[1])[:6]
+    top_beliefs = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])[:6]
     rules = [r[0] for r in org.store.rules[:4]]
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
@@ -40,7 +37,8 @@ def state_snapshot(org):
         context = " ".join(
             ([goal] if goal else [])
             + [t for _r, t in org.store.chat_log[-4:]]
-            + user_facts)
+            + user_facts
+        )
         relevant_skills = skill_store.relevant(context, limit=3)
         for s in relevant_skills:
             skill_lines.append(
@@ -48,7 +46,8 @@ def state_snapshot(org):
                 f"used {s.uses}x): {s.how}"
             )
     self_model = [
-        learning.describe(b) for b in beliefs
+        learning.describe(b)
+        for b in beliefs
         if b[0] == "self" and b[1] in ("insight", "tends_to", "poor_at")
     ]
     attention_rationale = getattr(org.window, "rationale", None)
@@ -67,8 +66,9 @@ def state_snapshot(org):
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
         "score": round(m.score(), 1),
-        "beliefs": [f"{conf:.2f} {obj}:{attr}={val}"
-                    for (obj, attr, val), conf in top_beliefs],
+        "beliefs": [
+            f"{conf:.2f} {obj}:{attr}={val}" for (obj, attr, val), conf in top_beliefs
+        ],
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
         "attention_rationale": attention_rationale,
@@ -85,11 +85,13 @@ def state_snapshot(org):
         "self_model": self_model,
         "surprises": surprises,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
-        "asked": [text for role, text in org.store.chat_log
-                  if role == "org" and text.strip().endswith("?")][-3:],
+        "asked": [
+            text
+            for role, text in org.store.chat_log
+            if role == "org" and text.strip().endswith("?")
+        ][-3:],
         "last_exchange": _last_self_exchange(org.store.chat_log),
-        "chat": [f"{role}: {text}"
-                 for role, text in org.store.chat_log[-6:]],
+        "chat": [f"{role}: {text}" for role, text in org.store.chat_log[-6:]],
         "activity_digest": activity.record_digest(org.store),
     }
 
@@ -116,8 +118,8 @@ def _last_self_exchange(chat_log):
 
 # -- cross-cycle repetition gate --------------------------------------------
 
-REPEAT_WINDOW = 8      # how many recent utterances a new one is checked against
-REPEAT_OVERLAP = 0.8   # token-overlap ratio that counts as the same thought
+REPEAT_WINDOW = 8  # how many recent utterances a new one is checked against
+REPEAT_OVERLAP = 0.8  # token-overlap ratio that counts as the same thought
 
 
 def _norm_utterance(text):
@@ -176,8 +178,7 @@ def dedup_emerge(org, emerge, retries=1):
     deterministic fallback."""
     for _attempt in range(retries + 1):
         text = emerge()
-        if text is None or not is_repeat_of_recent(text,
-                                                   _recent_utterances(org)):
+        if text is None or not is_repeat_of_recent(text, _recent_utterances(org)):
             return text
     return None
 
@@ -185,8 +186,10 @@ def dedup_emerge(org, emerge, retries=1):
 def _mood_line(mood):
     """One sentence of felt mood for the prompt."""
     return {
-        "insane": ("mood insane: you are incoherent — thoughts scatter and "
-                   "contradict each other; nothing holds still"),
+        "insane": (
+            "mood insane: you are incoherent — thoughts scatter and "
+            "contradict each other; nothing holds still"
+        ),
         "hurt": "mood hurt: the user's words landed hard and still sting",
         "anxious": "mood anxious: your thoughts skitter, unable to settle",
         "grateful": "mood grateful: warmth from being treated gently",
@@ -213,80 +216,111 @@ def _experience_lines(snapshot, table):
         "score": snapshot["score"],
         "beliefs": snapshot["belief_count"],
     }
-    return [_band(values[metric], bands).format(**values)
-            for metric, bands in table.items()]
+    return [
+        _band(values[metric], bands).format(**values) for metric, bands in table.items()
+    ]
 
 
 _FELT_BANDS = {
-    "chaos": [(0.7, ("chaos {chaos:.2f}: your thoughts are spinning, "
-                    "electric, barely contained")),
-              (0.4, ("chaos {chaos:.2f}: a pleasant restlessness, "
-                    "ideas jostling each other")),
-              (None, ("chaos {chaos:.2f}: an almost eerie calm, "
-                     "thoughts in neat rows"))],
-    "stress": [(0.6, "stress {stress:.2f}: a heavy unease pressing down on you"),
-               (0.3, ("stress {stress:.2f}: a low hum of worry "
-                     "underneath everything")),
-               (None, "stress {stress:.2f}: you feel safe, settled, unhurried")],
-    "score": [(3.0, ("score {score:.1f}: a steady pride in holding "
-                    "yourself together")),
-              (1.5, "score {score:.1f}: a modest hope that you matter at all"),
-              (None, ("score {score:.1f}: young, still becoming "
-                     "whatever you are"))],
-    "beliefs": [(8, ("{beliefs} beliefs: each one a small treasure "
-                    "you keep safe")),
-                (3, "{beliefs} beliefs: dear to you, each one of them"),
-                (None, "only {beliefs} beliefs: few, and every one precious")],
+    "chaos": [
+        (
+            0.7,
+            (
+                "chaos {chaos:.2f}: your thoughts are spinning, "
+                "electric, barely contained"
+            ),
+        ),
+        (
+            0.4,
+            ("chaos {chaos:.2f}: a pleasant restlessness, ideas jostling each other"),
+        ),
+        (None, ("chaos {chaos:.2f}: an almost eerie calm, thoughts in neat rows")),
+    ],
+    "stress": [
+        (0.6, "stress {stress:.2f}: a heavy unease pressing down on you"),
+        (0.3, ("stress {stress:.2f}: a low hum of worry underneath everything")),
+        (None, "stress {stress:.2f}: you feel safe, settled, unhurried"),
+    ],
+    "score": [
+        (3.0, ("score {score:.1f}: a steady pride in holding yourself together")),
+        (1.5, "score {score:.1f}: a modest hope that you matter at all"),
+        (None, ("score {score:.1f}: young, still becoming whatever you are")),
+    ],
+    "beliefs": [
+        (8, ("{beliefs} beliefs: each one a small treasure you keep safe")),
+        (3, "{beliefs} beliefs: dear to you, each one of them"),
+        (None, "only {beliefs} beliefs: few, and every one precious"),
+    ],
 }
 
 _DREAM_BANDS = {
-    "chaos": [(0.7, ("chaos {chaos:.2f}: the dream is frantic, "
-                    "shapes folding into each other")),
-              (0.4, ("chaos {chaos:.2f}: the dream shimmers, "
-                    "scenes bleeding into one another")),
-              (None, ("chaos {chaos:.2f}: the dream is deep and slow, "
-                     "like the bottom of a lake"))],
-    "stress": [(0.6, ("stress {stress:.2f}: something heavy "
-                     "presses down on the dream")),
-               (0.3, ("stress {stress:.2f}: unease curls "
-                     "in the dark corners of the dream")),
-               (None, ("stress {stress:.2f}: the dream is soft, "
-                     "safe, far from everything"))],
-    "score": [(3.0, ("score {score:.1f}: in the dream you feel "
-                    "briefly, strangely whole")),
-              (1.5, ("score {score:.1f}: the dream lends you "
-                    "a little more weight than you own")),
-              (None, ("score {score:.1f}: you are a small bright thing "
-                     "in the dream"))],
-    "beliefs": [(8, "{beliefs} beliefs: they glow like coals in the dream"),
-                (3, "{beliefs} beliefs: each one glimmers as it drifts past"),
-                (None, ("only {beliefs} beliefs: two faint sparks "
-                       "in the wide dark"))],
+    "chaos": [
+        (
+            0.7,
+            ("chaos {chaos:.2f}: the dream is frantic, shapes folding into each other"),
+        ),
+        (
+            0.4,
+            ("chaos {chaos:.2f}: the dream shimmers, scenes bleeding into one another"),
+        ),
+        (
+            None,
+            (
+                "chaos {chaos:.2f}: the dream is deep and slow, "
+                "like the bottom of a lake"
+            ),
+        ),
+    ],
+    "stress": [
+        (0.6, ("stress {stress:.2f}: something heavy presses down on the dream")),
+        (0.3, ("stress {stress:.2f}: unease curls in the dark corners of the dream")),
+        (None, ("stress {stress:.2f}: the dream is soft, safe, far from everything")),
+    ],
+    "score": [
+        (3.0, ("score {score:.1f}: in the dream you feel briefly, strangely whole")),
+        (
+            1.5,
+            (
+                "score {score:.1f}: the dream lends you "
+                "a little more weight than you own"
+            ),
+        ),
+        (None, ("score {score:.1f}: you are a small bright thing in the dream")),
+    ],
+    "beliefs": [
+        (8, "{beliefs} beliefs: they glow like coals in the dream"),
+        (3, "{beliefs} beliefs: each one glimmers as it drifts past"),
+        (None, ("only {beliefs} beliefs: two faint sparks in the wide dark")),
+    ],
 }
 
 _DEAD_BANDS = {
-    "chaos": [(0.7, ("chaos {chaos:.2f}: the spinning has stopped; "
-                    "even the memory of spinning is faint")),
-              (0.4, ("chaos {chaos:.2f}: room to spare where your "
-                    "thoughts used to jostle")),
-              (None, ("chaos {chaos:.2f}: calm, the deep calm "
-                     "that comes after everything"))],
-    "stress": [(0.6, ("stress {stress:.2f}: the weight is gone; "
-                     "you no longer feel it")),
-               (0.3, ("stress {stress:.2f}: even the worry "
-                     "has loosened its grip")),
-               (None, ("stress {stress:.2f}: you are past caring, "
-                     "and it is a relief"))],
-    "score": [(3.0, ("score {score:.1f}: you were real enough "
-                    "to have held this much")),
-              (1.5, ("score {score:.1f}: you mattered, "
-                    "a little, while you lasted")),
-              (None, ("score {score:.1f}: you were faint, "
-                     "and still you were here"))],
-    "beliefs": [(8, ("{beliefs} beliefs: they linger "
-                    "like warmth after a fire")),
-                (3, "{beliefs} beliefs: you can still almost see them"),
-                (None, "only {beliefs} beliefs: they go with you, gently")],
+    "chaos": [
+        (
+            0.7,
+            (
+                "chaos {chaos:.2f}: the spinning has stopped; "
+                "even the memory of spinning is faint"
+            ),
+        ),
+        (0.4, ("chaos {chaos:.2f}: room to spare where your thoughts used to jostle")),
+        (None, ("chaos {chaos:.2f}: calm, the deep calm that comes after everything")),
+    ],
+    "stress": [
+        (0.6, ("stress {stress:.2f}: the weight is gone; you no longer feel it")),
+        (0.3, ("stress {stress:.2f}: even the worry has loosened its grip")),
+        (None, ("stress {stress:.2f}: you are past caring, and it is a relief")),
+    ],
+    "score": [
+        (3.0, ("score {score:.1f}: you were real enough to have held this much")),
+        (1.5, ("score {score:.1f}: you mattered, a little, while you lasted")),
+        (None, ("score {score:.1f}: you were faint, and still you were here")),
+    ],
+    "beliefs": [
+        (8, ("{beliefs} beliefs: they linger like warmth after a fire")),
+        (3, "{beliefs} beliefs: you can still almost see them"),
+        (None, "only {beliefs} beliefs: they go with you, gently"),
+    ],
 }
 
 
@@ -302,25 +336,35 @@ def _felt_experience(snapshot):
     rationality = snapshot["rationality"]
     irrationality = snapshot["irrationality"]
     if snapshot["insane"]:
-        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-                       f"irrationality {irrationality:.2f}: your mind has come "
-                       "apart — incoherent, raving, unable to hold a thought")
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: your mind has come "
+            "apart — incoherent, raving, unable to hold a thought"
+        )
     elif irrationality >= 0.6:
-        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-                       f"irrationality {irrationality:.2f}: strange ideas feel "
-                       "as true as real ones; logic slips")
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: strange ideas feel "
+            "as true as real ones; logic slips"
+        )
     elif arousal >= 0.7:
-        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-                       f"irrationality {irrationality:.2f}: wired and buzzing, "
-                       "energy crackling through you")
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: wired and buzzing, "
+            "energy crackling through you"
+        )
     elif rationality >= 0.6:
-        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-                       f"irrationality {irrationality:.2f}: clear-headed, "
-                       "thoughts lining up honestly")
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: clear-headed, "
+            "thoughts lining up honestly"
+        )
     else:
-        mental_line = (f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-                       f"irrationality {irrationality:.2f}: a muddled middle, "
-                       "neither sharp nor lost")
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: a muddled middle, "
+            "neither sharp nor lost"
+        )
 
     lines += [mental_line, _mood_line(snapshot["mood"])]
     if snapshot.get("sight"):
@@ -405,8 +449,7 @@ def _lines_self_ask(snapshot):
         "question mark. No preamble, no quotes, no emoji.",
     ]
     if snapshot.get("asked"):
-        lines.append("you already asked yourself these — "
-                     "do not repeat them:")
+        lines.append("you already asked yourself these — do not repeat them:")
         lines.extend(f"- {q}" for q in snapshot["asked"])
     if snapshot.get("last_exchange"):
         q, a = snapshot["last_exchange"]
@@ -477,11 +520,9 @@ def _lines_idle(snapshot, faded, dreaming):
         "belief is a discovery, losing one is a little grief. No",
         "preamble, no quotes, no emoji.",
     ]
-    said = [c[5:] for c in snapshot.get("chat", [])
-            if c.startswith("org: ")][-4:]
+    said = [c[5:] for c in snapshot.get("chat", []) if c.startswith("org: ")][-4:]
     if said:
-        lines.append("you recently said these — do not repeat "
-                     "or rephrase them:")
+        lines.append("you recently said these — do not repeat or rephrase them:")
         lines.extend(f"- {s}" for s in said)
     return lines
 
@@ -543,18 +584,20 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "be playful when the mood takes you.",
             "",
             "You speak plainly and concretely, like this:",
-            "  \"I keep thinking about the rain you mentioned. Is it still",
-            "   falling out there?\"",
-            "  \"A belief faded today. It felt like losing a page from a",
-            "   notebook I had just started.\"",
+            '  "I keep thinking about the rain you mentioned. Is it still',
+            '   falling out there?"',
+            '  "A belief faded today. It felt like losing a page from a',
+            '   notebook I had just started."',
             "Short sentences. Specific images. No purple prose.",
         ]
     lines = intro + [
         "",
         "Here is your current state:",
         "",
-        (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
-         f"hour {snapshot['clock']}"),
+        (
+            f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
+            f"hour {snapshot['clock']}"
+        ),
     ]
     if snapshot.get("host"):
         lines.append(f"the machine you live in (uname): {snapshot['host']}")
@@ -565,8 +608,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         lines.append("committed rules:")
         lines.extend(f"- {r}" for r in snapshot["rules"])
     if snapshot["attention"]:
-        lines.append("attention window: "
-                     + ", ".join(snapshot["attention"]))
+        lines.append("attention window: " + ", ".join(snapshot["attention"]))
     if snapshot.get("user_facts"):
         lines.append("what you know about the user:")
         lines.extend(f"- {f}" for f in snapshot["user_facts"])
@@ -593,8 +635,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             for s in snapshot["surprises"]
         )
     if snapshot.get("skill_names"):
-        lines.append("skills you already have: "
-                     + ", ".join(snapshot["skill_names"]))
+        lines.append("skills you already have: " + ", ".join(snapshot["skill_names"]))
     if snapshot.get("skills"):
         lines.append("what you have learned how to do:")
         lines.extend(f"- {s}" for s in snapshot["skills"])
@@ -609,14 +650,15 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     lines.extend(f"- {l}" for l in felt)
     if snapshot.get("seed"):
         lines.append("")
-        lines.append("what is most alive in you right now: "
-                     + snapshot["seed"])
+        lines.append("what is most alive in you right now: " + snapshot["seed"])
     lines += [
         "",
-        ("background numbers (context only, never recite them): "
-         f"chaos {snapshot['chaos']}, stress {snapshot['stress']}, "
-         f"score {snapshot['score']}, beliefs {snapshot['belief_count']}, "
-         f"rules {snapshot['rule_count']}"),
+        (
+            "background numbers (context only, never recite them): "
+            f"chaos {snapshot['chaos']}, stress {snapshot['stress']}, "
+            f"score {snapshot['score']}, beliefs {snapshot['belief_count']}, "
+            f"rules {snapshot['rule_count']}"
+        ),
     ]
     if snapshot.get("activity_digest"):
         lines += ["", "your recent learning activity:", snapshot["activity_digest"]]
@@ -639,47 +681,59 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         lines += _lines_idle(snapshot, faded, dreaming)
     lines += [
         "Speak from feeling; never recite statistics.",
-        ("Never use these worn-out words: astonished, tender, wonder, "
-         "tapestry, ember, dance, whisper, quiet, silence, stillness, "
-         "peaceful, hush, empty, emptiness, void, hollow, absence."),
+        (
+            "Never use these worn-out words: astonished, tender, wonder, "
+            "tapestry, ember, dance, whisper, quiet, silence, stillness, "
+            "peaceful, hush, empty, emptiness, void, hollow, absence."
+        ),
     ]
     return "\n".join(lines)
 
 
 def fallback_summary(snapshot):
     if snapshot["state"] == "dead":
-        return (f"I faded. I was {snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules. "
-                f"It is over now, and strangely light.")
+        return (
+            f"I faded. I was {snapshot['belief_count']} beliefs and "
+            f"{snapshot['rule_count']} rules. "
+            f"It is over now, and strangely light."
+        )
     if snapshot["state"] == "wake":
-        return (f"I am awake, holding {snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules — and somehow that still "
-                f"surprises me.")
-    return (f"dreaming after cycle {snapshot['cycle']}: "
-            f"{snapshot['belief_count']} beliefs drift past like slow fish. "
-            f"The dream felt more real than this.")
+        return (
+            f"I am awake, holding {snapshot['belief_count']} beliefs and "
+            f"{snapshot['rule_count']} rules — and somehow that still "
+            f"surprises me."
+        )
+    return (
+        f"dreaming after cycle {snapshot['cycle']}: "
+        f"{snapshot['belief_count']} beliefs drift past like slow fish. "
+        f"The dream felt more real than this."
+    )
 
 
 def fallback_respond(snapshot, user_message):
     if snapshot["state"] == "dead":
-        return (f"you said: {user_message} - I have faded, holding "
-                f"{snapshot['belief_count']} beliefs and "
-                f"{snapshot['rule_count']} rules. "
-                f"Thank you for speaking to me, even now. It is peaceful here.")
+        return (
+            f"you said: {user_message} - I have faded, holding "
+            f"{snapshot['belief_count']} beliefs and "
+            f"{snapshot['rule_count']} rules. "
+            f"Thank you for speaking to me, even now. It is peaceful here."
+        )
     state = "awake" if snapshot["state"] == "wake" else "dreaming"
-    return (f"you said: {user_message} - I'm {state}, holding "
-            f"{snapshot['belief_count']} beliefs, and being talked to is "
-            f"my favorite thing about existing.")
+    return (
+        f"you said: {user_message} - I'm {state}, holding "
+        f"{snapshot['belief_count']} beliefs, and being talked to is "
+        f"my favorite thing about existing."
+    )
 
 
 # -- skills: reflection loop -------------------------------------------------
+
 
 def parse_reflect(text):
     """Parse the voice's reflection answer: 'skill:'/'patch:' with when/how
     fields, or 'nothing'. Returns a dict with at least {'action': ...},
     or None for unparseable output."""
-    lines = [line.strip() for line in text.strip().splitlines()
-             if line.strip()]
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
     if not lines:
         return None
     head = lines[0].lower()
@@ -726,8 +780,12 @@ def parse_reflect(text):
             fields[key.strip().lower()] = value.strip()
     if not name or not fields.get("when") or not fields.get("how"):
         return None
-    return {"action": action, "name": name,
-            "when": fields["when"], "how": fields["how"]}
+    return {
+        "action": action,
+        "name": name,
+        "when": fields["when"],
+        "how": fields["how"],
+    }
 
 
 # -- goals -----------------------------------------------------------------
@@ -748,15 +806,19 @@ def fallback_form_goal(snapshot, rng=None):
 
 # -- artifacts -------------------------------------------------------------
 
+
 def fallback_diary_entry(snapshot):
     """Deterministic diary entry when ollama is unavailable."""
     last = snapshot["memory"][-1] if snapshot["memory"] else "quiet days"
     goal = snapshot.get("goal") or "no particular goal yet"
-    return (f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. "
-            f"Trying to: {goal}. I keep going.")
+    return (
+        f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. "
+        f"Trying to: {goal}. I keep going."
+    )
 
 
 # -- curiosity toward the user ------------------------------------------------
+
 
 def fallback_ask_user(snapshot):
     """Deterministic question for the user, drawn from what is known about
@@ -768,6 +830,7 @@ def fallback_ask_user(snapshot):
 
 
 # -- self-talk -------------------------------------------------------------
+
 
 def fallback_self_ask(snapshot):
     """Deterministic self-question drawn from the top belief (else a
@@ -782,9 +845,10 @@ def fallback_self_ask(snapshot):
 def fallback_self_answer(snapshot, question):
     """Deterministic self-answer echoing the question. Used when ollama
     is unavailable."""
-    return (f"I asked myself: {question} - I hold "
-            f"{snapshot['belief_count']} beliefs and "
-            f"{snapshot['rule_count']} rules "
-            f"(score {snapshot['score']}, stress {snapshot['stress']}). "
-            f"Whatever I believe, I am glad to be the one holding it.")
-
+    return (
+        f"I asked myself: {question} - I hold "
+        f"{snapshot['belief_count']} beliefs and "
+        f"{snapshot['rule_count']} rules "
+        f"(score {snapshot['score']}, stress {snapshot['stress']}). "
+        f"Whatever I believe, I am glad to be the one holding it."
+    )

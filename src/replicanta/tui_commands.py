@@ -12,16 +12,24 @@ COMMANDS = [
     ("/save", "/save", "persist state + genome"),
     ("/think", "/think", "narrate thoughts now"),
     ("/self-talk", "/self-talk", "let the organism speak to itself"),
-    ("/voice", "/voice [on|off|list|use|get]",
-     "spoken voice: toggle, list, switch, download piper voices"),
+    (
+        "/voice",
+        "/voice [on|off|list|use|get]",
+        "spoken voice: toggle, list, switch, download piper voices",
+    ),
     ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)"),
-    ("/microphone", "/microphone [list|use dev]",
-     "mic status, list input devices, choose one"),
+    (
+        "/microphone",
+        "/microphone [list|use dev]",
+        "mic status, list input devices, choose one",
+    ),
     ("/look", "/look", "grab a camera frame and see it (F6)"),
-    ("/camera", "/camera [list|use dev]",
-     "camera status, list devices, choose one"),
-    ("/mud", "/mud [map|story|quest|pause|resume|step|reset|scenario d…]",
-     "toggle or control the dungeon crawl (text adventure)"),
+    ("/camera", "/camera [list|use dev]", "camera status, list devices, choose one"),
+    (
+        "/mud",
+        "/mud [map|story|quest|pause|resume|step|reset|scenario d…]",
+        "toggle or control the dungeon crawl (text adventure)",
+    ),
     ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)"),
     ("/reject", "/reject", "discard the pending genome patch (manual mode)"),
     ("/revert", "/revert", "undo the last applied genome patch"),
@@ -29,8 +37,11 @@ COMMANDS = [
     ("/new", "/new [name]", "birth a new organism and swap to it"),
     ("/swap", "/swap name", "swap to another organism"),
     ("/organisms", "/organisms", "list all organisms"),
-    ("/group", "/group start a b | stop",
-     "group chat: organisms talk with you and each other"),
+    (
+        "/group",
+        "/group start a b | stop",
+        "group chat: organisms talk with you and each other",
+    ),
     ("/reload", "/reload", "re-read the lua hook scripts"),
     ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand"),
     ("/help", "/help", "this help screen"),
@@ -54,7 +65,7 @@ def complete_command(value, index=0):
     if not matches:
         return value, index
     used = index % len(matches)
-    return matches[used] + value[len(token):], (used + 1) % len(matches)
+    return matches[used] + value[len(token) :], (used + 1) % len(matches)
 
 
 def history_push(history, text):
@@ -101,7 +112,8 @@ def sparkline(values):
         return _SPARK_BARS[0] * len(values)
     return "".join(
         _SPARK_BARS[int((v - lo) / (hi - lo) * (len(_SPARK_BARS) - 1) + 0.5)]
-        for v in values)
+        for v in values
+    )
 
 
 def help_text():

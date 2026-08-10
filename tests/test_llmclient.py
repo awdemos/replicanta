@@ -8,7 +8,7 @@ import urllib.error
 
 import pytest
 
-import llmclient
+from replicanta import llmclient
 
 
 def _fake_resp(payload):
@@ -27,16 +27,19 @@ def _fake_resp(payload):
 
 def _patch_urlopen(monkeypatch, payload):
     monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda req, timeout=None: _fake_resp(payload))
+        "urllib.request.urlopen", lambda req, timeout=None: _fake_resp(payload)
+    )
 
 
 def test_generate_with_stats_maps_token_counts(monkeypatch):
-    _patch_urlopen(monkeypatch, {
-        "response": "hello",
-        "prompt_eval_count": 42,
-        "eval_count": 7,
-    })
+    _patch_urlopen(
+        monkeypatch,
+        {
+            "response": "hello",
+            "prompt_eval_count": 42,
+            "eval_count": 7,
+        },
+    )
     text, stats = llmclient.generate_with_stats("prompt", "qwen2.5:3b", 5)
     assert text == "hello"
     assert stats == {"prompt_tokens": 42, "gen_tokens": 7}
@@ -55,9 +58,12 @@ def test_generate_with_stats_error_field_raises(monkeypatch):
 
 
 def test_generate_with_stats_strips_think_and_special(monkeypatch):
-    _patch_urlopen(monkeypatch, {
-        "response": "<think>reasoning</think>answer<|im_start|>loop",
-    })
+    _patch_urlopen(
+        monkeypatch,
+        {
+            "response": "<think>reasoning</think>answer<|im_start|>loop",
+        },
+    )
     text, _ = llmclient.generate_with_stats("prompt", "qwen2.5:3b", 5)
     assert text == "answer"
 

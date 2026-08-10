@@ -33,21 +33,23 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-import activity
-import camera
-import extensions
-import fileutil
-import groupchat
-import listen
-import llmclient
-import mud
-import nursery
-import speech
-import tui_commands
-import tui_views
-import voice
-from organism import Organism
-from tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
+from replicanta import (
+    activity,
+    camera,
+    extensions,
+    fileutil,
+    groupchat,
+    listen,
+    llmclient,
+    mud,
+    nursery,
+    speech,
+    tui_commands,
+    tui_views,
+    voice,
+)
+from replicanta.organism import Organism
+from replicanta.tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
 
 
 class SlashCommands(Provider):
@@ -80,15 +82,15 @@ class SlashCommands(Provider):
         for name, usage, description in tui_commands.COMMANDS:
             match = matcher.match(f"{name} {description}")
             if match is not None:
-                yield self._hit(name, usage, description,
-                                score=match.score, display=match.highlight)
+                yield self._hit(
+                    name, usage, description, score=match.score, display=match.highlight
+                )
 
 
 class HelpScreen(ModalScreen):
     """Overlay with every slash command and key binding."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def compose(self) -> ComposeResult:
         yield Static(tui_commands.help_text(), id="help")
@@ -98,8 +100,7 @@ class OrganismMenuScreen(ModalScreen):
     """Left-click dropdown on a sidebar organism: swap / rename / cancel.
     Dismisses with (action, name) or None."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, name, is_current):
         super().__init__()
@@ -127,8 +128,7 @@ class NamePromptScreen(ModalScreen):
     """Generic one-line name prompt (groups, renames). Dismisses with the
     typed name (stripped) or None on escape."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
     INPUT_ID: ClassVar[str] = "name-input"
 
     def __init__(self, placeholder):
@@ -151,16 +151,14 @@ class RenameScreen(NamePromptScreen):
     INPUT_ID: ClassVar[str] = "rename-input"
 
     def __init__(self, name):
-        super().__init__(f"new name for {name} "
-                         "(letters, digits, - and _)")
+        super().__init__(f"new name for {name} (letters, digits, - and _)")
 
 
 class GroupMenuScreen(ModalScreen):
     """Left-click dropdown on a sidebar group header: rename / remove /
     cancel. Dismisses with (action, group_name) or None."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, name):
         super().__init__()
@@ -169,10 +167,10 @@ class GroupMenuScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         yield OptionList(
             Option(f"rename {self._name}", id="rename"),
-            Option(f"remove group {self._name} (organisms stay)",
-                   id="remove"),
+            Option(f"remove group {self._name} (organisms stay)", id="remove"),
             Option("cancel", id="cancel"),
-            id="group-menu")
+            id="group-menu",
+        )
 
     def on_mount(self):
         self.query_one(OptionList).focus()
@@ -186,8 +184,7 @@ class GroupPickScreen(ModalScreen):
     """Pick a group to move an organism into. Dismisses with the group
     name, "" for no group, "new" to create one first, or None on cancel."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, org_name, groups):
         super().__init__()
@@ -220,16 +217,14 @@ class CellDetailScreen(ModalScreen):
     """Inspector for one neural-memory cell: what kind of object it is
     plus the metadata it carries. Escape or click anywhere to close."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "dismiss", "close")]
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, cell):
         super().__init__()
         self._cell = cell
 
     def compose(self) -> ComposeResult:
-        yield Static(Text(tui_views.cell_detail_text(self._cell)),
-                     id="cell-detail")
+        yield Static(Text(tui_views.cell_detail_text(self._cell)), id="cell-detail")
 
     def on_click(self, event):
         self.dismiss()
@@ -241,10 +236,10 @@ STYLE_LEARNED = "yellow"
 STYLE_SELF = "italic yellow"
 STYLE_WARN = "red"
 
-NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
-VOICE_PROBE_INTERVAL = 60.0   # seconds between ollama reachability probes
-ASK_USER_ODDS = 0.35      # chance an idle wake utterance asks the user instead
-MUD_TURN_DELAY = 4.0      # seconds between dungeon moves
+NARRATE_INTERVAL = 45.0  # seconds between self-narrations (each = 5 LLM calls)
+VOICE_PROBE_INTERVAL = 60.0  # seconds between ollama reachability probes
+ASK_USER_ODDS = 0.35  # chance an idle wake utterance asks the user instead
+MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
 
 
 class OrganismApp(App):
@@ -316,8 +311,7 @@ class OrganismApp(App):
         self.org = organism
         # nursery root for /new, /swap, /organisms; when the organism was
         # born in a nursery (organisms/<name>/), the root is two levels up
-        self.root = (Path(root) if root is not None
-                     else organism.dir_path.parent.parent)
+        self.root = Path(root) if root is not None else organism.dir_path.parent.parent
         # kwargs for Organism() when birthing/swapping (wake/sleep/chaos)
         self._spawn = dict(spawn or {})
         # metadata grid behind the cells tab, for click-to-inspect
@@ -352,9 +346,9 @@ class OrganismApp(App):
         self.listener = listen.Listener()
         self.camera = camera.Camera()
         self._mud_game = None
-        self._mud_hint = None   # one-shot user nudge for the next move
-        self._mud_paused = True   # start paused; the human plays the MUD
-        self._mud_thinking = False   # a move-choice worker is in flight
+        self._mud_hint = None  # one-shot user nudge for the next move
+        self._mud_paused = True  # start paused; the human plays the MUD
+        self._mud_thinking = False  # a move-choice worker is in flight
         self._mud_turn_gen = 0  # bumped by user moves/hints: stales in-flight
         self._quit_hint_time = 0.0
         self._mind_text = ""
@@ -372,8 +366,12 @@ class OrganismApp(App):
             with Vertical(id="content"), TabbedContent(initial="chat-pane"):
                 with TabPane("chat", id="chat-pane"):
                     dreams = RichLog(
-                        id="dreams", max_lines=1000, wrap=True,
-                        markup=True, highlight=False)
+                        id="dreams",
+                        max_lines=1000,
+                        wrap=True,
+                        markup=True,
+                        highlight=False,
+                    )
                     dreams.can_focus = False
                     yield dreams
                     yield Static("", id="pending", markup=False)
@@ -387,8 +385,9 @@ class OrganismApp(App):
                     yield Static("", id="cells", markup=False)
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
-                        "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells)",
-            id="chat")
+            "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells)",
+            id="chat",
+        )
         yield self.chat_input
         yield Static("", id="bottombar")
 
@@ -406,18 +405,22 @@ class OrganismApp(App):
         """(Re)render everything that reflects the current organism: chat
         history, status bar, mind/memory tabs. Used on mount and after a
         swap."""
-        self._chat_history = [line for role, line in self.org.store.chat_log
-                              if role == "user"]
+        self._chat_history = [
+            line for role, line in self.org.store.chat_log if role == "user"
+        ]
         if not self.org.store.chat_log and self.org.store.cycle == 0:
             self._append_log(
-                "a tiny replicanta wakes up inside your machine.", STYLE_DIM)
+                "a tiny replicanta wakes up inside your machine.", STYLE_DIM
+            )
             self._append_log(
                 "talk to it — it learns from you. /help (or F1) for commands.",
-                STYLE_DIM)
+                STYLE_DIM,
+            )
         for role, line in self.org.store.chat_log[-100:]:
             self._log_chat(role, line, stamp=False)
-        self.org.hooks.emit = \
-            lambda msg: self._append_log(f"lua · {msg}", STYLE_DIM, stamp=True)
+        self.org.hooks.emit = lambda msg: self._append_log(
+            f"lua · {msg}", STYLE_DIM, stamp=True
+        )
         self.refresh_top_bar()
         self._refresh_sidebar()
         self.refresh_status()
@@ -441,8 +444,7 @@ class OrganismApp(App):
         self.query_one("#dreams", RichLog).clear()
         self._pending_hide()
         self._show_org()
-        self._append_log(f"— now living with {name} —", STYLE_DIM,
-                         stamp=True)
+        self._append_log(f"— now living with {name} —", STYLE_DIM, stamp=True)
 
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
@@ -477,9 +479,11 @@ class OrganismApp(App):
         needs to cover Textual's terminal restore (~0.1s); state is
         already flushed by the caller, and file writes are atomic, so
         dying mid-flight cannot corrupt the organism."""
+
         def killer():
             time.sleep(delay)
             os._exit(0)
+
         threading.Thread(target=killer, daemon=True).start()
 
     def action_quit_or_hint(self):
@@ -495,20 +499,21 @@ class OrganismApp(App):
         """Render the custom top bar: app wordmark, organism identity,
         mood/mental state, and voice/mic/clock indicators."""
         lc = self.org.lifecycle
-        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(
-            lc.state, "🧠")
-        word = {"wake": "awake", "sleep": "asleep",
-                "dead": "faded"}.get(lc.state, lc.state)
+        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
+        word = {"wake": "awake", "sleep": "asleep", "dead": "faded"}.get(
+            lc.state, lc.state
+        )
         mood = self.org.store.belief_value("self", "mood", "calm")
         s = self.org.store
-        mental = (f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
-                  f"{s.irrationality:.2f}")
+        mental = f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f}"
         mic = " 🎙" if self.listener.recording else ""
         spoken = " 🔊" if speech.enabled else ""
         voice = llmclient.voice_status()
         clock = self.org.probe.clock_utc()
-        text = (f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · "
-                f"{mental}  │  {voice}{mic}{spoken}  {clock}")
+        text = (
+            f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · "
+            f"{mental}  │  {voice}{mic}{spoken}  {clock}"
+        )
         self._topbar_text = text
         topbar = self._safe_query("#topbar", Static)
         if topbar is not None:
@@ -533,12 +538,14 @@ class OrganismApp(App):
             marker = "● " if name == current else "  "
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
         for gname in sorted(groups):
-            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}",
-                                   classes="group-header"))
+            lv.append(
+                ListItem(
+                    Label(f"▾ {gname}"), name=f"group:{gname}", classes="group-header"
+                )
+            )
             for member in groups[gname]:
                 marker = "● " if member == current else "  "
-                lv.append(ListItem(Label(f"  {marker}{member}"),
-                                   name=member))
+                lv.append(ListItem(Label(f"  {marker}{member}"), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection opens a dropdown (left click or Enter): an
@@ -578,16 +585,13 @@ class OrganismApp(App):
         prompt. (Textual's Click message is left-button only, so button 3
         is handled directly here.)"""
         if event.button == 1:
-            item, _in_sidebar = self._sidebar_item_at(event.screen_x,
-                                                      event.screen_y)
+            item, _in_sidebar = self._sidebar_item_at(event.screen_x, event.screen_y)
             if item is not None and not item.name.startswith("group:"):
-                self._drag_candidate = (item.name, event.screen_x,
-                                        event.screen_y)
+                self._drag_candidate = (item.name, event.screen_x, event.screen_y)
             return
         if event.button != 3:
             return
-        item, in_sidebar = self._sidebar_item_at(event.screen_x,
-                                                 event.screen_y)
+        item, in_sidebar = self._sidebar_item_at(event.screen_x, event.screen_y)
         if not in_sidebar:
             return
         if item is None:
@@ -624,8 +628,7 @@ class OrganismApp(App):
         if sidebar is not None:
             sidebar.set_class(False, "-dragging")
         self._pending_hide()
-        item, in_sidebar = self._sidebar_item_at(event.screen_x,
-                                                 event.screen_y)
+        item, in_sidebar = self._sidebar_item_at(event.screen_x, event.screen_y)
         if not in_sidebar:
             return
         if item is None:
@@ -648,8 +651,7 @@ class OrganismApp(App):
             return
         col = event.x // 2
         row = event.y - 1
-        if not (0 <= row < tui_views.CELLS_ROWS
-                and 0 <= col < tui_views.CELLS_COLS):
+        if not (0 <= row < tui_views.CELLS_ROWS and 0 <= col < tui_views.CELLS_COLS):
             return
         idx = row * tui_views.CELLS_COLS + col
         if idx < len(self._cells_grid) and self._cells_grid[idx]:
@@ -666,9 +668,10 @@ class OrganismApp(App):
                 self._prompt_rename(org_name)
             elif action == "group":
                 self._pick_group_for(org_name)
+
         self.push_screen(
-            OrganismMenuScreen(name, name == self.org.dir_path.name),
-            on_choice)
+            OrganismMenuScreen(name, name == self.org.dir_path.name), on_choice
+        )
 
     def _prompt_rename(self, name):
         def on_name(new_name):
@@ -678,6 +681,7 @@ class OrganismApp(App):
                 self._rename_org(name, new_name)
             except ValueError as exc:
                 self.notify(str(exc), severity="error", timeout=4)
+
         self.push_screen(RenameScreen(name), on_name)
 
     def _rename_org(self, old, new):
@@ -710,8 +714,8 @@ class OrganismApp(App):
                     self.notify(str(exc), severity="error", timeout=4)
                     return
                 self._refresh_sidebar()
-                self.notify(f"removed group {name} "
-                            "(organisms ungrouped)", timeout=3)
+                self.notify(f"removed group {name} (organisms ungrouped)", timeout=3)
+
         self.push_screen(GroupMenuScreen(gname), on_choice)
 
     def _prompt_new_group(self, on_created=None):
@@ -727,10 +731,10 @@ class OrganismApp(App):
             self.notify(f"created group {name}", timeout=3)
             if on_created is not None:
                 on_created(name)
+
         self.push_screen(
-            NamePromptScreen(
-                "new group name (letters, digits, spaces, - _ .)"),
-            on_name)
+            NamePromptScreen("new group name (letters, digits, spaces, - _ .)"), on_name
+        )
 
     def _prompt_rename_group(self, gname):
         def on_name(new_name):
@@ -743,8 +747,8 @@ class OrganismApp(App):
                 return
             self._refresh_sidebar()
             self.notify(f"renamed group {gname} → {new_name}", timeout=3)
-        self.push_screen(
-            NamePromptScreen(f"new name for group {gname}"), on_name)
+
+        self.push_screen(NamePromptScreen(f"new name for group {gname}"), on_name)
 
     def _assign_to_group(self, org_name, group_name):
         try:
@@ -761,13 +765,14 @@ class OrganismApp(App):
                 return
             if choice == "new":
                 self._prompt_new_group(
-                    on_created=lambda name: self._assign_to_group(
-                        org_name, name))
+                    on_created=lambda name: self._assign_to_group(org_name, name)
+                )
                 return
             self._assign_to_group(org_name, choice or None)
+
         self.push_screen(
-            GroupPickScreen(org_name, nursery.list_groups(self.root)),
-            on_pick)
+            GroupPickScreen(org_name, nursery.list_groups(self.root)), on_pick
+        )
 
     def action_think_now(self):
         self._maybe_narrate()
@@ -792,14 +797,14 @@ class OrganismApp(App):
         if frame is None:
             self.call_from_thread(
                 self._append_log,
-                "no camera frame (plugged in? opencv installed? "
-                "see /camera list)", STYLE_WARN)
+                "no camera frame (plugged in? opencv installed? see /camera list)",
+                STYLE_WARN,
+            )
             return
         try:
             sight = llmclient.describe_image(frame)
         except Exception as exc:  # noqa: BLE001 — vision model offline etc.
-            self.call_from_thread(
-                self._append_log, f"sight failed: {exc}", STYLE_WARN)
+            self.call_from_thread(self._append_log, f"sight failed: {exc}", STYLE_WARN)
             return
         self.call_from_thread(self._set_sight, sight)
 
@@ -815,23 +820,28 @@ class OrganismApp(App):
             game = self._mud_game
             if game is None:
                 self._append_log(
-                    f"/mud {sub}: no game running (start with /mud)",
-                    STYLE_DIM)
+                    f"/mud {sub}: no game running (start with /mud)", STYLE_DIM
+                )
                 return
-            render = {"map": mud.render_map, "story": mud.render_story,
-                      "quest": mud.render_quest}[sub]
+            render = {
+                "map": mud.render_map,
+                "story": mud.render_story,
+                "quest": mud.render_quest,
+            }[sub]
             self._append_log(render(game), STYLE_DREAM)
         elif sub == "pause":
             if self._mud_game is None:
                 self._append_log("/mud pause: no game running.", STYLE_DIM)
             elif self._mud_paused:
-                self._append_log("mud: already paused (/mud resume)",
-                                 STYLE_DIM)
+                self._append_log("mud: already paused (/mud resume)", STYLE_DIM)
             else:
                 self._mud_paused = True
                 self._append_log(
                     "— the dungeon holds its breath (paused; /mud resume, "
-                    "/mud step, or type a command) —", STYLE_DIM, stamp=True)
+                    "/mud step, or type a command) —",
+                    STYLE_DIM,
+                    stamp=True,
+                )
                 self.refresh_status()
         elif sub == "resume":
             if self._mud_game is None:
@@ -840,8 +850,7 @@ class OrganismApp(App):
                 self._append_log("mud: not paused.", STYLE_DIM)
             else:
                 self._mud_paused = False
-                self._append_log("— the dungeon stirs again —", STYLE_DIM,
-                                 stamp=True)
+                self._append_log("— the dungeon stirs again —", STYLE_DIM, stamp=True)
                 self.refresh_status()
                 self._mud_next()
         elif sub == "step":
@@ -853,13 +862,16 @@ class OrganismApp(App):
             if not description:
                 self._append_log(
                     "/mud scenario needs a description, e.g. "
-                    "/mud scenario a haunted space station", STYLE_DIM)
+                    "/mud scenario a haunted space station",
+                    STYLE_DIM,
+                )
                 return
             self._mud_scenario(description)
         else:
             self._append_log(
-                "/mud [map|story|quest|pause|resume|step|reset|"
-                "scenario <description>]", STYLE_DIM)
+                "/mud [map|story|quest|pause|resume|step|reset|scenario <description>]",
+                STYLE_DIM,
+            )
 
     def _toggle_mud(self):
         """/mud: start or stop the organism's dungeon crawl. The world is
@@ -887,14 +899,18 @@ class OrganismApp(App):
         if session is not None:
             self._append_log(
                 f"— the organism returns to {game.scenario.title} "
-                f"(turn {game.turns}) —", STYLE_DREAM, stamp=True)
+                f"(turn {game.turns}) —",
+                STYLE_DREAM,
+                stamp=True,
+            )
         else:
             self._append_log(
                 "— the dungeon opens for you; the organism stands beside you "
                 "as a companion —",
-                STYLE_DREAM, stamp=True)
-            self._append_log(mud.build_premise(self.org, game.scenario),
-                             STYLE_DREAM)
+                STYLE_DREAM,
+                stamp=True,
+            )
+            self._append_log(mud.build_premise(self.org, game.scenario), STYLE_DREAM)
         self._append_log(game.look(), STYLE_DREAM)
         self.org.store.remember("mud", f"started {game.scenario.title}")
         self._mud_save_session(game)
@@ -907,9 +923,12 @@ class OrganismApp(App):
         self._mud_save_session(game)
         self._append_log(
             f"— the dungeon fades (stopped after {game.turns} turns) —",
-            STYLE_DIM, stamp=True)
+            STYLE_DIM,
+            stamp=True,
+        )
         self.org.store.remember(
-            "mud", f"left {game.scenario.title} after {game.turns} turns")
+            "mud", f"left {game.scenario.title} after {game.turns} turns"
+        )
         self.refresh_status()
 
     def _mud_reset(self):
@@ -930,11 +949,10 @@ class OrganismApp(App):
             self._append_log("/mud step: no game running.", STYLE_DIM)
             return
         if not self._mud_paused:
-            self._append_log(
-                "auto-turns are running — /mud pause first", STYLE_DIM)
+            self._append_log("auto-turns are running — /mud pause first", STYLE_DIM)
             return
         if self._mud_thinking:
-            return                      # a move is already being chosen
+            return  # a move is already being chosen
         self._mud_thinking = True
         self._mud_turn()
 
@@ -952,14 +970,14 @@ class OrganismApp(App):
             scenario = mud.generate_scenario(description, self.org)
         except Exception as exc:  # noqa: BLE001 — voice offline etc.
             self.call_from_thread(
-                self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN)
+                self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN
+            )
             return
         self.call_from_thread(self._mud_start_scenario, scenario)
 
     def _mud_start_scenario(self, scenario):
         self._mud_save_scenario(scenario)
-        self._append_log(f"new scenario: {scenario.title}", STYLE_LEARNED,
-                         stamp=True)
+        self._append_log(f"new scenario: {scenario.title}", STYLE_LEARNED, stamp=True)
         self._mud_start(scenario=scenario, fresh=True)
 
     # -- mud persistence ------------------------------------------------------
@@ -994,14 +1012,12 @@ class OrganismApp(App):
         the same way writes produce it before touching the filesystem."""
         if not slug or fileutil.slug(slug) != slug:
             return None
-        path = (self._mud_artifacts_dir() / "mud" / "scenarios"
-                / f"{slug}.json")
+        path = self._mud_artifacts_dir() / "mud" / "scenarios" / f"{slug}.json"
         try:
             if path.exists():
                 return mud.scenario_from_json(json.loads(path.read_text()))
         except (OSError, ValueError) as exc:
-            self._append_log(f"mud: couldn't load scenario {slug} ({exc})",
-                             STYLE_WARN)
+            self._append_log(f"mud: couldn't load scenario {slug} ({exc})", STYLE_WARN)
         default = mud.default_scenario()
         if fileutil.slug(default.title) == slug:
             return default
@@ -1014,12 +1030,13 @@ class OrganismApp(App):
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / f"{fileutil.slug(scenario.title)}.json"
             fileutil.atomic_write_text(
-                path, json.dumps(mud.scenario_to_json(scenario), indent=1))
-            self._append_log(f"scenario saved: artifacts/mud/scenarios/"
-                             f"{path.name}", STYLE_DIM)
+                path, json.dumps(mud.scenario_to_json(scenario), indent=1)
+            )
+            self._append_log(
+                f"scenario saved: artifacts/mud/scenarios/{path.name}", STYLE_DIM
+            )
         except OSError as exc:
-            self._append_log(f"mud: couldn't save scenario ({exc})",
-                             STYLE_WARN)
+            self._append_log(f"mud: couldn't save scenario ({exc})", STYLE_WARN)
 
     # -- mud turns -------------------------------------------------------------
     @work(thread=True)
@@ -1030,25 +1047,23 @@ class OrganismApp(App):
             return
         hint, self._mud_hint = self._mud_hint, None
         gen = self._mud_turn_gen
-        command, reason = mud.choose_action(game, hint=hint, rng=self._rng,
-                                            org=self.org)
-        self.call_from_thread(self._mud_apply, game, command, "organism",
-                              gen, reason)
+        command, reason = mud.choose_action(
+            game, hint=hint, rng=self._rng, org=self.org
+        )
+        self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
 
-    def _mud_apply(self, game, command, actor="organism", gen=None,
-                   reason=None):
+    def _mud_apply(self, game, command, actor="organism", gen=None, reason=None):
         if actor == "organism":
             self._mud_thinking = False
         if self._mud_game is not game:
-            return                      # stopped (or restarted) meanwhile
-        if (actor == "organism" and gen is not None
-                and gen != self._mud_turn_gen):
+            return  # stopped (or restarted) meanwhile
+        if actor == "organism" and gen is not None and gen != self._mud_turn_gen:
             # a user move (or hint) landed while this move was being
             # chosen — it was picked from a world that no longer
             # exists; dropping it keeps the heartbeat honest
             self._append_log(
-                "> (the organism hesitates — the moment passed)",
-                STYLE_DIM)
+                "> (the organism hesitates — the moment passed)", STYLE_DIM
+            )
             self._mud_schedule()
             return
         if actor == "organism" and reason:
@@ -1061,11 +1076,13 @@ class OrganismApp(App):
         if game.finished:
             outcome = "won" if game.won else "lost"
             self._append_log(
-                f"— {game.scenario.title} is {outcome} in {game.turns} "
-                "turns —", STYLE_LEARNED, stamp=True)
+                f"— {game.scenario.title} is {outcome} in {game.turns} turns —",
+                STYLE_LEARNED,
+                stamp=True,
+            )
             self.org.store.remember(
-                "mud", f"{outcome} {game.scenario.title} in "
-                       f"{game.turns} turns")
+                "mud", f"{outcome} {game.scenario.title} in {game.turns} turns"
+            )
             self._mud_save_session(game)
             self._mud_game = None
             self._mud_paused = False
@@ -1082,15 +1099,17 @@ class OrganismApp(App):
             self.set_timer(MUD_TURN_DELAY, self._mud_next)
 
     def _mud_next(self):
-        if (self._mud_game is not None and not self._mud_paused
-                and not self._mud_thinking):
+        if (
+            self._mud_game is not None
+            and not self._mud_paused
+            and not self._mud_thinking
+        ):
             self._mud_thinking = True
             self._mud_turn()
 
     def _set_sight(self, sight):
         self.org.see(sight)
-        self._append_log(f"the organism sees: {sight}", STYLE_LEARNED,
-                         stamp=True)
+        self._append_log(f"the organism sees: {sight}", STYLE_LEARNED, stamp=True)
 
     def _camera(self, args):
         """Manage the eye: bare = status, list = devices, use <dev> = pick
@@ -1099,16 +1118,16 @@ class OrganismApp(App):
             self._append_log(
                 f"camera: /dev/video{self.camera.device} · vision model "
                 f"{llmclient.vision_model()} · /camera list · "
-                "/camera use <device>", STYLE_DIM)
+                "/camera use <device>",
+                STYLE_DIM,
+            )
             return
         if args[0] == "list":
             cams = camera.list_cameras()
             if not cams:
-                self._append_log("no cameras found (plug one in)",
-                                 STYLE_WARN)
+                self._append_log("no cameras found (plug one in)", STYLE_WARN)
             for index, dev_name in cams:
-                self._append_log(f"  /dev/video{index}  {dev_name}",
-                                 STYLE_DIM)
+                self._append_log(f"  /dev/video{index}  {dev_name}", STYLE_DIM)
             return
         if args[0] == "use" and len(args) == 2:
             try:
@@ -1116,8 +1135,7 @@ class OrganismApp(App):
             except LookupError as exc:
                 self._append_log(f"/camera: {exc}", STYLE_WARN)
                 return
-            self._append_log(
-                f"camera: using /dev/video{index} ({dev_name})", STYLE_DIM)
+            self._append_log(f"camera: using /dev/video{index} ({dev_name})", STYLE_DIM)
             return
         self._append_log("/camera [list|use <device>]", STYLE_DIM)
 
@@ -1132,11 +1150,9 @@ class OrganismApp(App):
         else:
             self.listener.start()
             if self.listener.recording:
-                self._append_log(
-                    "listening… (F5 or /listen again to stop)", STYLE_DIM)
+                self._append_log("listening… (F5 or /listen again to stop)", STYLE_DIM)
             else:
-                self._append_log(
-                    "no microphone (device missing or busy?)", STYLE_WARN)
+                self._append_log("no microphone (device missing or busy?)", STYLE_WARN)
         self.refresh_status()
 
     @work(thread=True)
@@ -1145,8 +1161,7 @@ class OrganismApp(App):
         if text:
             self.call_from_thread(self.handle_chat, text)
         else:
-            self.call_from_thread(
-                self._append_log, "(heard nothing)", STYLE_DIM)
+            self.call_from_thread(self._append_log, "(heard nothing)", STYLE_DIM)
         self.call_from_thread(self.refresh_status)
 
     def _microphone(self, args):
@@ -1158,7 +1173,9 @@ class OrganismApp(App):
             self._append_log(
                 f"microphone: {mic} · stt {stt_model} "
                 f"({stt_device}/{stt_compute}) · "
-                "/microphone list · /microphone use <device>", STYLE_DIM)
+                "/microphone list · /microphone use <device>",
+                STYLE_DIM,
+            )
             return
         if args[0] == "list":
             mics = listen.list_microphones()
@@ -1188,8 +1205,9 @@ class OrganismApp(App):
                 self.chat_input.focus()
             else:
                 value = self.chat_input.value
-                new_value, self._completion_index = (
-                    tui_commands.complete_command(value, self._completion_index))
+                new_value, self._completion_index = tui_commands.complete_command(
+                    value, self._completion_index
+                )
                 if new_value != value:
                     self._set_chat_value(new_value)
             # without prevent_default, App._on_key still runs focus_next
@@ -1214,10 +1232,13 @@ class OrganismApp(App):
         self.chat_input.cursor_position = len(text)
 
     def _browse_history(self, delta):
-        self._history_index, self._history_draft, value = (
-            tui_commands.history_browse(
-                self._chat_history, self._history_index, self._history_draft,
-                self.chat_input.value, delta))
+        self._history_index, self._history_draft, value = tui_commands.history_browse(
+            self._chat_history,
+            self._history_index,
+            self._history_draft,
+            self.chat_input.value,
+            delta,
+        )
         return value
 
     def on_input_changed(self, event):
@@ -1249,10 +1270,10 @@ class OrganismApp(App):
             self._voice_announced = state
             if state == "offline":
                 self._append_log(
-                    "inner voice: offline — speaking from my bones "
-                    "(local fallback)", STYLE_DIM)
-                self.notify("inner voice offline — local fallback",
-                            severity="warning")
+                    "inner voice: offline — speaking from my bones (local fallback)",
+                    STYLE_DIM,
+                )
+                self.notify("inner voice offline — local fallback", severity="warning")
             elif state == "online":
                 self._append_log("inner voice: online (ollama)", STYLE_DIM)
                 self.notify("inner voice online (ollama)")
@@ -1265,18 +1286,23 @@ class OrganismApp(App):
         adopt it. Failure just logs — the current voice is kept."""
         self.call_from_thread(
             self._append_log,
-            f"downloading voice {name} (this can take a minute)…", STYLE_DIM)
+            f"downloading voice {name} (this can take a minute)…",
+            STYLE_DIM,
+        )
         model = speech.download_voice(name)
         if model is None:
             self.call_from_thread(
                 self._append_log,
                 f"/voice get: couldn't fetch {name!r} — names look like "
                 "en_US-lessac-medium, see "
-                "huggingface.co/rhasspy/piper-voices", STYLE_WARN)
+                "huggingface.co/rhasspy/piper-voices",
+                STYLE_WARN,
+            )
             return
         speech.set_voice(name)
         self.call_from_thread(
-            self._append_log, f"voice ready: {name}", STYLE_LEARNED, True)
+            self._append_log, f"voice ready: {name}", STYLE_LEARNED, True
+        )
         if speech.enabled:
             speech.say("This is my new voice.")
 
@@ -1290,19 +1316,20 @@ class OrganismApp(App):
         self.refresh_status()
 
     def _busy(self):
-        return (self._narrating or self._responding or self._self_talking
-                or self._group_responding)
+        return (
+            self._narrating
+            or self._responding
+            or self._self_talking
+            or self._group_responding
+        )
 
     def _refresh_views(self):
         self._mind_text = tui_views.mind_view(self.org)
         self._memory_text = tui_views.memory_view(self.org)
         self._inner_text = tui_views.inner_view(self.org)
-        self.query_one("#mind", Static).update(
-            tui_views.mind_renderable(self.org))
-        self.query_one("#memory", Static).update(
-            tui_views.memory_renderable(self.org))
-        self.query_one("#inner", Static).update(
-            tui_views.inner_renderable(self.org))
+        self.query_one("#mind", Static).update(tui_views.mind_renderable(self.org))
+        self.query_one("#memory", Static).update(tui_views.memory_renderable(self.org))
+        self.query_one("#inner", Static).update(tui_views.inner_renderable(self.org))
         text, self._cells_grid = tui_views.cells_layout(self.org)
         self.query_one("#cells", Static).update(text)
 
@@ -1312,14 +1339,13 @@ class OrganismApp(App):
         if kind == "state":
             to = event["to"]
             if to == "dead":
-                self._append_log("the organism has faded.", STYLE_WARN,
-                                 stamp=True)
+                self._append_log("the organism has faded.", STYLE_WARN, stamp=True)
                 self.notify("the organism has faded", severity="error")
                 self._maybe_narrate()
             else:
                 self._append_log(
-                    f"— the organism drifts to {to} —", STYLE_DIM,
-                    stamp=True)
+                    f"— the organism drifts to {to} —", STYLE_DIM, stamp=True
+                )
         elif kind == "dream":
             combos = event["combos"]
             if combos:
@@ -1327,13 +1353,12 @@ class OrganismApp(App):
             else:
                 self._append_log("dreams: (none promoted)", STYLE_DIM)
         elif kind == "beliefs":
-            learned = ", ".join(
-                f"{o}:{a}={v}" for (o, a, v) in event["new"])
+            learned = ", ".join(f"{o}:{a}={v}" for (o, a, v) in event["new"])
             self._append_log(f"new beliefs: {learned}", STYLE_LEARNED)
         elif kind == "sense":
             self._append_log(
-                f"the host strains (distress +{event['distress']:.2f})",
-                STYLE_WARN)
+                f"the host strains (distress +{event['distress']:.2f})", STYLE_WARN
+            )
         elif kind == "stress":
             level = "high" if event["band"] == 1 else "critical"
             self._append_log(f"stress rising: {level}", STYLE_WARN)
@@ -1341,29 +1366,37 @@ class OrganismApp(App):
             if event["insane"]:
                 self._append_log(
                     "the organism's mind comes apart: incoherent, insane",
-                    STYLE_WARN, stamp=True)
+                    STYLE_WARN,
+                    stamp=True,
+                )
                 self.notify("the organism has gone insane", severity="error")
             else:
                 self._append_log(
                     "the organism's thoughts settle back into coherence",
-                    STYLE_DIM, stamp=True)
+                    STYLE_DIM,
+                    stamp=True,
+                )
         elif kind == "mood":
             mood = event["mood"]
-            style = (STYLE_WARN if mood in ("hurt", "anxious", "insane")
-                     else STYLE_LEARNED if mood in ("grateful", "curious")
-                     else STYLE_DIM)
+            style = (
+                STYLE_WARN
+                if mood in ("hurt", "anxious", "insane")
+                else STYLE_LEARNED
+                if mood in ("grateful", "curious")
+                else STYLE_DIM
+            )
             self._append_log(f"mood: {mood}", style)
         elif kind == "learned":
-            self._append_log(f"learned: {event['text']}", STYLE_LEARNED,
-                             stamp=True)
+            self._append_log(f"learned: {event['text']}", STYLE_LEARNED, stamp=True)
             self.notify(f"learned: {event['text']}")
         elif kind == "want_goal":
             self._form_goal()
         elif kind == "want_diary":
             self._write_diary()
         elif kind == "goal":
-            self._append_log(f"goal completed: {event['text']}",
-                             STYLE_LEARNED, stamp=True)
+            self._append_log(
+                f"goal completed: {event['text']}", STYLE_LEARNED, stamp=True
+            )
             self.notify(f"goal completed: {event['text']}")
         elif kind == "want_reflect":
             self._reflect()
@@ -1374,8 +1407,7 @@ class OrganismApp(App):
         duplicates the top bar (state, mood, mental scalars, voice/mic/speech,
         clock)."""
         m = self.org.metrics()
-        busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
-                if self._busy() else "")
+        busy = f" · thinking{'.' * (self._busy_frame + 1)}" if self._busy() else ""
         if self._mud_game is not None:
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
         else:
@@ -1386,7 +1418,8 @@ class OrganismApp(App):
             f"{m.belief_count} beliefs · {m.rule_count} rules · "
             f"inner voice {llmclient.voice_status()}{playing}{busy}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
-            "(or F10, ctrl+c×2, /quit)")
+            "(or F10, ctrl+c×2, /quit)"
+        )
         bottombar = self._safe_query("#bottombar", Static)
         if bottombar is not None:
             bottombar.update(self._bottombar_text)
@@ -1419,7 +1452,8 @@ class OrganismApp(App):
         """Card title for the organism: its learned name (the user can give
         it one with 'your name is …'), else its nursery dir name."""
         return self.org.store.belief_value(
-            "self", "name", self.org.dir_path.name or "replicanta")
+            "self", "name", self.org.dir_path.name or "replicanta"
+        )
 
     def _log_chat(self, role, text, stamp=True):
         if role == "user":
@@ -1433,8 +1467,7 @@ class OrganismApp(App):
         Content is a plain Rich Text — organism output may contain markup
         metacharacters."""
         ts = self._stamp() if stamp else None
-        card = tui_views.chat_card(who, text, timestamp=ts,
-                                   border_style=border_style)
+        card = tui_views.chat_card(who, text, timestamp=ts, border_style=border_style)
         log = self.query_one("#dreams", RichLog)
         log.write("")
         log.write(card)
@@ -1442,11 +1475,10 @@ class OrganismApp(App):
     # -- goals + artifacts -------------------------------------------------
     @work(thread=True)
     def _form_goal(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         text = None
         try:
-            self.call_from_thread(
-                self._pending_show, "org is setting itself a goal")
+            self.call_from_thread(self._pending_show, "org is setting itself a goal")
             text = voice.form_goal(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "goal", exc)
@@ -1462,11 +1494,10 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _write_diary(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         entry = None
         try:
-            self.call_from_thread(
-                self._pending_show, "org is writing in its diary")
+            self.call_from_thread(self._pending_show, "org is writing in its diary")
             entry = voice.diary_entry(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "diary", exc)
@@ -1477,13 +1508,14 @@ class OrganismApp(App):
         self._pending_hide()
         self.org.write_diary(entry)
         self._write_card(f"{self._org_name()} · diary", entry, STYLE_DREAM)
-        self._append_log("diary: entry saved (artifacts/diary.md)",
-                         STYLE_DIM, stamp=True)
+        self._append_log(
+            "diary: entry saved (artifacts/diary.md)", STYLE_DIM, stamp=True
+        )
         self.refresh_status()
 
     @work(thread=True)
     def _reflect(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         result = None
         try:
             self.call_from_thread(self._pending_show, "org is reflecting")
@@ -1502,37 +1534,42 @@ class OrganismApp(App):
             applied = result.get("applied")
             auto = self.org.store.auto_apply_patches
             if applied is not None:
-                self.org.store.remember(
-                    "skill", f"patch applied ({entry['kind']})")
+                self.org.store.remember("skill", f"patch applied ({entry['kind']})")
                 self._append_log(
-                    f"patch applied ({entry['kind']}) — live now, no "
-                    "restart needed", STYLE_LEARNED, stamp=True)
-                self.notify(f"patch applied ({entry['kind']})",
-                            severity="information")
+                    f"patch applied ({entry['kind']}) — live now, no restart needed",
+                    STYLE_LEARNED,
+                    stamp=True,
+                )
+                self.notify(f"patch applied ({entry['kind']})", severity="information")
             else:
-                self.org.store.remember(
-                    "skill", f"proposed a patch ({entry['kind']})")
+                self.org.store.remember("skill", f"proposed a patch ({entry['kind']})")
             if entry["kind"] == "pattern":
                 detail = f"{entry['regex']} -> {entry['template']}"
             else:
                 detail = entry.get("text", "")
             if auto:
-                body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
-                        "auto-apply is on; toggle with /auto-apply off")
+                body = (
+                    f"{detail}\nwhy: {entry.get('why', '')}\n"
+                    "auto-apply is on; toggle with /auto-apply off"
+                )
             else:
-                body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
-                        "/approve to accept · /reject to discard")
-            self._write_card(f"{self._org_name()} · proposes a patch",
-                             body, "yellow")
-            self.notify("patch proposed — /approve or /reject" if not auto
-                        else "patch applied automatically",
-                        severity="warning" if not auto else "information")
+                body = (
+                    f"{detail}\nwhy: {entry.get('why', '')}\n"
+                    "/approve to accept · /reject to discard"
+                )
+            self._write_card(f"{self._org_name()} · proposes a patch", body, "yellow")
+            self.notify(
+                "patch proposed — /approve or /reject"
+                if not auto
+                else "patch applied automatically",
+                severity="warning" if not auto else "information",
+            )
             self.refresh_status()
             return
-        self.org.store.remember(
-            "skill", f"{result['action']} skill: {result['name']}")
-        self._append_log(f"skill {result['action']}: {result['name']}",
-                         STYLE_LEARNED, stamp=True)
+        self.org.store.remember("skill", f"{result['action']} skill: {result['name']}")
+        self._append_log(
+            f"skill {result['action']}: {result['name']}", STYLE_LEARNED, stamp=True
+        )
         self.notify(f"skill {result['action']}: {result['name']}")
         self.refresh_status()
 
@@ -1566,9 +1603,11 @@ class OrganismApp(App):
         if self._narrating:
             return
         self._narrating = True
-        if (self.org.lifecycle.state == "wake"
-                and not self._last_was_question
-                and self._rng.random() < ASK_USER_ODDS):
+        if (
+            self.org.lifecycle.state == "wake"
+            and not self._last_was_question
+            and self._rng.random() < ASK_USER_ODDS
+        ):
             self._last_was_question = True
             self.refresh_status()
             self._ask_user()
@@ -1579,14 +1618,14 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _ask_user(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         question = None
         try:
             self.call_from_thread(self._pending_show, "org is wondering")
             question = voice.ask_user(
                 org,
-                on_token=lambda tok: self.call_from_thread(
-                    self._pending_token, tok))
+                on_token=lambda tok: self.call_from_thread(self._pending_token, tok),
+            )
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "question", exc)
         finally:
@@ -1610,11 +1649,10 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _self_talk(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         answer = None
         try:
-            self.call_from_thread(
-                self._pending_show, "org is asking itself")
+            self.call_from_thread(self._pending_show, "org is asking itself")
             question = voice.self_ask(org)
             if org is not self.org:
                 return
@@ -1622,9 +1660,10 @@ class OrganismApp(App):
             self.call_from_thread(self._set_self_question, question)
             self.call_from_thread(self._pending_show, "org is answering")
             answer = voice.self_answer(
-                org, question,
-                on_token=lambda tok: self.call_from_thread(
-                    self._pending_token, tok))
+                org,
+                question,
+                on_token=lambda tok: self.call_from_thread(self._pending_token, tok),
+            )
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "self-talk", exc)
         finally:
@@ -1647,7 +1686,7 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _narrate(self):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         text = None
         try:
             self.call_from_thread(self._pending_show, "org is musing")
@@ -1691,9 +1730,10 @@ class OrganismApp(App):
     def _dispatch(self, name, parts):
         if name == "/chaos":
             if len(parts) != 2:
-                self._append_log("/chaos needs a number 0-1 "
-                                 f"(now {self.org.store.chaos:.2f})",
-                                 STYLE_DIM)
+                self._append_log(
+                    f"/chaos needs a number 0-1 (now {self.org.store.chaos:.2f})",
+                    STYLE_DIM,
+                )
                 return
             value = float(parts[1])
             if not 0.0 <= value <= 1.0:
@@ -1717,24 +1757,29 @@ class OrganismApp(App):
         elif name == "/revive":
             if self.org.revive():
                 self._append_log(
-                    "revived: the organism stirs back into existence.",
-                    STYLE_DIM)
+                    "revived: the organism stirs back into existence.", STYLE_DIM
+                )
                 self._maybe_narrate()
             else:
                 self._append_log(
-                    f"/revive: it is not faded (state "
-                    f"{self.org.lifecycle.state}).", STYLE_DIM)
+                    f"/revive: it is not faded (state {self.org.lifecycle.state}).",
+                    STYLE_DIM,
+                )
         elif name == "/stats":
             m = self.org.metrics()
             s = self.org.store
             self._append_log(
                 f"stats: beliefs={m.belief_count} rules={m.rule_count} "
-                f"depth={m.total_depth} score={m.score():.1f}", STYLE_DIM)
+                f"depth={m.total_depth} score={m.score():.1f}",
+                STYLE_DIM,
+            )
             self._append_log(
                 f"mental: arousal={s.arousal:.2f} "
                 f"rationality={s.rationality:.2f} "
                 f"irrationality={s.irrationality:.2f} "
-                f"insane={s.insane}", STYLE_DIM)
+                f"insane={s.insane}",
+                STYLE_DIM,
+            )
             for line in activity.summary_lines(self.org.store):
                 self._append_log(line, STYLE_DIM)
         elif name == "/save":
@@ -1755,47 +1800,43 @@ class OrganismApp(App):
             self.org.hooks.reload()
             count = len(self.org.hooks.scripts)
             self._append_log(
-                f"lua hooks reloaded ({count} script"
-                f"{'s' if count != 1 else ''})", STYLE_DIM)
+                f"lua hooks reloaded ({count} script{'s' if count != 1 else ''})",
+                STYLE_DIM,
+            )
         elif name == "/lua":
             if len(parts) != 2:
                 names = ", ".join(s.name for s in self.org.hooks.scripts)
                 self._append_log(
-                    f"/lua needs a script name (scripts/: {names or 'none'})",
-                    STYLE_DIM)
+                    f"/lua needs a script name (scripts/: {names or 'none'})", STYLE_DIM
+                )
                 return
-            self._append_log(self.org.hooks.run(parts[1], self.org),
-                             STYLE_DIM)
+            self._append_log(self.org.hooks.run(parts[1], self.org), STYLE_DIM)
         elif name == "/organisms":
             names = nursery.list_organisms(self.root)
             current = self.org.dir_path.name
-            listing = ", ".join(f"*{n}" if n == current else n
-                                for n in names) or "(none)"
-            self._append_log(f"organisms: {listing}  (* = current)",
-                             STYLE_DIM)
+            listing = (
+                ", ".join(f"*{n}" if n == current else n for n in names) or "(none)"
+            )
+            self._append_log(f"organisms: {listing}  (* = current)", STYLE_DIM)
         elif name == "/group":
             self._group_command(parts[1:])
         elif name == "/new":
-            new_name = (parts[1] if len(parts) == 2
-                        else nursery.next_name(self.root))
+            new_name = parts[1] if len(parts) == 2 else nursery.next_name(self.root)
             try:
-                nursery.create(self.root, new_name,
-                               Path(self.root) / "organism.scl")
+                nursery.create(self.root, new_name, Path(self.root) / "organism.scl")
             except (ValueError, OSError) as exc:
                 self._append_log(f"/new: {exc}", STYLE_WARN)
             else:
                 self._swap_to(new_name)
         elif name == "/swap":
             if len(parts) != 2:
-                self._append_log("/swap needs a name — /organisms to list.",
-                                 STYLE_DIM)
+                self._append_log("/swap needs a name — /organisms to list.", STYLE_DIM)
                 return
             if parts[1] not in nursery.list_organisms(self.root):
-                names = ", ".join(nursery.list_organisms(self.root)) \
-                    or "(none)"
+                names = ", ".join(nursery.list_organisms(self.root)) or "(none)"
                 self._append_log(
-                    f"/swap: no organism {parts[1]!r} — have: {names}",
-                    STYLE_WARN)
+                    f"/swap: no organism {parts[1]!r} — have: {names}", STYLE_WARN
+                )
                 return
             self._swap_to(parts[1])
         elif name == "/voice":
@@ -1810,11 +1851,14 @@ class OrganismApp(App):
                     self._append_log(
                         f"spoken voice {state}, but no piper model at "
                         f"{speech.model_path()} — staying mute "
-                        f"(/voice get en_US-lessac-medium)", STYLE_WARN)
+                        f"(/voice get en_US-lessac-medium)",
+                        STYLE_WARN,
+                    )
                 elif speech.enabled:
                     self._append_log(
-                        "spoken voice on — the organism speaks aloud "
-                        "(piper tts)", STYLE_DIM)
+                        "spoken voice on — the organism speaks aloud (piper tts)",
+                        STYLE_DIM,
+                    )
                     speech.say("I can speak now.")
                 else:
                     self._append_log("spoken voice off", STYLE_DIM)
@@ -1822,81 +1866,86 @@ class OrganismApp(App):
             elif args[0] == "list":
                 voices = speech.list_voices()
                 active = speech.voice_name()
-                listing = (", ".join(f"*{v}" if v == active else v
-                                     for v in voices)
-                           or "(none — /voice get en_US-lessac-medium)")
-                self._append_log(f"voices: {listing}  (* = active)",
-                                 STYLE_DIM)
+                listing = (
+                    ", ".join(f"*{v}" if v == active else v for v in voices)
+                    or "(none — /voice get en_US-lessac-medium)"
+                )
+                self._append_log(f"voices: {listing}  (* = active)", STYLE_DIM)
             elif args[0] == "use" and len(args) == 2:
                 if speech.set_voice(args[1]):
-                    self._append_log(f"voice: {speech.voice_name()}",
-                                     STYLE_DIM)
+                    self._append_log(f"voice: {speech.voice_name()}", STYLE_DIM)
                     speech.say("This is my new voice.")
                 else:
                     have = ", ".join(speech.list_voices()) or "(none)"
                     self._append_log(
                         f"/voice use: no voice {args[1]!r} — have: {have}. "
-                        f"/voice get {args[1]} downloads it", STYLE_WARN)
+                        f"/voice get {args[1]} downloads it",
+                        STYLE_WARN,
+                    )
             elif args[0] == "get" and len(args) == 2:
                 self._voice_download(args[1])
             else:
                 self._append_log(
-                    "/voice [on|off] · /voice list · /voice use name · "
-                    "/voice get name", STYLE_DIM)
+                    "/voice [on|off] · /voice list · /voice use name · /voice get name",
+                    STYLE_DIM,
+                )
         elif name == "/self-talk":
             self._self_talk_on = not self._self_talk_on
             if self._self_talk_on:
                 self._append_log(
-                    "self-talk on — the organism may speak to itself.",
-                    STYLE_DIM)
+                    "self-talk on — the organism may speak to itself.", STYLE_DIM
+                )
                 if self.org.lifecycle.state == "wake":
                     self._maybe_self_talk()
             else:
                 self._append_log("self-talk off", STYLE_DIM)
         elif name == "/approve":
             entry = extensions.approve(
-                self.org.dir_path / "artifacts" / "extensions.json")
+                self.org.dir_path / "artifacts" / "extensions.json"
+            )
             if entry:
-                self.org.store.remember(
-                    "skill", f"patch applied ({entry['kind']})")
+                self.org.store.remember("skill", f"patch applied ({entry['kind']})")
                 self._append_log(
-                    f"patch applied ({entry['kind']}) — live now, no "
-                    "restart needed", STYLE_LEARNED, stamp=True)
+                    f"patch applied ({entry['kind']}) — live now, no restart needed",
+                    STYLE_LEARNED,
+                    stamp=True,
+                )
             else:
                 self._append_log("/approve: no pending patch.", STYLE_DIM)
         elif name == "/reject":
             entry = extensions.reject(
-                self.org.dir_path / "artifacts" / "extensions.json")
+                self.org.dir_path / "artifacts" / "extensions.json"
+            )
             if entry:
-                self.org.store.remember(
-                    "skill", f"patch rejected ({entry['kind']})")
-                self._append_log(f"patch rejected ({entry['kind']})",
-                                 STYLE_DIM, stamp=True)
+                self.org.store.remember("skill", f"patch rejected ({entry['kind']})")
+                self._append_log(
+                    f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True
+                )
             else:
                 self._append_log("/reject: no pending patch.", STYLE_DIM)
         elif name == "/auto-apply":
             args = parts[1:]
             if args and args[0] in ("on", "off"):
-                self.org.store.auto_apply_patches = (args[0] == "on")
+                self.org.store.auto_apply_patches = args[0] == "on"
                 self.org.store.dirty = True
                 state = "on" if self.org.store.auto_apply_patches else "off"
                 self._append_log(f"auto-apply patches: {state}", STYLE_DIM)
             else:
                 state = "on" if self.org.store.auto_apply_patches else "off"
                 self._append_log(
-                    f"auto-apply patches is {state} — "
-                    "use /auto-apply on|off", STYLE_DIM)
+                    f"auto-apply patches is {state} — use /auto-apply on|off", STYLE_DIM
+                )
         elif name == "/revert":
             entry = extensions.revert_last(
-                self.org.dir_path / "artifacts" / "extensions.json")
+                self.org.dir_path / "artifacts" / "extensions.json"
+            )
             if entry:
-                self.org.store.remember(
-                    "skill", f"patch reverted ({entry['kind']})")
-                self._append_log(f"patch reverted ({entry['kind']})",
-                                 STYLE_LEARNED, stamp=True)
+                self.org.store.remember("skill", f"patch reverted ({entry['kind']})")
+                self._append_log(
+                    f"patch reverted ({entry['kind']})", STYLE_LEARNED, stamp=True
+                )
             else:
-                self._append_log("/revert: no applied patches yet.",
-                                 STYLE_DIM)
+                self._append_log("/revert: no applied patches yet.", STYLE_DIM)
         elif name == "/quit":
             self.action_quit()
         elif name == "/help":
@@ -1915,8 +1964,8 @@ class OrganismApp(App):
                 self._mud_turn_gen += 1
                 self._mud_apply(self._mud_game, command, actor="user")
                 return
-            self._mud_turn_gen += 1     # hints invalidate in-flight moves too
-            self._mud_hint = text      # shout a nudge into the next move
+            self._mud_turn_gen += 1  # hints invalidate in-flight moves too
+            self._mud_hint = text  # shout a nudge into the next move
         if self._group is not None:
             # everyone in the group heard the line; beliefs form per
             # member, but only the current organism's events render
@@ -1939,14 +1988,15 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _respond(self, text):
-        org = self.org   # capture: a swap mid-debate drops the delivery
+        org = self.org  # capture: a swap mid-debate drops the delivery
         reply = None
         try:
             self.call_from_thread(self._pending_show, "org is thinking")
             reply = voice.respond(
-                org, text,
-                on_token=lambda tok: self.call_from_thread(
-                    self._pending_token, tok))
+                org,
+                text,
+                on_token=lambda tok: self.call_from_thread(self._pending_token, tok),
+            )
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
         finally:
@@ -1956,8 +2006,13 @@ class OrganismApp(App):
 
     # -- group chat -------------------------------------------------------
     GROUP_STYLES: ClassVar[list[str]] = [
-        "green", "yellow", "magenta", "cyan",
-        "bright_blue", "bright_magenta"]
+        "green",
+        "yellow",
+        "magenta",
+        "cyan",
+        "bright_blue",
+        "bright_magenta",
+    ]
 
     def _group_style(self, name):
         """Stable per-member card color while the group is active."""
@@ -1971,11 +2026,14 @@ class OrganismApp(App):
                 self._append_log(
                     "no active group — /group start "
                     + " ".join(nursery.list_organisms(self.root)),
-                    STYLE_DIM)
+                    STYLE_DIM,
+                )
             else:
                 self._append_log(
                     f"group chat: {', '.join(self._group.names())} "
-                    f"({len(self._group.transcript)} messages)", STYLE_DIM)
+                    f"({len(self._group.transcript)} messages)",
+                    STYLE_DIM,
+                )
             return
         if args[0] == "stop":
             if self._group is None:
@@ -1984,13 +2042,11 @@ class OrganismApp(App):
             names = ", ".join(self._group.names())
             self.action_save_now()
             self._group = None
-            self._append_log(f"— group chat ended ({names}) —",
-                             STYLE_DIM, stamp=True)
+            self._append_log(f"— group chat ended ({names}) —", STYLE_DIM, stamp=True)
             self.refresh_status()
             return
         if args[0] != "start":
-            self._append_log("usage: /group start a b [c…] | /group stop",
-                             STYLE_DIM)
+            self._append_log("usage: /group start a b [c…] | /group stop", STYLE_DIM)
             return
         names = args[1:]
         if names == ["all"]:
@@ -2015,16 +2071,15 @@ class OrganismApp(App):
         missing = [n for n in names if n not in known]
         if missing:
             self._append_log(
-                f"/group: unknown organisms or groups: {', '.join(missing)}",
-                STYLE_WARN)
+                f"/group: unknown organisms or groups: {', '.join(missing)}", STYLE_WARN
+            )
             return
         members = {}
         for n in names:
             if n == self.org.dir_path.name:
                 members[n] = self.org
             else:
-                org = Organism(nursery.organism_dir(self.root, n),
-                               **self._spawn)
+                org = Organism(nursery.organism_dir(self.root, n), **self._spawn)
                 org.load()
                 members[n] = org
         try:
@@ -2036,7 +2091,9 @@ class OrganismApp(App):
             f"— group chat started: {', '.join(self._group.names())} — "
             "everything you type is broadcast; address one member with "
             "'name: …' or '@name …'; /group stop to end —",
-            STYLE_DIM, stamp=True)
+            STYLE_DIM,
+            stamp=True,
+        )
         self.refresh_status()
 
     def _maybe_group_respond(self, text):
@@ -2047,7 +2104,7 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _group_respond(self, text):
-        group = self._group   # capture: /group stop mid-broadcast drops it
+        group = self._group  # capture: /group stop mid-broadcast drops it
         if group is None:
             return
         utterances = None
@@ -2083,8 +2140,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Replicanta TUI")
     parser.add_argument("--dir", default=str(Path(__file__).parent))
-    parser.add_argument("--org", default=None,
-                        help="organism name in the nursery")
+    parser.add_argument("--org", default=None, help="organism name in the nursery")
     parser.add_argument("--wake", type=int, default=180)
     parser.add_argument("--sleep", type=int, default=60)
     parser.add_argument("--chaos", type=float, default=0.5)
@@ -2097,8 +2153,11 @@ def main():
     org_dir = nursery.organism_dir(root, name)
     if not org_dir.exists():
         nursery.create(root, name, root / "organism.scl")
-    spawn = {"wake_seconds": args.wake, "sleep_seconds": args.sleep,
-             "chaos": args.chaos}
+    spawn = {
+        "wake_seconds": args.wake,
+        "sleep_seconds": args.sleep,
+        "chaos": args.chaos,
+    }
     org = Organism(org_dir, **spawn)
     org.load()
     OrganismApp(org, root, spawn).run()

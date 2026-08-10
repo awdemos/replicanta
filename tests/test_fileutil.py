@@ -2,19 +2,14 @@
 long-term memory — a crash mid-write must leave the old file intact, never
 a half-written one."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from fileutil import atomic_write_text
+from replicanta.fileutil import atomic_write_text
 
 
 def test_atomic_write_creates_file(tmp_path):
     target = tmp_path / "state.json"
     atomic_write_text(target, '{"ok": true}')
     assert target.read_text() == '{"ok": true}'
-    assert list(tmp_path.glob("*.tmp")) == []     # no temp litter
+    assert list(tmp_path.glob("*.tmp")) == []  # no temp litter
 
 
 def test_atomic_write_replaces_atomically(tmp_path, monkeypatch):

@@ -20,9 +20,7 @@ import random
 from dataclasses import dataclass, field
 from typing import TypedDict
 
-import fileutil
-import llmclient
-import voice
+from replicanta import fileutil, llmclient, voice
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +34,15 @@ def _mud_timeout():
     """Per-decision timeout seconds (env: REPLICANTA_MUD_TIMEOUT, per call)."""
     return int(os.environ.get("REPLICANTA_MUD_TIMEOUT", "60"))
 
-DIR_ALIASES = {"n": "north", "s": "south", "e": "east", "w": "west",
-               "u": "up", "d": "down"}
+
+DIR_ALIASES = {
+    "n": "north",
+    "s": "south",
+    "e": "east",
+    "w": "west",
+    "u": "up",
+    "d": "down",
+}
 _ALL_DIRECTIONS = set(DIR_ALIASES) | set(DIR_ALIASES.values())
 
 _FILLER = ("the", "a", "an", "to")
@@ -57,6 +62,7 @@ class WinCondition(TypedDict, total=False):
     """How a scenario is won: take 'item', or reach 'room'. 'win_text'
     optionally overrides the flavor line spoken when the item is taken
     (scenario data, so generated scenarios can narrate their own win)."""
+
     item: str
     room: str
     win_text: str
@@ -125,27 +131,33 @@ def default_scenario() -> Scenario:
     """The built-in deterministic dungeon: mossy clearing, cave, locked gate."""
     return Scenario(
         title="The Amulet of Vatox",
-        premise=("A mossy clearing, a cave mouth, and a locked treasury. "
-                 "Find the amulet and escape."),
+        premise=(
+            "A mossy clearing, a cave mouth, and a locked treasury. "
+            "Find the amulet and escape."
+        ),
         start_room="clearing",
         rooms={
             "clearing": Room(
-                desc=("A mossy clearing under a flat grey sky. "
-                      "A cave yawns to the north."),
+                desc=(
+                    "A mossy clearing under a flat grey sky. A cave yawns to the north."
+                ),
                 exits={"north": "cave mouth"},
                 items=[],
             ),
             "cave mouth": Room(
-                desc=("The cave's mouth. Cold air breathes out of the dark. "
-                      "A torch leans against the rock."),
+                desc=(
+                    "The cave's mouth. Cold air breathes out of the dark. "
+                    "A torch leans against the rock."
+                ),
                 exits={"south": "clearing", "east": "dark hall"},
                 items=["torch"],
             ),
             "dark hall": Room(
-                desc=("A long hall of wet stone. Steps spiral down; "
-                      "a rusty gate blocks the north arch."),
-                exits={"west": "cave mouth", "down": "well room",
-                       "north": "treasury"},
+                desc=(
+                    "A long hall of wet stone. Steps spiral down; "
+                    "a rusty gate blocks the north arch."
+                ),
+                exits={"west": "cave mouth", "down": "well room", "north": "treasury"},
                 locked={"north": ("brass key", "The rusty gate is locked tight.")},
                 items=[],
             ),
@@ -155,16 +167,16 @@ def default_scenario() -> Scenario:
                 items=["brass key"],
             ),
             "treasury": Room(
-                desc=("A vault glittering with old coins. "
-                      "On a pedestal: the amulet."),
+                desc=("A vault glittering with old coins. On a pedestal: the amulet."),
                 exits={"south": "dark hall"},
                 items=["amulet"],
                 is_goal=True,
             ),
         },
-        win_condition={"item": "amulet",
-                           "win_text": ("You lift the amulet. "
-                                        "The dungeon exhales")},
+        win_condition={
+            "item": "amulet",
+            "win_text": ("You lift the amulet. The dungeon exhales"),
+        },
     )
 
 
@@ -218,8 +230,7 @@ class MudGame:
         self.session.command_log.append((actor, command.strip(), self.turns))
         self._record_room(self.room)
 
-        words = [w for w in command.strip().lower().split()
-                 if w not in _FILLER]
+        words = [w for w in command.strip().lower().split() if w not in _FILLER]
         if not words:
             return TurnResult(text="Nothing happens.")
 
@@ -233,18 +244,23 @@ class MudGame:
         elif verb == "look":
             result = TurnResult(text=self.look())
         elif verb in ("inventory", "inv", "i"):
-            result = TurnResult(text=(
-                "You carry: " + ", ".join(self.inventory) + "."
-                if self.inventory else "You carry nothing."))
-        else:
             result = TurnResult(
-                text=f"'{command.strip()}'? The dungeon ignores that.")
+                text=(
+                    "You carry: " + ", ".join(self.inventory) + "."
+                    if self.inventory
+                    else "You carry nothing."
+                )
+            )
+        else:
+            result = TurnResult(text=f"'{command.strip()}'? The dungeon ignores that.")
 
         if result.moved:
             self._record_room(self.room)
             new_room = self.rooms[self.room]
-            if (new_room.plot_trigger
-                    and new_room.plot_trigger not in self.session.plot_beats):
+            if (
+                new_room.plot_trigger
+                and new_room.plot_trigger not in self.session.plot_beats
+            ):
                 result.plot = new_room.plot_trigger
                 self.session.plot_beats.append(new_room.plot_trigger)
 
@@ -275,7 +291,9 @@ class MudGame:
         finished = False
         won = False
         if self.scenario.win_condition.get("room") == self.room:
-            text += f" You have reached your destination and won, in {self.turns} turns."
+            text += (
+                f" You have reached your destination and won, in {self.turns} turns."
+            )
             finished = True
             won = True
         return TurnResult(text=text, moved=True, finished=finished, won=won)
@@ -290,22 +308,26 @@ class MudGame:
                 if held == self.scenario.win_condition.get("item"):
                     custom = self.scenario.win_condition.get("win_text")
                     if custom:
-                        text = (f"{custom} — "
-                                f"you have won, in {self.turns} turns.")
+                        text = f"{custom} — you have won, in {self.turns} turns."
                     else:
-                        text = (f"You take the {held}. The dungeon exhales — "
-                                f"you have won, in {self.turns} turns.")
-                    return TurnResult(text=text, took=held,
-                                      finished=True, won=True)
+                        text = (
+                            f"You take the {held}. The dungeon exhales — "
+                            f"you have won, in {self.turns} turns."
+                        )
+                    return TurnResult(text=text, took=held, finished=True, won=True)
                 if self.scenario.win_condition.get("room") == self.room:
-                    return TurnResult(text=f"You take the {held}. "
-                                           "The quest is complete!",
-                                      took=held, finished=True, won=True)
+                    return TurnResult(
+                        text=f"You take the {held}. The quest is complete!",
+                        took=held,
+                        finished=True,
+                        won=True,
+                    )
                 return TurnResult(text=f"You take the {held}.", took=held)
         return TurnResult(text=f"There is no {item} here.")
 
 
 # -- rendering -----------------------------------------------------------------
+
 
 def render_map(game) -> str:
     """Text map of rooms the organism has discovered."""
@@ -344,15 +366,18 @@ def render_quest(game) -> str:
         goal = f"Reach the {condition['room']}."
     else:
         goal = "Complete the quest."
-    return "\n".join([
-        f"Quest: {scenario.title}",
-        scenario.premise,
-        "",
-        f"Goal: {goal}",
-    ])
+    return "\n".join(
+        [
+            f"Quest: {scenario.title}",
+            scenario.premise,
+            "",
+            f"Goal: {goal}",
+        ]
+    )
 
 
 # -- the player ----------------------------------------------------------------
+
 
 def _org_name(org):
     """Best-effort organism name from beliefs or directory."""
@@ -377,9 +402,11 @@ def _user_name(org):
 def build_premise(org, scenario=None) -> str:
     """Opening premise that names the organism and the user."""
     scenario = scenario or default_scenario()
-    return (f"You are {_org_name(org)}, a small mind that lives in a "
-            f"terminal. {_user_name(org)} sits beyond the screen, watching. "
-            f"Together you have entered {scenario.title}: {scenario.premise}")
+    return (
+        f"You are {_org_name(org)}, a small mind that lives in a "
+        f"terminal. {_user_name(org)} sits beyond the screen, watching. "
+        f"Together you have entered {scenario.title}: {scenario.premise}"
+    )
 
 
 def situation_text(game, hint=None):
@@ -397,18 +424,20 @@ def situation_text(game, hint=None):
         render_map(game),
     ]
     if game.session.plot_beats:
-        lines.extend([
-            "Story so far:",
-            "\n".join(f"- {beat}" for beat in game.session.plot_beats),
-        ])
+        lines.extend(
+            [
+                "Story so far:",
+                "\n".join(f"- {beat}" for beat in game.session.plot_beats),
+            ]
+        )
     recent = game.session.command_log[-5:]
     if recent:
         lines.append("Recent moves:")
         for actor, cmd, turn in recent:
             lines.append(f"- turn {turn} ({actor}): {cmd}")
     lines.append(
-        "Commands: go <exit> (or just the exit name), take <item>, look, "
-        "inventory.")
+        "Commands: go <exit> (or just the exit name), take <item>, look, inventory."
+    )
     if hint:
         lines.append(f"A friend watching shouts: {hint}")
     return "\n".join(lines)
@@ -421,17 +450,29 @@ def action_prompt(game, org=None, hint=None):
         "You are playing a tiny text adventure. First write one short "
         "sentence about why you choose your move, starting with "
         "'because'. Then, on a new line, write exactly one command "
-        "and nothing else.")
+        "and nothing else."
+    )
     org_line = ""
     if org is not None:
-        org_line = (f"You are {_org_name(org)}. {_user_name(org)} is watching "
-                    "from beyond the screen.")
+        org_line = (
+            f"You are {_org_name(org)}. {_user_name(org)} is watching "
+            "from beyond the screen."
+        )
     body = situation_text(game, hint=hint)
     return "\n".join(filter(None, [instruction, org_line, body, "Your move:"]))
 
 
-_COMMAND_STARTERS = ("go", "take", "get", "grab", "look", "move",
-                     "walk", "inventory", "inv")
+_COMMAND_STARTERS = (
+    "go",
+    "take",
+    "get",
+    "grab",
+    "look",
+    "move",
+    "walk",
+    "inventory",
+    "inv",
+)
 
 
 def _command_words(line):
@@ -474,10 +515,9 @@ def parse_player_command(text):
     if not text:
         return None
     text = text.strip().lower().rstrip(".!?")
-    for prefix in ("i want to ", "i would like to ", "can i ", "please ",
-                   "i "):
+    for prefix in ("i want to ", "i would like to ", "can i ", "please ", "i "):
         if text.startswith(prefix):
-            text = text[len(prefix):].strip()
+            text = text[len(prefix) :].strip()
     words = [w for w in text.split() if w not in _FILLER]
     if not words:
         return None
@@ -509,7 +549,8 @@ def fallback_action(game, rng):
     """The wanderer: prefer unvisited exits, then items, then any exit."""
     room = game.rooms[game.room]
     unvisited = [
-        direction for direction in room.exits
+        direction
+        for direction in room.exits
         if room.exits[direction] not in game.session.visited
     ]
     if unvisited:
@@ -538,12 +579,13 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
             # Fallback small-model path when no organism is available.
             raw = llmclient.generate(
                 action_prompt(game, hint=hint),
-                model=_mud_model(), timeout=_mud_timeout(),
-                temperature=0.7)
+                model=_mud_model(),
+                timeout=_mud_timeout(),
+                temperature=0.7,
+            )
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
-        command, reason = parse_action_with_reason(
-            llmclient.clean_candidate(raw or ""))
+        command, reason = parse_action_with_reason(llmclient.clean_candidate(raw or ""))
     except Exception:  # noqa: BLE001, S110 — a silent voice means wandering
         pass
     if command is None:
@@ -553,6 +595,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
 
 
 # -- scenario generation -------------------------------------------------------
+
 
 def _scenario_generation_prompt(description, org):
     org_name = _org_name(org)
@@ -604,7 +647,8 @@ def scenario_or_default(data) -> Scenario:
             for direction, lock_info in locked_raw.items():
                 if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
                     raise ValueError(
-                        f"invalid locked format for {direction} in {room_id}")
+                        f"invalid locked format for {direction} in {room_id}"
+                    )
                 locked[direction] = (lock_info[0], lock_info[1])
             plot_trigger = room_data.get("plot_trigger")
             is_goal = room_data.get("is_goal", False)
@@ -621,7 +665,8 @@ def scenario_or_default(data) -> Scenario:
             for direction, target in room.exits.items():
                 if target not in rooms:
                     raise ValueError(
-                        f"exit {direction} from {room_id} to unknown {target}")
+                        f"exit {direction} from {room_id} to unknown {target}"
+                    )
 
         if "item" in win_condition:
             item = win_condition["item"]
@@ -629,8 +674,7 @@ def scenario_or_default(data) -> Scenario:
                 raise ValueError(f"win item {item!r} not found in any room")
         elif "room" in win_condition:
             if win_condition["room"] not in rooms:
-                raise ValueError(
-                    f"win room {win_condition['room']!r} not found")
+                raise ValueError(f"win room {win_condition['room']!r} not found")
         else:
             raise ValueError("win_condition must contain 'item' or 'room'")
 
@@ -647,6 +691,7 @@ def scenario_or_default(data) -> Scenario:
 
 
 # -- scenario serialization ----------------------------------------------------
+
 
 def scenario_to_json(scenario) -> dict:
     """Scenario -> plain JSON-safe dict (for saving generated scenarios)."""
@@ -678,17 +723,20 @@ def scenario_from_json(data) -> Scenario:
 def generate_scenario(description, org, generate=None) -> Scenario:
     """Ask the voice for a scenario, validate it, and fall back on failure."""
     if generate is None:
+
         def generate(prompt):
             return llmclient.generate(
-                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=0.7)
+                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=0.7
+            )
+
     prompt = _scenario_generation_prompt(description, org)
     try:
         raw = generate(prompt)
         text = raw.strip()
         if text.startswith("```"):
             text = "\n".join(
-                line for line in text.splitlines()
-                if not line.strip().startswith("```"))
+                line for line in text.splitlines() if not line.strip().startswith("```")
+            )
             text = text.strip()
         data = json.loads(text)
         return scenario_or_default(data)

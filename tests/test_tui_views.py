@@ -1,13 +1,9 @@
-import sys
-from pathlib import Path
 
 import pytest
 from rich.console import Console
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import tui_views
-from organism import BeliefStore, Metrics
+from replicanta import tui_views
+from replicanta.organism import BeliefStore, Metrics
 
 
 class FakeOrg:
@@ -123,10 +119,16 @@ def test_inner_view_without_mental_state(org):
 
 def test_inner_view_shows_loop_and_arena(org):
     org.store.activity = {
-        "rules_tried": 4, "derivations": 2, "rules_committed": 1,
-        "dreams_promoted": 3, "dreams_discarded": 1,
-        "llm_calls": 5, "prompt_tokens": 100, "gen_tokens": 50,
-        "utterances": 2, "fallbacks": 0,
+        "rules_tried": 4,
+        "derivations": 2,
+        "rules_committed": 1,
+        "dreams_promoted": 3,
+        "dreams_discarded": 1,
+        "llm_calls": 5,
+        "prompt_tokens": 100,
+        "gen_tokens": 50,
+        "utterances": 2,
+        "fallbacks": 0,
     }
     view = tui_views.inner_view(org)
     assert "perpetuation loop" in view
@@ -146,7 +148,8 @@ def test_inner_view_shows_pending_proposal(org, tmp_path):
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
         '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}')
+        '{"kind": "seed", "text": "what if the rain is curious"}}'
+    )
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
     assert "seed: what if the rain is curious" in view
@@ -159,7 +162,8 @@ def test_inner_view_shows_manual_approval_when_auto_off(org, tmp_path):
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
         '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}')
+        '{"kind": "seed", "text": "what if the rain is curious"}}'
+    )
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
     assert "/approve to apply" in view
@@ -174,8 +178,7 @@ def test_inner_view_without_pending_proposal(org):
 
 
 def _render(renderable, width=80):
-    console = Console(width=width, force_terminal=False, color_system=None,
-                      record=True)
+    console = Console(width=width, force_terminal=False, color_system=None, record=True)
     console.print(renderable)
     return console.export_text()
 
@@ -198,10 +201,16 @@ def test_inner_renderable_uses_gauge_bars(org):
 
 def test_inner_renderable_shows_loop_and_arena(org):
     org.store.activity = {
-        "rules_tried": 4, "derivations": 2, "rules_committed": 1,
-        "dreams_promoted": 3, "dreams_discarded": 1,
-        "llm_calls": 5, "prompt_tokens": 100, "gen_tokens": 50,
-        "utterances": 2, "fallbacks": 0,
+        "rules_tried": 4,
+        "derivations": 2,
+        "rules_committed": 1,
+        "dreams_promoted": 3,
+        "dreams_discarded": 1,
+        "llm_calls": 5,
+        "prompt_tokens": 100,
+        "gen_tokens": 50,
+        "utterances": 2,
+        "fallbacks": 0,
     }
     text = _render(tui_views.inner_renderable(org))
     assert "perpetuation loop" in text
@@ -216,7 +225,8 @@ def test_inner_renderable_shows_pending_proposal(org, tmp_path):
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
         '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}')
+        '{"kind": "seed", "text": "what if the rain is curious"}}'
+    )
     text = _render(tui_views.inner_renderable(org))
     assert "pending proposal" in text
     assert "seed" in text
@@ -231,12 +241,12 @@ def test_inner_renderable_without_activity_still_shows_state(org):
 
 # -- cells grid (F8) ----------------------------------------------------------
 
+
 def _stocked_org(org):
     """An organism with one of each cell kind."""
     org.store.add(("cat", "has_fur", "true"), 0.9)
     org.store.add(("self", "mood", "calm"), 0.8)
-    org.store.rules.append(
-        ('q1(x) = bel(x, "has_fur", "true")', 2))
+    org.store.rules.append(('q1(x) = bel(x, "has_fur", "true")', 2))
     org.store.remember("mud", "found a torch")
     org.store.add_goal("learn the user's name", marker=1, strategy="ask")
     return org
@@ -327,8 +337,7 @@ def test_cells_layout_returns_metadata_grid(org):
 
 def test_cells_view_matches_layout_text(org):
     org = _stocked_org(org)
-    assert _render(tui_views.cells_view(org)) == \
-        _render(tui_views.cells_layout(org)[0])
+    assert _render(tui_views.cells_view(org)) == _render(tui_views.cells_layout(org)[0])
 
 
 def test_cell_detail_text_describes_each_kind(org):

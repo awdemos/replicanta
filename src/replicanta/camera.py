@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 WIDTH, HEIGHT = 640, 480
-WARMUP_FRAMES = 5        # webcams need a few frames for auto-exposure
+WARMUP_FRAMES = 5  # webcams need a few frames for auto-exposure
 JPEG_QUALITY = 85
 SYSFS = Path("/sys/class/video4linux")
 
@@ -64,7 +64,7 @@ class Camera:
 
     def __init__(self, grabber=None):
         self._grabber = grabber
-        self.device = 0      # opencv device index (the N in /dev/videoN)
+        self.device = 0  # opencv device index (the N in /dev/videoN)
 
     def grab(self):
         """One JPEG frame (bytes), or None when no frame could be taken."""
@@ -72,6 +72,7 @@ class Camera:
             return self._grabber()
         try:
             import cv2
+
             cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
             try:
                 if not cap.isOpened():
@@ -84,8 +85,8 @@ class Camera:
                 if not ok or frame is None:
                     return None
                 ok, buf = cv2.imencode(
-                    ".jpg", frame,
-                    [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
+                )
                 return buf.tobytes() if ok else None
             finally:
                 cap.release()

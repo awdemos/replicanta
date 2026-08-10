@@ -2,19 +2,16 @@
 failure-streak inference, and the arena's offline fast path."""
 
 import json
-import sys
 import urllib.error
-from pathlib import Path
 from typing import ClassVar
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import llmclient
 import pytest
-from arena import ThoughtArena
-from llmclient import probe_voice, voice_online, voice_status
-from organism import BeliefStore, Lifecycle, Metrics
 from conftest import patch_generate
+
+from replicanta import llmclient
+from replicanta.arena import ThoughtArena
+from replicanta.llmclient import probe_voice, voice_online, voice_status
+from replicanta.organism import BeliefStore, Lifecycle, Metrics
 
 
 class _FakeWindow:
@@ -57,12 +54,14 @@ class _Resp:
 def _tags(monkeypatch, names):
     monkeypatch.setattr(
         "urllib.request.urlopen",
-        lambda req, timeout=None: _Resp({"models": [{"name": n} for n in names]}))
+        lambda req, timeout=None: _Resp({"models": [{"name": n} for n in names]}),
+    )
 
 
 def test_probe_offline_when_unreachable(monkeypatch):
     def boom(req, timeout=None):
         raise urllib.error.URLError("connection refused")
+
     monkeypatch.setattr("urllib.request.urlopen", boom)
     assert probe_voice() is False
     assert voice_online() is False
@@ -92,12 +91,13 @@ def test_voice_unknown_before_any_probe():
 
 # -- arena fast path ----------------------------------------------------------
 
+
 def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
     calls = []
     patch_generate(monkeypatch, lambda *a, **k: calls.append(1) or "should not happen")
     llmclient.reset_voice()
     llmclient.note_voice_failure()
-    llmclient.note_voice_failure()   # streak -> offline
+    llmclient.note_voice_failure()  # streak -> offline
     text = ThoughtArena().emerge(org)
     assert calls == []
     assert "belief" in text  # deterministic fallback summary
@@ -106,11 +106,12 @@ def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
 def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
     def boom(*a, **k):
         raise urllib.error.URLError("connection refused")
+
     patch_generate(monkeypatch, boom)
     ThoughtArena().emerge(org)
-    assert voice_online() is None       # one failure: still retryable
+    assert voice_online() is None  # one failure: still retryable
     ThoughtArena().emerge(org)
-    assert voice_online() is False      # streak: offline
+    assert voice_online() is False  # streak: offline
 
 
 def test_arena_success_clears_offline(org, monkeypatch):

@@ -2,17 +2,11 @@
 sessions — store persistence, tick events (want_goal / goal completion),
 narration.form_goal, and goal injection into prompts."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import narration
-import llmclient
-import voice
-from organism import BeliefStore, Organism
-from probe import SystemProbe
 from conftest import patch_generate
+
+from replicanta import llmclient, narration, voice
+from replicanta.organism import BeliefStore, Organism
+from replicanta.probe import SystemProbe
 
 
 def _null_probe():
@@ -27,6 +21,7 @@ def _organism(tmp_path, **kwargs):
 
 
 # -- store -------------------------------------------------------------------
+
 
 def test_store_goal_add_active_complete(tmp_path):
     store = BeliefStore(tmp_path)
@@ -51,6 +46,7 @@ def test_store_goals_persist_round_trip(tmp_path):
 
 
 # -- engine events -----------------------------------------------------------
+
 
 def test_tick_emits_want_goal_once(tmp_path):
     org = _organism(tmp_path, wake_seconds=999, sleep_seconds=999)
@@ -96,16 +92,18 @@ def test_generic_goal_completes_after_pursuit_cycles(tmp_path):
 def test_add_goal_remembers_episode(tmp_path):
     org = _organism(tmp_path)
     org.add_goal("learn about the user")
-    assert any(m["kind"] == "goal" and "learn" in m["text"]
-               for m in org.store.memory)
+    assert any(m["kind"] == "goal" and "learn" in m["text"] for m in org.store.memory)
 
 
 # -- narration ----------------------------------------------------------------
 
+
 def test_form_goal_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
+    patch_generate(
+        monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x"
+    )
     voice.form_goal(org)
     assert "one thing you want" in captured["p"]
 

@@ -1,17 +1,13 @@
 """Regression tests for organism evolution, goal-seeking, and self-awareness
 enhancements: activity digest, goal progress, reflection triggers, etc."""
 
-import sys
-from pathlib import Path
 from typing import ClassVar
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import activity
-from narration import build_prompt, state_snapshot
-from organism import BeliefStore, Lifecycle, Metrics
+from replicanta import activity
+from replicanta.narration import build_prompt, state_snapshot
+from replicanta.organism import BeliefStore, Lifecycle, Metrics
 
 
 class FakeWindow:
@@ -110,8 +106,11 @@ def test_goal_progress_in_prompt(org):
 
 
 def test_goal_strategy_renders_in_prompt(org):
-    org.store.add_goal("learn about the user", marker=0,
-                       strategy="strategy: ask one question at a time.")
+    org.store.add_goal(
+        "learn about the user",
+        marker=0,
+        strategy="strategy: ask one question at a time.",
+    )
     prompt = build_prompt(state_snapshot(org))
     assert "strategy:" in prompt
 
@@ -150,11 +149,19 @@ def test_attention_rationale_renders(org):
 
 
 def test_skill_effectiveness_appears_in_prompt(org):
-    from skills import Skill, SkillStore
+    from replicanta.skills import Skill, SkillStore
+
     skills_dir = org.store.dir_path / "skills"
     store = SkillStore(skills_dir)
-    store.save(Skill(name="rain talk", when="user likes rain",
-                     how="ask a follow-up", uses=3, effectiveness=0.6))
+    store.save(
+        Skill(
+            name="rain talk",
+            when="user likes rain",
+            how="ask a follow-up",
+            uses=3,
+            effectiveness=0.6,
+        )
+    )
     org.skills = store
     org.store.add(("user", "like_rain", "true"), 0.8)
     snap = state_snapshot(org)

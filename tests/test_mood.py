@@ -2,33 +2,33 @@
 tone coupling (bruise/soothe), the mood belief dynamics, and narration's
 felt mood line."""
 
-import sys
 import time
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
-from narration import _felt_experience, state_snapshot
-from organism import Organism, StressMeter
-from probe import SystemProbe
-from sentiment import harshness, kindness
+
+from replicanta.narration import _felt_experience, state_snapshot
+from replicanta.organism import Organism, StressMeter
+from replicanta.probe import SystemProbe
+from replicanta.sentiment import harshness, kindness
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc",
-                                           sys="/nonexistent/sys"))
+    kwargs.setdefault(
+        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
+    )
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
 
 
 def _mood_belief(org):
-    return next((v for (o, a, v) in org.store.beliefs()
-                 if (o, a) == ("self", "mood")), None)
+    return next(
+        (v for (o, a, v) in org.store.beliefs() if (o, a) == ("self", "mood")), None
+    )
 
 
 # -- kindness scorer ---------------------------------------------------------
+
 
 def test_kindness_zero_for_neutral():
     assert kindness("the weather is a topic") == 0.0
@@ -39,8 +39,7 @@ def test_kindness_detects_warmth():
 
 
 def test_kindness_caps_at_limit():
-    assert kindness("good good good love love please thanks great nice") \
-        <= 0.02
+    assert kindness("good good good love love please thanks great nice") <= 0.02
 
 
 def test_harshness_still_scored():
@@ -48,6 +47,7 @@ def test_harshness_still_scored():
 
 
 # -- hear(): tone touches the body --------------------------------------------
+
 
 def test_hear_records_chat(tmp_path):
     org = _organism(tmp_path)
@@ -76,6 +76,7 @@ def test_hear_kind_never_below_baseline(tmp_path):
 
 
 # -- mood dynamics -------------------------------------------------------------
+
 
 def test_first_tick_settles_calm(tmp_path):
     org = _organism(tmp_path, wake_seconds=999, sleep_seconds=999)
@@ -139,6 +140,7 @@ def test_revive_clears_mood_state(tmp_path):
 
 # -- narration exposure ---------------------------------------------------------
 
+
 def test_snapshot_includes_mood(tmp_path):
     org = _organism(tmp_path)
     org.hear("you are trash")
@@ -146,7 +148,15 @@ def test_snapshot_includes_mood(tmp_path):
 
 
 def test_felt_experience_has_mood_line():
-    snap = {"chaos": 0.5, "stress": 0.1, "score": 1.0, "belief_count": 2,
-            "mood": "grateful", "arousal": 0.3, "rationality": 0.5,
-            "irrationality": 0.2, "insane": False}
+    snap = {
+        "chaos": 0.5,
+        "stress": 0.1,
+        "score": 1.0,
+        "belief_count": 2,
+        "mood": "grateful",
+        "arousal": 0.3,
+        "rationality": 0.5,
+        "irrationality": 0.2,
+        "insane": False,
+    }
     assert any("grateful" in line for line in _felt_experience(snap))

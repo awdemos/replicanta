@@ -12,7 +12,7 @@ Belief shapes:
 
 import re
 
-import extensions
+from replicanta import extensions
 
 LEARN_CONF = 0.8
 MAX_PER_MESSAGE = 2
@@ -20,24 +20,55 @@ MAX_PER_MESSAGE = 2
 _VALUE = r"([a-zA-Z][a-zA-Z ]{0,38}?)"
 
 _PATTERNS = [
-    (re.compile(r"\bmy name is ([a-zA-Z]+)", re.IGNORECASE),
-     lambda m: ("user", "name", m.group(1)), True),
-    (re.compile(r"\bi (?:really )?(?:like|love|enjoy) " + _VALUE + r"[.!,]?$", re.IGNORECASE),
-     lambda m: ("user", f"like_{m.group(1)}", "true"), False),
-    (re.compile(r"\bi (?:really )?(?:hate|dislike) " + _VALUE + r"[.!,]?$", re.IGNORECASE),
-     lambda m: ("user", f"dislike_{m.group(1)}", "true"), False),
-    (re.compile(r"\bi (?:am|feel) (?:feeling )?" + _VALUE + r"[.!,]?$", re.IGNORECASE),
-     lambda m: ("user", "feeling", m.group(1)), True),
-    (re.compile(r"\byour ([a-zA-Z]+) is " + _VALUE + r"[.!,]?$", re.IGNORECASE),
-     lambda m: ("self", m.group(1), m.group(2)), True),
-    (re.compile(r"\byou are " + _VALUE + r"[.!,]?$", re.IGNORECASE),
-     lambda m: ("self", "described_as", m.group(1)), True),
+    (
+        re.compile(r"\bmy name is ([a-zA-Z]+)", re.IGNORECASE),
+        lambda m: ("user", "name", m.group(1)),
+        True,
+    ),
+    (
+        re.compile(
+            r"\bi (?:really )?(?:like|love|enjoy) " + _VALUE + r"[.!,]?$", re.IGNORECASE
+        ),
+        lambda m: ("user", f"like_{m.group(1)}", "true"),
+        False,
+    ),
+    (
+        re.compile(
+            r"\bi (?:really )?(?:hate|dislike) " + _VALUE + r"[.!,]?$", re.IGNORECASE
+        ),
+        lambda m: ("user", f"dislike_{m.group(1)}", "true"),
+        False,
+    ),
+    (
+        re.compile(
+            r"\bi (?:am|feel) (?:feeling )?" + _VALUE + r"[.!,]?$", re.IGNORECASE
+        ),
+        lambda m: ("user", "feeling", m.group(1)),
+        True,
+    ),
+    (
+        re.compile(r"\byour ([a-zA-Z]+) is " + _VALUE + r"[.!,]?$", re.IGNORECASE),
+        lambda m: ("self", m.group(1), m.group(2)),
+        True,
+    ),
+    (
+        re.compile(r"\byou are " + _VALUE + r"[.!,]?$", re.IGNORECASE),
+        lambda m: ("self", "described_as", m.group(1)),
+        True,
+    ),
 ]
 
 # filler that clings to captured values and means nothing as a belief
 _PREFIX_FILLER = ("really ", "very ", "so ", "quite ")
-_SUFFIX_FILLER = (" too", " a lot", " very much", " so much", " a bit",
-                  " actually", " honestly")
+_SUFFIX_FILLER = (
+    " too",
+    " a lot",
+    " very much",
+    " so much",
+    " a bit",
+    " actually",
+    " honestly",
+)
 
 
 def _sanitize(text):
@@ -94,8 +125,9 @@ def extract(text):
         value = _sanitize(raw)
         if value is None:
             continue
-        obj, attr, val = (part.replace("{x}", value)
-                          for part in entry["template"].split(":"))
+        obj, attr, val = (
+            part.replace("{x}", value) for part in entry["template"].split(":")
+        )
         fact = ((obj, attr, val), obj == "self")
         if fact not in facts:
             facts.append(fact)

@@ -1,9 +1,6 @@
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from organism import Mind
+from replicanta.organism import Mind
 
 SCL = Path(__file__).parent.parent / "organism.scl"
 
@@ -23,22 +20,31 @@ def test_mind_beliefs_returns_float_confidences():
         assert isinstance(conf, float)
         assert 0.0 <= conf <= 1.0
 
+
 import pytest
-from organism import CHAT_LOG_LIMIT, VALID_VALUE_RE, BeliefStore  # noqa: F401
+
+from replicanta.organism import (  # noqa: F401
+    CHAT_LOG_LIMIT,
+    VALID_VALUE_RE,
+    BeliefStore,
+)
 
 
 @pytest.fixture
 def store(tmp_path):
     return BeliefStore(tmp_path)
 
+
 def test_add_new_belief(store):
     store.add(("apple", "color", "red"), 0.8)
     assert store.conf(("apple", "color", "red")) == 0.8
+
 
 def test_strengthen_keeps_max(store):
     store.add(("apple", "color", "red"), 0.6)
     store.add(("apple", "color", "red"), 0.9)
     assert store.conf(("apple", "color", "red")) == 0.9
+
 
 def test_contradiction_prunes_lower_confidence(store):
     store.add(("apple", "color", "red"), 0.9)
@@ -47,14 +53,17 @@ def test_contradiction_prunes_lower_confidence(store):
     assert ("apple", "color", "green") not in store.beliefs()
     assert ("apple", "color", "green") in store.archived()
 
+
 def test_invalid_value_rejected(store):
     with pytest.raises(ValueError):
         store.add(("apple", "color", "Not Valid!"), 0.9)
+
 
 def test_render_scl_matches_import_file_format(store):
     store.add(("apple", "color", "red"), 0.9)
     scl = store.render_scl()
     assert 'rel 0.9::bel("apple", "color", "red")' in scl
+
 
 def test_save_load_roundtrip(store):
     store.add(("apple", "color", "red"), 0.9)
@@ -64,6 +73,7 @@ def test_save_load_roundtrip(store):
     loaded.load()
     assert loaded.conf(("apple", "color", "red")) == 0.9
     assert loaded.chaos == 0.7
+
 
 def test_scl_with_committed_rules_reimports(tmp_path):
     store = BeliefStore(tmp_path)
@@ -75,21 +85,25 @@ def test_scl_with_committed_rules_reimports(tmp_path):
     mind.rebuild()
     assert mind.beliefs()[("apple", "color", "red")] == 0.9
 
+
 def test_record_chat_strips_and_skips_empty(store):
     store.record_chat("user", "  hi there  ")
     store.record_chat("org", "   ")
     assert store.chat_log == [["user", "hi there"]]
+
 
 def test_record_chat_appends_entries(store):
     store.record_chat("user", "hello")
     store.record_chat("org", "hi back")
     assert store.chat_log == [["user", "hello"], ["org", "hi back"]]
 
+
 def test_record_chat_caps_log(store):
     for i in range(CHAT_LOG_LIMIT + 10):
         store.record_chat("user", f"line {i}")
     assert len(store.chat_log) == CHAT_LOG_LIMIT
     assert store.chat_log[-1] == ["user", f"line {CHAT_LOG_LIMIT + 9}"]
+
 
 def test_chat_log_roundtrips_via_save_load(store):
     store.record_chat("user", "hello")
@@ -99,7 +113,8 @@ def test_chat_log_roundtrips_via_save_load(store):
     loaded.load()
     assert loaded.chat_log == [["user", "hello"], ["org", "hi back"]]
 
-from organism import AttentionWindow, ChaosKnob
+
+from replicanta.organism import AttentionWindow, ChaosKnob
 
 
 def test_chaos_knob_clamps():
@@ -111,12 +126,14 @@ def test_chaos_knob_clamps():
     knob.set(0.7)
     assert knob.value == 0.7
 
+
 def test_attention_window_from_beliefs():
     beliefs = {("apple", "color", "red"): 0.9, ("ball", "shape", "round"): 0.8}
     win = AttentionWindow(beliefs)
     win.refresh()
     assert ("color", "red") in win.pairs
     assert ("shape", "round") in win.pairs
+
 
 def test_attention_window_narrows_with_fatigue():
     beliefs = {("o1", f"attr{i}", f"val{i}"): 0.9 for i in range(20)}
@@ -128,11 +145,13 @@ def test_attention_window_narrows_with_fatigue():
     assert narrow < wide
     assert narrow >= 3
 
+
 def test_focus_steering():
     beliefs = {("apple", "color", "red"): 0.9, ("ball", "shape", "round"): 0.8}
     win = AttentionWindow(beliefs)
     win.focus("color")
     assert set(win.pairs) == {("color", "red")}
+
 
 def test_focus_clears():
     beliefs = {("apple", "color", "red"): 0.9}
@@ -142,7 +161,8 @@ def test_focus_clears():
     win.refresh()
     assert ("color", "red") in win.pairs
 
-from organism import SelfQuestioner
+
+from replicanta.organism import SelfQuestioner
 
 
 def _make_questioner(tmp_path):
@@ -152,7 +172,8 @@ def _make_questioner(tmp_path):
         'rel 0.8::bel("apple", "shape", "round")\n'
         'rel 0.7::bel("ball", "color", "red")\n'
     )
-    from organism import BeliefStore
+    from replicanta.organism import BeliefStore
+
     store = BeliefStore(tmp_path)
     store.load()
     store.beliefs_map = {
@@ -164,17 +185,20 @@ def _make_questioner(tmp_path):
     mind.rebuild()
     return SelfQuestioner(store, mind, tmp_path)
 
+
 def test_derives_new_belief(tmp_path):
     q = _make_questioner(tmp_path)
     # apple is red AND round -> new belief apple has "red+round" = true
     q.ask(("color", "red"), ("shape", "round"))
     assert q.store.conf(("apple", "red_round", "true")) is not None
 
+
 def test_no_derivation_no_growth(tmp_path):
     q = _make_questioner(tmp_path)
     # nothing is red AND drinkable -> no new belief
     q.ask(("color", "red"), ("drinkable", "true"))
     assert len(q.store.beliefs()) == 3
+
 
 def test_consolidation_strengthens(tmp_path):
     q = _make_questioner(tmp_path)
@@ -183,6 +207,7 @@ def test_consolidation_strengthens(tmp_path):
     q.ask(("color", "red"), ("shape", "round"))
     after = q.store.conf(("apple", "red_round", "true"))
     assert after >= before
+
 
 def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
     q = _make_questioner(tmp_path)
@@ -194,9 +219,10 @@ def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
     assert depth == 2
     assert rule.startswith("q1(x)")
 
+
 import random
 
-from organism import DreamEngine
+from replicanta.organism import DreamEngine
 
 
 def _make_dreamer(tmp_path):
@@ -207,7 +233,8 @@ def _make_dreamer(tmp_path):
         'rel 0.7::bel("ball", "color", "red")\n'
         'rel 0.9::bel("ball", "shape", "round")\n'
     )
-    from organism import BeliefStore
+    from replicanta.organism import BeliefStore
+
     store = BeliefStore(tmp_path)
     store.load()
     store.beliefs_map = {
@@ -220,6 +247,7 @@ def _make_dreamer(tmp_path):
     mind.rebuild()
     return DreamEngine(store, mind)
 
+
 def test_dream_generates_candidate_facts(tmp_path):
     engine = _make_dreamer(tmp_path)
     engine.rng = random.Random(42)
@@ -229,6 +257,7 @@ def test_dream_generates_candidate_facts(tmp_path):
         assert isinstance(d, dict)
         assert "rule" in d and "combo" in d
 
+
 def test_dream_validates_and_promotes(tmp_path):
     engine = _make_dreamer(tmp_path)
     engine.rng = random.Random(42)
@@ -237,14 +266,21 @@ def test_dream_validates_and_promotes(tmp_path):
     # at least one dream should promote (apple/ball share color+shape)
     assert len(promoted) >= 1
 
+
 def test_dream_discards_unsupported(tmp_path):
     engine = _make_dreamer(tmp_path)
-    unsupported = [{"rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
-                    "combo": "red_true", "head": "q99"}]
+    unsupported = [
+        {
+            "rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
+            "combo": "red_true",
+            "head": "q99",
+        }
+    ]
     promoted = engine.promote(unsupported)
     assert promoted == []
 
-from organism import Lifecycle, Metrics
+
+from replicanta.organism import Lifecycle, Metrics
 
 
 def test_lifecycle_advances_cycle(monkeypatch, tmp_path):
@@ -289,8 +325,8 @@ def test_lifecycle_dead_is_terminal(tmp_path):
         lc.tick()
     assert lc.state == "dead"
     cycle_before = store.cycle
-    assert lc.tick() == "dead"      # no further transitions
-    assert lc.advance() is None     # scheduler no-op
+    assert lc.tick() == "dead"  # no further transitions
+    assert lc.advance() is None  # scheduler no-op
     assert not lc.due()
     assert store.cycle == cycle_before
 
@@ -306,6 +342,7 @@ def test_revive_restores_wake_baseline(tmp_path):
     assert store.fade_streak == 0
     assert store.stress == 0.05  # StressMeter.BASELINE
 
+
 def test_metrics_score_components(tmp_path):
     store = BeliefStore(tmp_path)
     store.beliefs_map = {("a", "color", "red"): 0.9, ("b", "shape", "round"): 0.8}
@@ -314,6 +351,7 @@ def test_metrics_score_components(tmp_path):
     assert m.belief_count == 2
     assert m.rule_count == 1
     assert m.score() > 0
+
 
 def test_metrics_score_monotonic_under_prune_archive(tmp_path):
     store = BeliefStore(tmp_path)
@@ -324,7 +362,8 @@ def test_metrics_score_monotonic_under_prune_archive(tmp_path):
     m2 = Metrics(store).score()
     assert m2 >= m1
 
-from organism import Organism
+
+from replicanta.organism import Organism
 
 
 def _seeded_organism(tmp_path):
@@ -337,12 +376,14 @@ def _seeded_organism(tmp_path):
     )
     return Organism(tmp_path, wake_seconds=0, sleep_seconds=0)
 
+
 def test_organism_bootstraps_from_genome(tmp_path):
     org = _seeded_organism(tmp_path)
     org.load()
     assert org.store.conf(("apple", "color", "red")) == 0.9
     assert org.store.conf(("ball", "shape", "round")) == 0.9
     assert org.metrics().score() > 0
+
 
 def test_organism_sleeps_and_grows(tmp_path):
     org = _seeded_organism(tmp_path)
@@ -352,6 +393,7 @@ def test_organism_sleeps_and_grows(tmp_path):
     score_after = org.metrics().score()
     assert score_after >= score_before
     assert org.store.cycle >= 1
+
 
 def test_organism_self_play_grows_over_cycles(tmp_path):
     org = _seeded_organism(tmp_path)
@@ -376,26 +418,31 @@ def test_organism_death_persists_across_reload(tmp_path):
     assert org2.lifecycle.state == "dead"
 
 
-from tui import OrganismApp
+from replicanta.tui import OrganismApp
 
 
 def test_tui_app_constructs(tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
     assert app is not None
 
+
 def test_tui_command_chaos(tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
     app.handle_command("/chaos 0.8")
     assert org.store.chaos == 0.8
 
+
 def test_tui_command_focus(tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -404,7 +451,8 @@ def test_tui_command_focus(tmp_path):
 
 
 def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     org.store.stress = 0.96
@@ -429,7 +477,8 @@ def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
 
 
 def test_tui_command_self_talk_toggles(monkeypatch, tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -450,7 +499,8 @@ def test_tui_command_self_talk_toggles(monkeypatch, tmp_path):
 
 
 def test_tui_narrate_routes_to_self_talk_when_on(tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -464,7 +514,8 @@ def test_tui_narrate_routes_to_self_talk_when_on(tmp_path):
 
 
 def test_tui_narrate_stays_dream_when_sleeping(tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -485,7 +536,8 @@ def test_tui_focuses_chat_input_on_mount(monkeypatch, tmp_path):
     widget, which is the log)."""
     import asyncio
 
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -503,7 +555,8 @@ def test_tui_focuses_chat_input_on_mount(monkeypatch, tmp_path):
 
 
 def _headless_app(monkeypatch, tmp_path):
-    from organism import Organism
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -516,14 +569,19 @@ def test_tui_has_four_tabs(monkeypatch, tmp_path):
     import asyncio
 
     from textual.widgets import TabbedContent, TabPane
+
     app = _headless_app(monkeypatch, tmp_path)
 
     async def check():
         async with app.run_test():
             tabs = app.query_one(TabbedContent)
             assert {p.id for p in tabs.query(TabPane)} == {
-                "chat-pane", "mind-pane", "memory-pane", "inner-pane",
-                "cells-pane"}
+                "chat-pane",
+                "mind-pane",
+                "memory-pane",
+                "inner-pane",
+                "cells-pane",
+            }
 
     asyncio.run(check())
 
@@ -578,8 +636,10 @@ def test_tui_mind_and_memory_views_refresh(monkeypatch, tmp_path):
 
 
 def test_tui_chat_renders_as_card(monkeypatch, tmp_path):
-    from organism import Organism
     from rich.panel import Panel
+
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -603,8 +663,10 @@ def test_tui_chat_renders_as_card(monkeypatch, tmp_path):
 
 
 def test_tui_org_reply_renders_as_card(monkeypatch, tmp_path):
-    from organism import Organism
     from rich.panel import Panel
+
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -626,8 +688,10 @@ def test_tui_org_reply_renders_as_card(monkeypatch, tmp_path):
 
 
 def test_tui_events_stay_flat_lines(monkeypatch, tmp_path):
-    from organism import Organism
     from rich.panel import Panel
+
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -646,8 +710,10 @@ def test_tui_events_stay_flat_lines(monkeypatch, tmp_path):
 
 
 def test_tui_org_card_titled_by_dir_name_by_default(monkeypatch, tmp_path):
-    from organism import Organism
     from rich.panel import Panel
+
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path / "organisms" / "fern")
     org.load()
     app = OrganismApp(org)
@@ -667,8 +733,10 @@ def test_tui_org_card_titled_by_dir_name_by_default(monkeypatch, tmp_path):
 
 
 def test_tui_org_card_uses_learned_name(monkeypatch, tmp_path):
-    from organism import Organism
     from rich.panel import Panel
+
+    from replicanta.organism import Organism
+
     org = Organism(tmp_path)
     org.load()
     org.store.add(("self", "name", "sprig"), 0.8)
@@ -712,8 +780,7 @@ def test_tui_goal_event_logs_completion(monkeypatch, tmp_path):
     logged = []
     app._append_log = lambda text, style=None, stamp=False: logged.append(text)
     app.notify = lambda *a, **k: None
-    app._render_event({"kind": "goal", "text": "learn about the user",
-                       "done": True})
+    app._render_event({"kind": "goal", "text": "learn about the user", "done": True})
     assert any("learn about the user" in line for line in logged)
 
 
@@ -806,13 +873,17 @@ def test_tui_set_reflection_nothing_is_quiet(monkeypatch, tmp_path):
 
 # -- tier B: approval commands ---------------------------------------------------
 
-import extensions as ext_mod
+from replicanta import extensions as ext_mod
 
 
 def _proposal_entry():
-    return {"kind": "pattern", "regex": "i adore ([a-z '-]+)",
-            "template": "user:like_{x}:true", "example": "i adore hiking",
-            "why": "the user says adore"}
+    return {
+        "kind": "pattern",
+        "regex": "i adore ([a-z '-]+)",
+        "template": "user:like_{x}:true",
+        "example": "i adore hiking",
+        "why": "the user says adore",
+    }
 
 
 def _patch_app(monkeypatch, app, logged):
@@ -830,6 +901,7 @@ def _patch_app(monkeypatch, app, logged):
 
 def test_tui_set_reflection_proposal_shows_card(monkeypatch, tmp_path):
     from rich.panel import Panel
+
     app = _headless_app(monkeypatch, tmp_path)
     written = []
 
@@ -854,8 +926,11 @@ def test_tui_approve_applies_pending(monkeypatch, tmp_path):
     app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
-    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry(), auto_apply=False)
+    ext_mod.propose(
+        app.org.dir_path / "artifacts" / "extensions.json",
+        _proposal_entry(),
+        auto_apply=False,
+    )
     app.handle_command("/approve")
     assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
     assert any("applied" in line for line in logged)
@@ -875,8 +950,11 @@ def test_tui_reject_discards_pending(monkeypatch, tmp_path):
     app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
-    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry(), auto_apply=False)
+    ext_mod.propose(
+        app.org.dir_path / "artifacts" / "extensions.json",
+        _proposal_entry(),
+        auto_apply=False,
+    )
     app.handle_command("/reject")
     assert ext_mod.pending() is None
     assert ext_mod.active_entries("pattern") == []
@@ -887,8 +965,11 @@ def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
     logged = []
     _patch_app(monkeypatch, app, logged)
-    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry(), auto_apply=False)
+    ext_mod.propose(
+        app.org.dir_path / "artifacts" / "extensions.json",
+        _proposal_entry(),
+        auto_apply=False,
+    )
     ext_mod.approve(app.org.dir_path / "artifacts" / "extensions.json")
     app.handle_command("/revert")
     assert ext_mod.active_entries("pattern") == []
@@ -916,8 +997,11 @@ def test_tui_proposal_auto_applies_when_setting_on(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
     logged = []
     _patch_app(monkeypatch, app, logged)
-    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry(), auto_apply=True)
+    ext_mod.propose(
+        app.org.dir_path / "artifacts" / "extensions.json",
+        _proposal_entry(),
+        auto_apply=True,
+    )
     assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
 
 
@@ -927,11 +1011,11 @@ def test_tui_proposal_auto_applies_when_setting_on(monkeypatch, tmp_path):
 def _nursery_app(monkeypatch, tmp_path):
     """An app whose organism lives in a real nursery: tmp_path is the root
     (with the seed genome), the organism at organisms/default/."""
-    import nursery
-    from organism import Organism
+    from replicanta import nursery
+    from replicanta.organism import Organism
+
     root = tmp_path
-    (root / "organism.scl").write_text(
-        'type bel(x: String, a: String, v: String)\n')
+    (root / "organism.scl").write_text("type bel(x: String, a: String, v: String)\n")
     nursery.create(root, "default", root / "organism.scl")
     org = Organism(nursery.organism_dir(root, "default"))
     org.load()
@@ -955,7 +1039,8 @@ def _nursery_app(monkeypatch, tmp_path):
 
 
 def test_tui_new_births_and_swaps(monkeypatch, tmp_path):
-    import nursery
+    from replicanta import nursery
+
     app, root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/new fern")
     assert app.org.dir_path == nursery.organism_dir(root, "fern")
@@ -1003,12 +1088,12 @@ def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
     app, root, _logged = _nursery_app(monkeypatch, tmp_path)
     app._responding = True
     app.handle_command("/new fern")
-    assert app.org.dir_path.name == "fern"       # swapped anyway
+    assert app.org.dir_path.name == "fern"  # swapped anyway
     assert (root / "organisms" / "fern").exists()
-    assert app._responding is False              # flags reset for the new org
+    assert app._responding is False  # flags reset for the new org
 
 
-import speech
+from replicanta import speech
 
 
 def test_tui_voice_toggles_speech(monkeypatch, tmp_path):
@@ -1042,7 +1127,7 @@ def test_tui_voice_warns_without_model(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "say", lambda text: None)
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice on")
-    assert speech.enabled is True            # flag set, but honest about it
+    assert speech.enabled is True  # flag set, but honest about it
     assert any("staying mute" in line for line in logged)
 
 
@@ -1054,21 +1139,21 @@ def test_tui_voice_rejects_bad_arg(monkeypatch, tmp_path):
 
 
 def test_tui_voice_list_marks_active(monkeypatch, tmp_path):
-    monkeypatch.setattr(speech, "list_voices",
-                        lambda: ["en_GB-alan-low", "en_US-lessac-medium"])
-    monkeypatch.setattr(speech, "voice_name",
-                        lambda: "en_US-lessac-medium")
+    monkeypatch.setattr(
+        speech, "list_voices", lambda: ["en_GB-alan-low", "en_US-lessac-medium"]
+    )
+    monkeypatch.setattr(speech, "voice_name", lambda: "en_US-lessac-medium")
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice list")
-    assert any("*en_US-lessac-medium" in line and "en_GB-alan-low" in line
-               for line in logged)
+    assert any(
+        "*en_US-lessac-medium" in line and "en_GB-alan-low" in line for line in logged
+    )
 
 
 def test_tui_voice_use_switches_and_speaks(monkeypatch, tmp_path):
     said = []
     monkeypatch.setattr(speech, "say", lambda text: said.append(text))
-    monkeypatch.setattr(speech, "set_voice",
-                        lambda spec: Path(f"voices/{spec}.onnx"))
+    monkeypatch.setattr(speech, "set_voice", lambda spec: Path(f"voices/{spec}.onnx"))
     monkeypatch.setattr(speech, "voice_name", lambda: "en_GB-alan-low")
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice use en_GB-alan-low")
@@ -1078,12 +1163,13 @@ def test_tui_voice_use_switches_and_speaks(monkeypatch, tmp_path):
 
 def test_tui_voice_use_unknown_suggests_get(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "set_voice", lambda spec: None)
-    monkeypatch.setattr(speech, "list_voices",
-                        lambda: ["en_US-lessac-medium"])
+    monkeypatch.setattr(speech, "list_voices", lambda: ["en_US-lessac-medium"])
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice use en_GB-alan-low")
-    assert any("no voice 'en_GB-alan-low'" in line
-               and "/voice get en_GB-alan-low" in line for line in logged)
+    assert any(
+        "no voice 'en_GB-alan-low'" in line and "/voice get en_GB-alan-low" in line
+        for line in logged
+    )
 
 
 def test_tui_voice_get_runs_download_worker(monkeypatch, tmp_path):
@@ -1098,6 +1184,7 @@ def test_tui_reply_speaks_only_when_enabled(monkeypatch, tmp_path):
     """The organism's own utterances route through speech.say — a no-op
     unless the user turned the spoken voice on."""
     import threading
+
     said = []
     spoke = threading.Event()
 
@@ -1109,7 +1196,7 @@ def test_tui_reply_speaks_only_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "_speak", fake_speak)
     app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
     app._set_reply("i am here")
-    assert said == []                          # disabled: silence
+    assert said == []  # disabled: silence
     speech.set_enabled(True)
     app._set_reply("i am here")
     assert spoke.wait(2.0)
@@ -1120,5 +1207,5 @@ def test_load_tolerates_corrupt_state_json(tmp_path):
     store = BeliefStore(tmp_path)
     store.state_path.parent.mkdir(parents=True, exist_ok=True)
     store.state_path.write_text("{not json")
-    store.load()   # must not raise; keeps fresh defaults
+    store.load()  # must not raise; keeps fresh defaults
     assert store.cycle == 0

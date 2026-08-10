@@ -9,8 +9,8 @@ import json
 from rich.panel import Panel
 from rich.text import Text
 
-import activity
-from learning import describe
+from replicanta import activity
+from replicanta.learning import describe
 
 STYLE_USER = "cyan"
 STYLE_ORG = "green"
@@ -53,15 +53,20 @@ def mind_view(org):
     currently holding as true, aiming for, and paying attention to.
     Read-only; rebuilt on every tick."""
     m = org.metrics()
-    lines = ["top beliefs", "",
-             ("(▮ = confidence; more blocks means the organism holds it "
-              "more strongly)"), ""]
+    lines = [
+        "top beliefs",
+        "",
+        ("(▮ = confidence; more blocks means the organism holds it more strongly)"),
+        "",
+    ]
     top = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])
     for (obj, attr, val), conf in top[:_BELIEF_LIMIT]:
         lines.append(f"{conf_bar(conf)} {conf:.2f} {obj}:{attr}={val}")
     if not top:
-        lines += [("(no beliefs yet — say something like \"my name is "
-                   "Sam\" or \"i like rain\")"), ""]
+        lines += [
+            ('(no beliefs yet — say something like "my name is Sam" or "i like rain")'),
+            "",
+        ]
     if org.store.goals:
         lines += ["", "goals", ""]
         active = org.store.active_goal()
@@ -70,30 +75,49 @@ def mind_view(org):
             strategy_line = f"   strategy: {strategy}" if strategy else ""
             lines.append(
                 f"→ now trying: {active['text']} "
-                f"(since cycle {active['created_cycle']}){strategy_line}")
-        for g in [g for g in org.store.goals
-                  if g["done_cycle"] is not None][-3:]:
+                f"(since cycle {active['created_cycle']}){strategy_line}"
+            )
+        for g in [g for g in org.store.goals if g["done_cycle"] is not None][-3:]:
             lines.append(f"   done (cycle {g['done_cycle']}): {g['text']}")
     skill_store = getattr(org, "skills", None)
     skill_list = skill_store.list() if skill_store is not None else []
     if skill_list:
-        lines += ["", "skills", "",
-                  "(techniques the organism has learned and can reuse)", ""]
+        lines += [
+            "",
+            "skills",
+            "",
+            "(techniques the organism has learned and can reuse)",
+            "",
+        ]
         for s in skill_list[:8]:
             lines.append(f"{s.name} (used {s.uses}×) — when {s.when}")
     if org.store.rules:
-        lines += ["", "committed rules", "",
-                  "(derived patterns the organism treats as reliable)", ""]
+        lines += [
+            "",
+            "committed rules",
+            "",
+            "(derived patterns the organism treats as reliable)",
+            "",
+        ]
         lines += [text for text, _depth in org.store.rules[:_RULE_LIMIT]]
     if org.store.attention:
         pairs = sorted(f"{a}={v}" for a, v in org.store.attention)
-        lines += ["", "attention: " + ", ".join(pairs),
-                  ("(only beliefs matching the focus window strongly "
-                   "influence replies right now)")]
-    lines += ["",
-              (f"genome: {m.belief_count} beliefs · {m.rule_count} rules · "
-               f"depth {m.total_depth} · consciousness score "
-               f"{m.score():.1f}")]
+        lines += [
+            "",
+            "attention: " + ", ".join(pairs),
+            (
+                "(only beliefs matching the focus window strongly "
+                "influence replies right now)"
+            ),
+        ]
+    lines += [
+        "",
+        (
+            f"genome: {m.belief_count} beliefs · {m.rule_count} rules · "
+            f"depth {m.total_depth} · consciousness score "
+            f"{m.score():.1f}"
+        ),
+    ]
     activity_lines = activity.summary_lines(org.store)
     if activity_lines:
         lines += [""] + activity_lines
@@ -104,33 +128,52 @@ def memory_view(org):
     """The Memory tab: the organism's episodic diary, what it has learned
     about the user, how the user describes it, and any saved artifacts.
     Read-only; rebuilt on every tick."""
-    lines = ["episodes", "",
-             ("(notable moments from the organism's life, stamped by the "
-              "cycle they happened)"), ""]
+    lines = [
+        "episodes",
+        "",
+        (
+            "(notable moments from the organism's life, stamped by the "
+            "cycle they happened)"
+        ),
+        "",
+    ]
     for ep in org.store.memory:
         lines.append(f"cycle {ep['cycle']:<4} {ep['kind']:<8} {ep['text']}")
     if not org.store.memory:
-        lines += [("(nothing remembered yet — events appear here when the "
-                   "organism dreams, learns, or fades)"), ""]
+        lines += [
+            (
+                "(nothing remembered yet — events appear here when the "
+                "organism dreams, learns, or fades)"
+            ),
+            "",
+        ]
     beliefs = org.store.beliefs()
     user_facts = [describe(b) for b in beliefs if b[0] == "user"]
     if user_facts:
-        lines += ["", "what it knows about you", "",
-                  "(facts extracted from what you said)", ""]
+        lines += [
+            "",
+            "what it knows about you",
+            "",
+            "(facts extracted from what you said)",
+            "",
+        ]
         lines += [f"- {f}" for f in user_facts]
     views = [v for (o, a, v) in beliefs if (o, a) == ("self", "described_as")]
     if views:
-        lines += ["", "what you said it is", "",
-                  "(labels you have given the organism)", ""]
+        lines += [
+            "",
+            "what you said it is",
+            "",
+            "(labels you have given the organism)",
+            "",
+        ]
         lines += [f"- {v}" for v in views]
     artifacts = org.store.dir_path / "artifacts"
     if artifacts.is_dir():
         files = sorted(p for p in artifacts.iterdir() if p.is_file())
         if files:
-            lines += ["", "artifacts", "",
-                      "(files the organism has written)", ""]
-            lines += [f"- {p.name} ({_human_size(p.stat().st_size)})"
-                      for p in files]
+            lines += ["", "artifacts", "", "(files the organism has written)", ""]
+            lines += [f"- {p.name} ({_human_size(p.stat().st_size)})" for p in files]
     return "\n".join(lines)
 
 
@@ -140,10 +183,12 @@ def _mental_state(org):
     [0, 1]); mood is a string belief, not a scalar."""
     store = org.store
     scalars = []
-    for attr, label in (("arousal", "arousal"),
-                        ("stress", "stress"),
-                        ("rationality", "rationality"),
-                        ("irrationality", "irrationality")):
+    for attr, label in (
+        ("arousal", "arousal"),
+        ("stress", "stress"),
+        ("rationality", "rationality"),
+        ("irrationality", "irrationality"),
+    ):
         value = getattr(store, attr, None)
         if isinstance(value, float):
             scalars.append((label, value))
@@ -163,8 +208,7 @@ def _pending_proposal(org):
         return None
     kind = entry.get("kind", "?")
     if kind == "pattern":
-        preview = (f"{entry.get('template', '?')} "
-                   f"← /{entry.get('regex', '?')}/")
+        preview = f"{entry.get('template', '?')} ← /{entry.get('regex', '?')}/"
     else:
         preview = entry.get("text", "?")
     return f"{kind}: {preview}"
@@ -222,8 +266,7 @@ def mind_renderable(org):
                 f"({obj})",
             )
         caption = Text(
-            "▮ = confidence; more blocks means the organism holds it "
-            "more strongly",
+            "▮ = confidence; more blocks means the organism holds it more strongly",
             style="dim",
         )
         panels.append(
@@ -277,12 +320,9 @@ def mind_renderable(org):
                     (f"when {s.when}", ""),
                 ),
             )
-        caption = Text(
-            "techniques the organism has learned and can reuse", style="dim"
-        )
+        caption = Text("techniques the organism has learned and can reuse", style="dim")
         panels.append(
-            Panel(Group(grid, Text(""), caption), title="skills",
-                  border_style="yellow")
+            Panel(Group(grid, Text(""), caption), title="skills", border_style="yellow")
         )
 
     if store.rules:
@@ -290,12 +330,13 @@ def mind_renderable(org):
         grid.add_column(justify="left")
         for text, _depth in store.rules[:_RULE_LIMIT]:
             grid.add_row(Text(text, style="blue"))
-        caption = Text(
-            "derived patterns the organism treats as reliable", style="dim"
-        )
+        caption = Text("derived patterns the organism treats as reliable", style="dim")
         panels.append(
-            Panel(Group(grid, Text(""), caption), title="committed rules",
-                  border_style="blue")
+            Panel(
+                Group(grid, Text(""), caption),
+                title="committed rules",
+                border_style="blue",
+            )
         )
 
     if store.attention:
@@ -308,14 +349,14 @@ def mind_renderable(org):
                 style="dim",
             ),
         )
-        panels.append(
-            Panel(body, title="attention", border_style="yellow")
-        )
+        panels.append(Panel(body, title="attention", border_style="yellow"))
 
     m = org.metrics()
-    genome_text = (f"{m.belief_count} beliefs · {m.rule_count} rules · "
-                   f"depth {m.total_depth} · consciousness score "
-                   f"{m.score():.1f}")
+    genome_text = (
+        f"{m.belief_count} beliefs · {m.rule_count} rules · "
+        f"depth {m.total_depth} · consciousness score "
+        f"{m.score():.1f}"
+    )
     footer = Text.assemble(
         ("genome: ", "bold"),
         (genome_text, ""),
@@ -488,15 +529,12 @@ def inner_renderable(org):
             f"{committed} rules committed · {promoted} dreams "
             f"promoted / {discarded} discarded",
         )
-        panels.append(
-            Panel(grid, title="perpetuation loop", border_style="magenta")
-        )
+        panels.append(Panel(grid, title="perpetuation loop", border_style="magenta"))
 
     arena = activity.summary_lines(store)
     if arena:
         panels.append(
-            Panel(Text("\n".join(arena)), title="thought arena",
-                  border_style="yellow")
+            Panel(Text("\n".join(arena)), title="thought arena", border_style="yellow")
         )
 
     proposal = _pending_proposal(org)
@@ -546,11 +584,13 @@ def inner_view(org):
         lines += ["", "perpetuation loop", ""]
         lines.append(
             f"{tried} questions → {derived} derivations "
-            f"({derived / max(tried, 1):.0%} yield) over {cycle} cycles")
+            f"({derived / max(tried, 1):.0%} yield) over {cycle} cycles"
+        )
         lines.append(
             f"{committed} rules committed ({committed / max(derived, 1):.0%}"
             f" of derivations) · {promoted} dreams promoted / "
-            f"{discarded} discarded")
+            f"{discarded} discarded"
+        )
     else:
         lines += ["", "perpetuation loop", ""]
         lines.append("(no activity yet)")
@@ -562,8 +602,9 @@ def inner_view(org):
         lines += ["", "pending proposal", ""]
         lines.append(proposal)
         auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
-        lines.append("auto-applied" if auto
-                     else "(/approve to apply · /reject to discard)")
+        lines.append(
+            "auto-applied" if auto else "(/approve to apply · /reject to discard)"
+        )
     return "\n".join(lines)
 
 
@@ -579,7 +620,7 @@ _CELLS_BG = "#0b0f1a"
 
 
 def _hex_to_rgb(h):
-    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+    return tuple(int(h[i : i + 2], 16) for i in (1, 3, 5))
 
 
 def _lerp_color(low, high, t):
@@ -621,22 +662,46 @@ def cells_layout(org):
     items = []
     for (obj, attr, val), conf in org.store.beliefs().items():
         kind = "self" if obj == "self" else "belief"
-        items.append((kind, conf, f"{obj}:{attr}={val}",
-                      {"object": obj, "attribute": attr, "value": val}))
+        items.append(
+            (
+                kind,
+                conf,
+                f"{obj}:{attr}={val}",
+                {"object": obj, "attribute": attr, "value": val},
+            )
+        )
     for text, depth in org.store.rules:
-        items.append(("rule", 0.5 + min(depth, 4) / 8, text,
-                      {"text": text, "depth": depth}))
+        items.append(
+            ("rule", 0.5 + min(depth, 4) / 8, text, {"text": text, "depth": depth})
+        )
     for entry in org.store.memory[-50:]:
         mkind = entry.get("kind", "memory")
-        items.append(("memory", 0.7, f"{mkind}:{entry.get('text', '')}",
-                      {"cycle": entry.get("cycle"), "tag": mkind,
-                       "text": entry.get("text", "")}))
+        items.append(
+            (
+                "memory",
+                0.7,
+                f"{mkind}:{entry.get('text', '')}",
+                {
+                    "cycle": entry.get("cycle"),
+                    "tag": mkind,
+                    "text": entry.get("text", ""),
+                },
+            )
+        )
     goal = org.store.active_goal()
     if goal:
-        items.append(("goal", 0.9, goal["text"],
-                      {"text": goal["text"],
-                       "created_cycle": goal.get("created_cycle"),
-                       "strategy": goal.get("strategy")}))
+        items.append(
+            (
+                "goal",
+                0.9,
+                goal["text"],
+                {
+                    "text": goal["text"],
+                    "created_cycle": goal.get("created_cycle"),
+                    "strategy": goal.get("strategy"),
+                },
+            )
+        )
 
     # Most strongly held memories get a cell when space runs out.
     items.sort(key=lambda item: -item[1])
@@ -652,29 +717,34 @@ def cells_layout(org):
                 break
 
     text = Text()
-    text.append(f"neural memory · {len(items)} cells\n",
-                style="bold #e2e8f0")
+    text.append(f"neural memory · {len(items)} cells\n", style="bold #e2e8f0")
     for row in range(CELLS_ROWS):
         for col in range(CELLS_COLS):
             cell = grid[row * CELLS_COLS + col]
             if cell is None:
                 text.append("  ", style=f"on {_CELLS_BG}")
             else:
-                text.append("  ", style=f"on {_cell_color(
-                    cell['kind'], cell['confidence'])}")
+                text.append(
+                    "  ", style=f"on {_cell_color(cell['kind'], cell['confidence'])}"
+                )
         text.append("\n")
     # legend: real swatches in the exact colors the grid uses — each kind
     # shows its weak->strong endpoints, because brightness is confidence
     legend = Text()
     legend.append("legend: ", style="#94a3b8")
-    for kind, label in (("belief", "beliefs"), ("self", "self"),
-                        ("rule", "rules"), ("memory", "memory"),
-                        ("goal", "goals")):
+    for kind, label in (
+        ("belief", "beliefs"),
+        ("self", "self"),
+        ("rule", "rules"),
+        ("memory", "memory"),
+        ("goal", "goals"),
+    ):
         legend.append("  ", style=f"on {_cell_color(kind, 0.15)}")
         legend.append("  ", style=f"on {_cell_color(kind, 1.0)}")
         legend.append(f" {label} · ", style="#94a3b8")
-    legend.append("dim→bright = weak→strong · click a cell to inspect it",
-                  style="#94a3b8")
+    legend.append(
+        "dim→bright = weak→strong · click a cell to inspect it", style="#94a3b8"
+    )
     text.append(legend)
     return text, grid
 
@@ -690,16 +760,20 @@ def cell_detail_text(cell):
     kind = cell["kind"]
     lines = [f"kind: {kind}  (confidence {cell['confidence']:.2f})", ""]
     if kind in ("belief", "self"):
-        lines += [f"object:    {cell['object']}",
-                  f"attribute: {cell['attribute']}",
-                  f"value:     {cell['value']}"]
+        lines += [
+            f"object:    {cell['object']}",
+            f"attribute: {cell['attribute']}",
+            f"value:     {cell['value']}",
+        ]
     elif kind == "rule":
         lines += [f"depth: {cell['depth']}", "", cell["text"]]
     elif kind == "memory":
-        lines += [f"cycle: {cell['cycle']}", f"tag:   {cell['tag']}",
-                  "", cell["text"]]
+        lines += [f"cycle: {cell['cycle']}", f"tag:   {cell['tag']}", "", cell["text"]]
     elif kind == "goal":
-        lines += [f"created cycle: {cell['created_cycle']}",
-                  f"strategy:      {cell['strategy'] or '-'}",
-                  "", cell["text"]]
+        lines += [
+            f"created cycle: {cell['created_cycle']}",
+            f"strategy:      {cell['strategy'] or '-'}",
+            "",
+            cell["text"],
+        ]
     return "\n".join(lines)

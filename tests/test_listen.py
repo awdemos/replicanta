@@ -3,24 +3,21 @@ machine, mono conversion, transcription gating) and the TUI /listen
 wiring. No real microphone or whisper model is touched."""
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import pytest
 
-import listen
-from listen import Listener
+from replicanta import listen
+from replicanta.listen import Listener
 
 
 def _audio(seconds=1.0, value=0.1):
-    return np.full(int(listen.SAMPLE_RATE * seconds), value,
-                   dtype=np.float32)
+    return np.full(int(listen.SAMPLE_RATE * seconds), value, dtype=np.float32)
 
 
 # -- _mono --------------------------------------------------------------------
+
 
 def test_mono_averages_channels():
     frames = np.array([[0.5, 1.0], [-0.5, 0.5]], dtype=np.float32)
@@ -38,8 +35,10 @@ def test_mono_passes_through_1d():
 
 # -- toggle state machine ------------------------------------------------------
 
+
 class _FakeMic:
     """Silence-generating stand-in for a soundcard microphone."""
+
     def recorder(self, samplerate):
         return self
 
@@ -67,14 +66,14 @@ def test_toggle_starts_then_stops():
     assert recording is False
     assert li.recording is False
     assert isinstance(audio, np.ndarray)
-    assert len(audio) > 0          # the fake mic really captured frames
+    assert len(audio) > 0  # the fake mic really captured frames
 
 
 def test_start_is_idempotent():
     li = _listener()
     li.start()
     first = li._thread
-    li.start()                            # must not spawn a second capture
+    li.start()  # must not spawn a second capture
     assert li._thread is first
     li.stop()
 
@@ -82,9 +81,10 @@ def test_start_is_idempotent():
 def test_no_microphone_is_a_quiet_noop():
     def dead_mic():
         raise OSError("no such device")
+
     li = Listener(mic_factory=dead_mic)
     li.start()
-    assert li.recording is False          # recording never began
+    assert li.recording is False  # recording never began
     assert len(li.stop()) == 0
 
 
@@ -95,6 +95,7 @@ def test_stop_without_start_returns_empty():
 
 
 # -- transcription ----------------------------------------------------------
+
 
 def test_transcribe_uses_injected_transcriber():
     seen = []
@@ -112,14 +113,17 @@ def test_transcribe_rejects_too_short_audio():
 def test_transcribe_contains_transcriber_failures():
     def boom(_a):
         raise RuntimeError("model exploded")
+
     li = Listener(transcriber=boom)
     assert li.transcribe(_audio(1.0)) == ""
 
 
 # -- TUI wiring ---------------------------------------------------------------
 
+
 class _FakeListener:
     """Scriptable stand-in: toggles like Listener, no mic, no whisper."""
+
     def __init__(self):
         self.recording = False
         self.stopped = False
@@ -137,8 +141,9 @@ class _FakeListener:
 
 
 def test_listen_command_toggles_mic(tmp_path):
-    from organism import Organism
-    from tui import OrganismApp
+    from replicanta.organism import Organism
+    from replicanta.tui import OrganismApp
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -146,7 +151,7 @@ def test_listen_command_toggles_mic(tmp_path):
     app.listener = fake
     app.handle_command("/listen")
     assert fake.recording is True
-    app._transcribe_then_say = lambda _audio: None   # no worker in tests
+    app._transcribe_then_say = lambda _audio: None  # no worker in tests
     app.handle_command("/listen")
     assert fake.recording is False
     assert fake.stopped is True
@@ -163,8 +168,7 @@ def _mics():
 
 
 def test_match_by_exact_id():
-    assert listen.match_microphone(_mics(), "usb-1").name == \
-        "Blue Yeti Microphone"
+    assert listen.match_microphone(_mics(), "usb-1").name == "Blue Yeti Microphone"
 
 
 def test_match_by_name_substring_case_insensitive():
@@ -191,19 +195,20 @@ def test_list_microphones_never_raises(monkeypatch):
     """A soundcard that explodes at call time yields [], not a crash.
     (The fake goes into sys.modules: importing the real soundcard needs
     libpulse, which CI containers don't have.)"""
+
     def boom(*args, **kwargs):
         raise OSError("no server")
-    monkeypatch.setitem(
-        sys.modules, "soundcard",
-        SimpleNamespace(all_microphones=boom))
+
+    monkeypatch.setitem(sys.modules, "soundcard", SimpleNamespace(all_microphones=boom))
     assert listen.list_microphones() == []
 
 
 def test_list_microphones_shapes_devices(monkeypatch):
     monkeypatch.setitem(
-        sys.modules, "soundcard",
-        SimpleNamespace(
-            all_microphones=lambda include_loopback=False: _mics()))
+        sys.modules,
+        "soundcard",
+        SimpleNamespace(all_microphones=lambda include_loopback=False: _mics()),
+    )
     assert listen.list_microphones() == [
         ("alsa-0", "Built-in Audio Analog Stereo"),
         ("usb-1", "Blue Yeti Microphone"),
@@ -211,12 +216,13 @@ def test_list_microphones_shapes_devices(monkeypatch):
 
 
 def test_microphone_command_status_and_use(tmp_path):
-    from organism import Organism
-    from tui import OrganismApp
+    from replicanta.organism import Organism
+    from replicanta.tui import OrganismApp
+
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
     app.listener = Listener(mic_factory=_FakeMic)
-    app.handle_command("/microphone")          # status line, no crash
+    app.handle_command("/microphone")  # status line, no crash
     app.handle_command("/microphone use usb-1")
     assert app.listener.mic_spec == "usb-1"

@@ -25,34 +25,10 @@ listen = ["faster-whisper>=1.0", "soundcard>=0.4"]
 vision = ["opencv-python-headless>=4.8"]
 
 [project.scripts]
-replicanta = "tui:main"
+replicanta = "replicanta.tui:main"
 
-[tool.setuptools]
-py-modules = [
-    "activity",
-    "arena",
-    "camera",
-    "extensions",
-    "fileutil",
-    "goals",
-    "groupchat",
-    "hooks",
-    "learning",
-    "listen",
-    "llmclient",
-    "mud",
-    "narration",
-    "nursery",
-    "organism",
-    "probe",
-    "sentiment",
-    "skills",
-    "speech",
-    "tui",
-    "tui_commands",
-    "tui_views",
-    "voice",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 target-version = "py312"

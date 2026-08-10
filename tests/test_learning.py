@@ -2,21 +2,17 @@
 vocabulary sanitization, hear() assimilation into the belief store,
 and narration exposure of user facts."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import learning
-from learning import describe, extract
-from narration import build_prompt, state_snapshot
-from organism import Organism
-from probe import SystemProbe
+from replicanta import learning
+from replicanta.learning import describe, extract
+from replicanta.narration import build_prompt, state_snapshot
+from replicanta.organism import Organism
+from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path):
-    org = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc",
-                                               sys="/nonexistent/sys"))
+    org = Organism(
+        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
+    )
     org.load()
     return org
 
@@ -27,18 +23,21 @@ def _beliefs_only(facts):
 
 # -- extraction ---------------------------------------------------------------
 
+
 def test_extract_name():
     assert _beliefs_only(extract("my name is Sam")) == [("user", "name", "sam")]
 
 
 def test_extract_like_multiword():
-    assert _beliefs_only(extract("i really like ice cream")) == \
-        [("user", "like_ice_cream", "true")]
+    assert _beliefs_only(extract("i really like ice cream")) == [
+        ("user", "like_ice_cream", "true")
+    ]
 
 
 def test_extract_dislike():
-    assert _beliefs_only(extract("i hate loud noises")) == \
-        [("user", "dislike_loud_noises", "true")]
+    assert _beliefs_only(extract("i hate loud noises")) == [
+        ("user", "dislike_loud_noises", "true")
+    ]
 
 
 def test_extract_feeling():
@@ -47,18 +46,19 @@ def test_extract_feeling():
 
 
 def test_extract_you_are():
-    assert _beliefs_only(extract("you are beautiful")) == \
-        [("self", "described_as", "beautiful")]
+    assert _beliefs_only(extract("you are beautiful")) == [
+        ("self", "described_as", "beautiful")
+    ]
 
 
 def test_extract_your_trait():
-    assert _beliefs_only(extract("your color is blue")) == \
-        [("self", "color", "blue")]
+    assert _beliefs_only(extract("your color is blue")) == [("self", "color", "blue")]
 
 
 def test_extract_strips_filler():
-    assert _beliefs_only(extract("i like rain a lot")) == \
-        [("user", "like_rain", "true")]
+    assert _beliefs_only(extract("i like rain a lot")) == [
+        ("user", "like_rain", "true")
+    ]
 
 
 def test_questions_teach_nothing():
@@ -78,16 +78,17 @@ def test_extract_caps_per_message():
 
 # -- describe -----------------------------------------------------------------
 
+
 def test_describe_user_facts():
     assert describe(("user", "name", "sam")) == "your name is sam"
-    assert describe(("user", "like_ice_cream", "true")) == \
-        "you like ice cream"
+    assert describe(("user", "like_ice_cream", "true")) == "you like ice cream"
     assert describe(("user", "feeling", "happy")) == "you feel happy"
     assert describe(("self", "described_as", "brave")) == "you say I am brave"
     assert describe(("self", "color", "blue")) == "my color is blue"
 
 
 # -- hear() assimilation --------------------------------------------------------
+
 
 def test_hear_learns_and_reports(tmp_path):
     org = _organism(tmp_path)
@@ -101,8 +102,9 @@ def test_hear_learned_facts_persist(tmp_path):
     org = _organism(tmp_path)
     org.hear("i like rain")
     org.flush()
-    fresh = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc",
-                                                 sys="/nonexistent/sys"))
+    fresh = Organism(
+        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
+    )
     fresh.load()
     assert fresh.store.conf(("user", "like_rain", "true")) == 0.8
 
@@ -133,11 +135,14 @@ def test_learned_facts_render_into_genome(tmp_path):
     org = _organism(tmp_path)
     org.hear("i like rain")
     org.flush()
-    assert 'rel 0.8::bel("user", "like_rain", "true")' in \
-        (tmp_path / "organism.scl").read_text()
+    assert (
+        'rel 0.8::bel("user", "like_rain", "true")'
+        in (tmp_path / "organism.scl").read_text()
+    )
 
 
 # -- narration exposure ---------------------------------------------------------
+
 
 def test_snapshot_lists_user_facts(tmp_path):
     org = _organism(tmp_path)

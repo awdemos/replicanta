@@ -18,13 +18,19 @@ import os
 import threading
 
 SAMPLE_RATE = 16000
+
+
 def _stt_config():
     """(model, device, compute) for WhisperModel, read per call so the
     REPLICANTA_STT_* env overrides are not frozen at import."""
-    return (os.environ.get("REPLICANTA_STT_MODEL", "base"),
-            os.environ.get("REPLICANTA_STT_DEVICE", "cpu"),
-            os.environ.get("REPLICANTA_STT_COMPUTE", "int8"))
-MIN_SECONDS = 0.25   # shorter captures are treated as accidental taps
+    return (
+        os.environ.get("REPLICANTA_STT_MODEL", "base"),
+        os.environ.get("REPLICANTA_STT_DEVICE", "cpu"),
+        os.environ.get("REPLICANTA_STT_COMPUTE", "int8"),
+    )
+
+
+MIN_SECONDS = 0.25  # shorter captures are treated as accidental taps
 
 
 def _prime_resource_tracker():
@@ -68,8 +74,8 @@ def list_microphones():
     sound server is unavailable."""
     try:
         import soundcard as sc
-        return [(m.id, m.name)
-                for m in sc.all_microphones(include_loopback=False)]
+
+        return [(m.id, m.name) for m in sc.all_microphones(include_loopback=False)]
     except Exception:  # noqa: BLE001 — listing must never kill anything
         return []
 
@@ -77,6 +83,7 @@ def list_microphones():
 def _mono(frames):
     """soundcard frames ((n, channels) float32) -> mono 1-D float32."""
     import numpy as np
+
     audio = np.asarray(frames, dtype=np.float32)
     if audio.ndim == 2:
         audio = audio.mean(axis=1)
@@ -94,7 +101,7 @@ class Listener:
     def __init__(self, transcriber=None, mic_factory=None):
         self._transcriber = transcriber
         self._mic_factory = mic_factory
-        self.mic_spec = None     # chosen input device (id or name substring)
+        self.mic_spec = None  # chosen input device (id or name substring)
         self._thread = None
         self._chunks = []
         self._stop = threading.Event()
@@ -117,17 +124,20 @@ class Listener:
         self._chunks = []
         self._stop.clear()
         self._thread = threading.Thread(
-            target=self._capture, args=(mic,), daemon=True, name="listen")
+            target=self._capture, args=(mic,), daemon=True, name="listen"
+        )
         self._thread.start()
 
     def _open_mic(self):
         if self._mic_factory is not None:
             return self._mic_factory()
         import soundcard as sc
+
         if self.mic_spec is None:
             return sc.default_microphone()
         mic = match_microphone(
-            sc.all_microphones(include_loopback=False), self.mic_spec)
+            sc.all_microphones(include_loopback=False), self.mic_spec
+        )
         if mic is None:
             raise LookupError(f"no microphone matching {self.mic_spec!r}")
         return mic
@@ -140,8 +150,8 @@ class Listener:
             self.mic_spec = spec
             return spec
         import soundcard as sc
-        mic = match_microphone(
-            sc.all_microphones(include_loopback=False), spec)
+
+        mic = match_microphone(sc.all_microphones(include_loopback=False), spec)
         if mic is None:
             raise LookupError(f"no microphone matching {spec!r}")
         self.mic_spec = spec
@@ -151,6 +161,7 @@ class Listener:
         """End the capture; returns the recorded float32 mono audio at
         16 kHz (empty array when nothing was captured)."""
         import numpy as np
+
         self._stop.set()
         thread, self._thread = self._thread, None
         if thread is not None:
@@ -177,7 +188,8 @@ class Listener:
             if self._transcriber is not None:
                 return self._transcriber(audio).strip()
             segments, _info = self._load_model().transcribe(
-                audio, beam_size=5, vad_filter=True)
+                audio, beam_size=5, vad_filter=True
+            )
             return " ".join(s.text.strip() for s in segments).strip()
         except Exception:  # noqa: BLE001 — hearing must never kill anything
             return ""
@@ -186,8 +198,7 @@ class Listener:
         try:
             with mic.recorder(samplerate=SAMPLE_RATE) as rec:
                 while not self._stop.is_set():
-                    self._chunks.append(
-                        _mono(rec.record(numframes=SAMPLE_RATE // 10)))
+                    self._chunks.append(_mono(rec.record(numframes=SAMPLE_RATE // 10)))
         except Exception:  # noqa: BLE001 — device died mid-capture: "nothing heard"
             self._chunks = []
 
@@ -195,7 +206,7 @@ class Listener:
         with self._model_lock:
             if self._model is None:
                 from faster_whisper import WhisperModel
+
                 model, device, compute = _stt_config()
-                self._model = WhisperModel(
-                    model, device=device, compute_type=compute)
+                self._model = WhisperModel(model, device=device, compute_type=compute)
             return self._model

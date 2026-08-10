@@ -2,16 +2,12 @@
 win) plus the decision chain (prompt -> parse -> wanderer fallback).
 No LLM and no network: generate is always injected."""
 
-import sys
+import random
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-import random
-
-import mud
-from mud import MudGame, Room
+from replicanta import mud
+from replicanta.mud import MudGame, Room
 
 
 def _at(room="cave mouth"):
@@ -27,14 +23,15 @@ def _org(name="Testling", user="Tester"):
         store=SimpleNamespace(
             beliefs=lambda: beliefs,
             belief_value=lambda obj, attr, default=None: next(
-                (v for (o, _a, v) in beliefs if (o, _a) == (obj, attr)),
-                default),
+                (v for (o, _a, v) in beliefs if (o, _a) == (obj, attr)), default
+            ),
         ),
         dir_path=Path("testling"),
     )
 
 
 # -- the world -----------------------------------------------------------------
+
 
 def test_look_describes_room_and_exits():
     game = MudGame()
@@ -140,8 +137,16 @@ def test_rooms_are_copied_per_game():
 
 def test_full_walkthrough_wins():
     game = MudGame()
-    plan = ["go north", "take torch", "go east", "go down",
-            "take brass key", "go up", "go north", "take amulet"]
+    plan = [
+        "go north",
+        "take torch",
+        "go east",
+        "go down",
+        "take brass key",
+        "go up",
+        "go north",
+        "take amulet",
+    ]
     for cmd in plan:
         out = game.act(cmd)
     assert game.won and game.finished
@@ -151,8 +156,16 @@ def test_full_walkthrough_wins():
 def test_default_scenario_walkthrough():
     """The new Scenario dataclass path still supports the classic 8-turn win."""
     game = MudGame(mud.default_scenario())
-    plan = ["go north", "take torch", "go east", "go down",
-            "take brass key", "go up", "go north", "take amulet"]
+    plan = [
+        "go north",
+        "take torch",
+        "go east",
+        "go down",
+        "take brass key",
+        "go up",
+        "go north",
+        "take amulet",
+    ]
     for cmd in plan:
         game.act(cmd)
     assert game.won and game.finished
@@ -160,6 +173,7 @@ def test_default_scenario_walkthrough():
 
 
 # -- act_event / session -------------------------------------------------------
+
 
 def test_act_event_returns_turn_result():
     game = MudGame()
@@ -204,6 +218,7 @@ def test_mud_session_json_roundtrip():
 
 # -- rendering -----------------------------------------------------------------
 
+
 def test_render_map():
     game = MudGame()
     game.act("go north")
@@ -232,6 +247,7 @@ def test_render_quest():
 
 
 # -- parse ---------------------------------------------------------------------
+
 
 def test_parse_clean_command():
     assert mud.parse_action("go north") == "go north"
@@ -276,6 +292,7 @@ def test_parse_player_command_rejects_prose():
 
 # -- premise + prompt ----------------------------------------------------------
 
+
 def test_build_premise_names_organism_and_user():
     premise = mud.build_premise(_org(name="Glip", user="Ada"))
     assert "Glip" in premise
@@ -297,6 +314,7 @@ def test_action_prompt_includes_context():
 
 # -- fallback + choose ---------------------------------------------------------
 
+
 def test_fallback_prefers_unvisited_exits():
     game = _at()
     assert mud.fallback_action(game, random.Random(0)) == "go east"
@@ -309,7 +327,7 @@ def test_fallback_takes_what_is_here():
 
 
 def test_fallback_wanders_elsewhere():
-    game = MudGame()          # clearing: only exit is north
+    game = MudGame()  # clearing: only exit is north
     assert mud.fallback_action(game, random.Random(0)) == "go north"
 
 
@@ -321,9 +339,10 @@ def test_choose_uses_generated_command():
 
 def test_choose_falls_back_on_nonsense():
     game = MudGame()
-    cmd, _reason = mud.choose_action(game, rng=random.Random(0),
-                                     generate=lambda p: "purple elephants")
-    assert cmd == "go north"      # wanderer in the clearing
+    cmd, _reason = mud.choose_action(
+        game, rng=random.Random(0), generate=lambda p: "purple elephants"
+    )
+    assert cmd == "go north"  # wanderer in the clearing
 
 
 def test_choose_falls_back_on_exception():
@@ -349,10 +368,13 @@ def test_choose_passes_hint_into_prompt():
 
 # -- reasons ---------------------------------------------------------------------
 
+
 def test_parse_action_with_reason_splits_chatter():
     raw = "because the torch glows like a promise\ngo north"
     assert mud.parse_action_with_reason(raw) == (
-        "go north", "because the torch glows like a promise")
+        "go north",
+        "because the torch glows like a promise",
+    )
 
 
 def test_parse_action_with_reason_none_when_only_command():
@@ -362,7 +384,8 @@ def test_parse_action_with_reason_none_when_only_command():
 def test_choose_captures_stated_reason():
     game = MudGame()
     cmd, reason = mud.choose_action(
-        game, generate=lambda p: "because the dark hall pulls at me\ngo north")
+        game, generate=lambda p: "because the dark hall pulls at me\ngo north"
+    )
     assert cmd == "go north"
     assert reason == "because the dark hall pulls at me"
 
@@ -391,8 +414,7 @@ def test_choose_uses_org_voice_when_org_is_given():
     old_arena = patch.ThoughtArena
     try:
         patch.ThoughtArena = FakeArena
-        cmd, reason = mud.choose_action(game, org=_org(name="Glip",
-                                                        user="Ada"))
+        cmd, reason = mud.choose_action(game, org=_org(name="Glip", user="Ada"))
     finally:
         patch.ThoughtArena = old_arena
     assert cmd == "go north"
@@ -416,8 +438,7 @@ def test_choose_uses_injected_generate_even_when_org_given():
     old_arena = patch.ThoughtArena
     try:
         patch.ThoughtArena = FakeArena
-        cmd, _reason = mud.choose_action(
-            game, org=_org(), generate=lambda p: "go east")
+        cmd, _reason = mud.choose_action(game, org=_org(), generate=lambda p: "go east")
     finally:
         patch.ThoughtArena = old_arena
     assert cmd == "go east"
@@ -425,23 +446,27 @@ def test_choose_uses_injected_generate_even_when_org_given():
 
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
-    cmd, reason = mud.choose_action(game, rng=random.Random(0),
-                                    generate=lambda p: "purple elephants")
+    cmd, reason = mud.choose_action(
+        game, rng=random.Random(0), generate=lambda p: "purple elephants"
+    )
     assert cmd == "go north"
     assert "silent" in reason
 
 
 def test_choose_reason_scrubs_prompt_echoes():
     game = MudGame()
-    raw = ("Draft a candidate answer, following the task instruction "
-           "above exactly.\n"
-           "because the key glints\ngo down")
+    raw = (
+        "Draft a candidate answer, following the task instruction "
+        "above exactly.\n"
+        "because the key glints\ngo down"
+    )
     cmd, reason = mud.choose_action(game, generate=lambda p: raw)
     assert cmd == "go down"
     assert reason == "because the key glints"
 
 
 # -- scenario generation -------------------------------------------------------
+
 
 def test_validate_scenario():
     data = {
@@ -486,8 +511,9 @@ def test_validate_scenario_falls_back_on_bad_exits():
 
 
 def test_generate_scenario_uses_default_on_bad_json():
-    scenario = mud.generate_scenario("haunted space station", _org(),
-                                     generate=lambda p: "not json")
+    scenario = mud.generate_scenario(
+        "haunted space station", _org(), generate=lambda p: "not json"
+    )
     assert scenario.title == "The Amulet of Vatox"
 
 
@@ -518,8 +544,9 @@ def test_generate_scenario_parses_valid_json():
             },
         },
     }
-    scenario = mud.generate_scenario("tower", _org(),
-                                     generate=lambda p: __import__("json").dumps(data))
+    scenario = mud.generate_scenario(
+        "tower", _org(), generate=lambda p: __import__("json").dumps(data)
+    )
     assert scenario.title == "The Tiny Tower"
 
 
@@ -537,7 +564,9 @@ def test_scenario_json_roundtrip():
     assert recovered.win_condition == scenario.win_condition
     assert set(recovered.rooms) == set(scenario.rooms)
     assert recovered.rooms["dark hall"].locked["north"] == (
-        "brass key", "The rusty gate is locked tight.")
+        "brass key",
+        "The rusty gate is locked tight.",
+    )
 
 
 def test_loaded_scenario_is_playable(tmp_path):
@@ -548,8 +577,16 @@ def test_loaded_scenario_is_playable(tmp_path):
     path.write_text(json.dumps(mud.scenario_to_json(mud.default_scenario())))
     scenario = mud.scenario_from_json(json.loads(path.read_text()))
     game = MudGame(scenario)
-    plan = ["go north", "take torch", "go east", "go down",
-            "take brass key", "go up", "go north", "take amulet"]
+    plan = [
+        "go north",
+        "take torch",
+        "go east",
+        "go down",
+        "take brass key",
+        "go up",
+        "go north",
+        "take amulet",
+    ]
     for cmd in plan:
         game.act(cmd)
     assert game.won and game.finished
@@ -557,6 +594,7 @@ def test_loaded_scenario_is_playable(tmp_path):
 
 
 # -- win conditions ------------------------------------------------------------
+
 
 def test_room_based_win_condition():
     scenario = mud.Scenario(

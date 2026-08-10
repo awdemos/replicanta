@@ -9,27 +9,46 @@ temp:cpu=hot, time:hour=fourteen)."""
 
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-LOAD_LOW = 0.5      # load1/ncpu below this -> "low"
-LOAD_MID = 1.0      # load1/ncpu below this -> "mid", else "high"
-MEM_LOW = 50.0      # percent used below this -> "low"
-MEM_MID = 80.0      # percent used below this -> "mid", else "high"
-DISK_LOW = 10.0     # percent free below this -> "low"
-DISK_MID = 30.0     # percent free below this -> "mid", else "ok"
-TEMP_COOL = 50.0    # celsius below this -> "cool"
-TEMP_WARM = 80.0    # celsius below this -> "warm", else "hot"
+LOAD_LOW = 0.5  # load1/ncpu below this -> "low"
+LOAD_MID = 1.0  # load1/ncpu below this -> "mid", else "high"
+MEM_LOW = 50.0  # percent used below this -> "low"
+MEM_MID = 80.0  # percent used below this -> "mid", else "high"
+DISK_LOW = 10.0  # percent free below this -> "low"
+DISK_MID = 30.0  # percent free below this -> "mid", else "ok"
+TEMP_COOL = 50.0  # celsius below this -> "cool"
+TEMP_WARM = 80.0  # celsius below this -> "warm", else "hot"
 BATTERY_LOW = 20.0  # percent below this -> "low", else "ok"
-UPTIME_BRIEF = 3600.0    # seconds below this -> "brief"
-UPTIME_DAY = 86400.0     # seconds below this -> "day", else "long"
+UPTIME_BRIEF = 3600.0  # seconds below this -> "brief"
+UPTIME_DAY = 86400.0  # seconds below this -> "day", else "long"
 
 # hour of the UTC clock as a symbolic value (VALID_VALUE_RE: letters only)
 HOUR_WORDS = (
-    "midnight", "one", "two", "three", "four", "five", "six",
-    "seven", "eight", "nine", "ten", "eleven", "twelve",
-    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-    "eighteen", "nineteen", "twenty", "twenty_one", "twenty_two",
+    "midnight",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "twenty_one",
+    "twenty_two",
     "twenty_three",
 )
 
@@ -56,8 +75,9 @@ def _host_uname():
     """`uname -snrm` — the host's identity as one line (e.g.
     'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable."""
     try:
-        out = subprocess.run(["uname", "-snrm"], capture_output=True,
-                             text=True, timeout=2, check=False)
+        out = subprocess.run(
+            ["uname", "-snrm"], capture_output=True, text=True, timeout=2, check=False
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     if out.returncode != 0:
@@ -69,25 +89,27 @@ class SystemProbe:
     """Reads live system metrics. All sources are injectable so tests can
     point at fake /proc and /sys trees."""
 
-    def __init__(self, proc="/proc", sys="/sys", ncpu=None, statvfs=None,
-                 clock=None, uname=None):
+    def __init__(
+        self, proc="/proc", sys="/sys", ncpu=None, statvfs=None, clock=None, uname=None
+    ):
         self.proc = Path(proc)
         self.sys = Path(sys)
         self.ncpu = ncpu if ncpu is not None else os.cpu_count() or 1
         self._statvfs = statvfs or os.statvfs
-        self._clock = clock if clock is not None \
-            else (lambda: datetime.now(timezone.utc))
+        self._clock = (
+            clock if clock is not None else (lambda: datetime.now(UTC))
+        )
         self._uname = uname if uname is not None else _host_uname
-        self._prev_cpu = None   # (idle, total) from the previous stat read
-        self._adverse_seen = set()   # adverse beliefs already counted
+        self._prev_cpu = None  # (idle, total) from the previous stat read
+        self._adverse_seen = set()  # adverse beliefs already counted
 
     def _clock_now(self):
         """The wall clock, always normalized to UTC (naive clocks are
         assumed to already be UTC)."""
         now = self._clock()
         if now.tzinfo is None:
-            return now.replace(tzinfo=timezone.utc)
-        return now.astimezone(timezone.utc)
+            return now.replace(tzinfo=UTC)
+        return now.astimezone(UTC)
 
     def clock_utc(self):
         """Computer time as 'HH:MM UTC' (e.g. '14:30 UTC')."""
@@ -123,7 +145,7 @@ class SystemProbe:
         try:
             line = (self.proc / "stat").read_text().splitlines()[0]
             fields = [int(v) for v in line.split()[1:]]
-            idle = fields[3] + fields[4]          # idle + iowait
+            idle = fields[3] + fields[4]  # idle + iowait
             total = sum(fields)
         except (OSError, ValueError, IndexError):
             return None
@@ -141,10 +163,16 @@ class SystemProbe:
     def _mem_percent(self):
         try:
             info = (self.proc / "meminfo").read_text()
-            total = int(next(l for l in info.splitlines()
-                             if l.startswith("MemTotal:")).split()[1])
-            avail = int(next(l for l in info.splitlines()
-                             if l.startswith("MemAvailable:")).split()[1])
+            total = int(
+                next(l for l in info.splitlines() if l.startswith("MemTotal:")).split()[
+                    1
+                ]
+            )
+            avail = int(
+                next(
+                    l for l in info.splitlines() if l.startswith("MemAvailable:")
+                ).split()[1]
+            )
         except (OSError, ValueError, IndexError, StopIteration):
             return None
         if total <= 0:
@@ -209,30 +237,60 @@ class SystemProbe:
         """Continuous metrics -> discrete (obj, attr, val) beliefs."""
         b = {}
         if snap["load_ratio"] is not None:
-            lvl = ("low" if snap["load_ratio"] < LOAD_LOW
-                   else "mid" if snap["load_ratio"] < LOAD_MID else "high")
+            lvl = (
+                "low"
+                if snap["load_ratio"] < LOAD_LOW
+                else "mid"
+                if snap["load_ratio"] < LOAD_MID
+                else "high"
+            )
             b[("cpu", "load", lvl)] = 0.9
         if snap["mem_percent"] is not None:
-            lvl = ("low" if snap["mem_percent"] < MEM_LOW
-                   else "mid" if snap["mem_percent"] < MEM_MID else "high")
+            lvl = (
+                "low"
+                if snap["mem_percent"] < MEM_LOW
+                else "mid"
+                if snap["mem_percent"] < MEM_MID
+                else "high"
+            )
             b[("mem", "usage", lvl)] = 0.9
         if snap["disk_free_percent"] is not None:
-            lvl = ("low" if snap["disk_free_percent"] < DISK_LOW
-                   else "mid" if snap["disk_free_percent"] < DISK_MID else "ok")
+            lvl = (
+                "low"
+                if snap["disk_free_percent"] < DISK_LOW
+                else "mid"
+                if snap["disk_free_percent"] < DISK_MID
+                else "ok"
+            )
             b[("disk", "space", lvl)] = 0.9
         if snap["temp_c"] is not None:
-            lvl = ("cool" if snap["temp_c"] < TEMP_COOL
-                   else "warm" if snap["temp_c"] < TEMP_WARM else "hot")
+            lvl = (
+                "cool"
+                if snap["temp_c"] < TEMP_COOL
+                else "warm"
+                if snap["temp_c"] < TEMP_WARM
+                else "hot"
+            )
             b[("temp", "cpu", lvl)] = 0.9
         if snap["battery_percent"] is not None:
-            lvl = ("low" if snap["battery_percent"] < BATTERY_LOW else "ok")
+            lvl = "low" if snap["battery_percent"] < BATTERY_LOW else "ok"
             b[("battery", "level", lvl)] = 0.9
             if snap["battery_charging"] is not None:
-                b[("battery", "charging",
-                   "true" if snap["battery_charging"] else "false")] = 0.9
+                b[
+                    (
+                        "battery",
+                        "charging",
+                        "true" if snap["battery_charging"] else "false",
+                    )
+                ] = 0.9
         if snap["uptime_s"] is not None:
-            lvl = ("brief" if snap["uptime_s"] < UPTIME_BRIEF
-                   else "day" if snap["uptime_s"] < UPTIME_DAY else "long")
+            lvl = (
+                "brief"
+                if snap["uptime_s"] < UPTIME_BRIEF
+                else "day"
+                if snap["uptime_s"] < UPTIME_DAY
+                else "long"
+            )
             b[("system", "uptime", lvl)] = 0.9
         b[("time", "hour", HOUR_WORDS[snap["clock_hour"]])] = 0.9
         return b

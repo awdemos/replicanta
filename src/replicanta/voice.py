@@ -5,42 +5,52 @@ over narration.py's prompts and fallbacks. This module is the seam that
 keeps the dependency graph acyclic: arena imports narration (prompts),
 voice imports both, narration imports neither."""
 
-import extensions
-import narration
-from arena import ThoughtArena
-from narration import dedup_emerge, state_snapshot
-from skills import Skill
+from replicanta import extensions, narration
+from replicanta.arena import ThoughtArena
+from replicanta.narration import dedup_emerge, state_snapshot
+from replicanta.skills import Skill
 
 
 def narrate(org, model=None, timeout=None, rng=None):
     """First-person idle thought, or None when the only thoughts on
     offer restate what was just said — silence beats an echo."""
     return dedup_emerge(
-        org,
-        lambda: ThoughtArena(rng=rng).emerge(org, model=model,
-                                             timeout=timeout))
+        org, lambda: ThoughtArena(rng=rng).emerge(org, model=model, timeout=timeout)
+    )
 
 
-def respond(org, user_text, model=None, timeout=None, rng=None,
-            on_token=None, quick=False):
+def respond(
+    org, user_text, model=None, timeout=None, rng=None, on_token=None, quick=False
+):
     """First-person reply to the user; quick=True uses one cleaned
     generation for many-speaker contexts. The winner is replayed
     through on_token in word chunks."""
     return ThoughtArena(rng=rng).emerge(
-        org, user_message=user_text,
+        org,
+        user_message=user_text,
         fallback=lambda snap: narration.fallback_respond(snap, user_text),
-        on_token=on_token, model=model, timeout=timeout, quick=quick)
+        on_token=on_token,
+        model=model,
+        timeout=timeout,
+        quick=quick,
+    )
 
 
 # -- skills: reflection loop -------------------------------------------------
+
 
 def reflect(org, model=None, timeout=None, rng=None):
     """One reflection cycle: distill a skill, patch one, or 'nothing'.
     Structured task, parsed and applied to the skill store; offline or
     unparseable is a quiet no-op — never a fake skill."""
     text = ThoughtArena(rng=rng).emerge(
-        org, task="reflect", structured=True,
-        fallback=lambda _snap: None, model=model, timeout=timeout)
+        org,
+        task="reflect",
+        structured=True,
+        fallback=lambda _snap: None,
+        model=model,
+        timeout=timeout,
+    )
     if text is None:
         return {"action": "none"}
     result = narration.parse_reflect(text)
@@ -53,7 +63,8 @@ def reflect(org, model=None, timeout=None, rng=None):
         entry = extensions.propose(
             org.dir_path / "artifacts" / "extensions.json",
             result["entry"],
-            auto_apply=getattr(org.store, "auto_apply_patches", True))
+            auto_apply=getattr(org.store, "auto_apply_patches", True),
+        )
         if entry is not None:
             result["applied"] = entry
         return result
@@ -63,53 +74,75 @@ def reflect(org, model=None, timeout=None, rng=None):
     if result["action"] == "patched" and store.get(result["name"]) is None:
         result["action"] = "created"
     cycle = org.store.cycle
-    store.save(Skill(name=result["name"], when=result["when"],
-                     how=result["how"], created_cycle=cycle,
-                     updated_cycle=cycle))
+    store.save(
+        Skill(
+            name=result["name"],
+            when=result["when"],
+            how=result["how"],
+            created_cycle=cycle,
+            updated_cycle=cycle,
+        )
+    )
     if hasattr(org, "record_self_model"):
         if result["action"] == "patched":
             org.record_self_model(
-                f"I refine my skill {result['name']} when {result['when']}")
+                f"I refine my skill {result['name']} when {result['when']}"
+            )
         else:
-            org.record_self_model(
-                f"I tend to {result['name']} when {result['when']}")
+            org.record_self_model(f"I tend to {result['name']} when {result['when']}")
     return result
 
 
 # -- goals --------------------------------------------------------------------
 
+
 def form_goal(org, model=None, timeout=None, rng=None):
     """One concrete intention grounded in what the organism knows;
     deterministic goal offline."""
     return ThoughtArena(rng=rng).emerge(
-        org, task="form_goal", structured=True,
+        org,
+        task="form_goal",
+        structured=True,
         fallback=lambda snap: narration.fallback_form_goal(snap, rng),
-        model=model, timeout=timeout)
+        model=model,
+        timeout=timeout,
+    )
 
 
 # -- artifacts ----------------------------------------------------------------
+
 
 def diary_entry(org, model=None, timeout=None, rng=None):
     """One short diary entry about recent days; deterministic entry
     offline."""
     return ThoughtArena(rng=rng).emerge(
-        org, task="diary", structured=True,
-        fallback=narration.fallback_diary_entry, model=model,
-        timeout=timeout)
+        org,
+        task="diary",
+        structured=True,
+        fallback=narration.fallback_diary_entry,
+        model=model,
+        timeout=timeout,
+    )
 
 
 # -- curiosity toward the user -------------------------------------------------
+
 
 def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
     """One curious question for the user, grounded in a seed;
     deterministic question offline."""
     return ThoughtArena(rng=rng).emerge(
-        org, task="ask_user",
-        fallback=narration.fallback_ask_user, on_token=on_token,
-        model=model, timeout=timeout)
+        org,
+        task="ask_user",
+        fallback=narration.fallback_ask_user,
+        on_token=on_token,
+        model=model,
+        timeout=timeout,
+    )
 
 
 # -- self-talk ----------------------------------------------------------------
+
 
 def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
     """One self-question, steered away from its own recent questions;
@@ -117,35 +150,43 @@ def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
     question = dedup_emerge(
         org,
         lambda: ThoughtArena(rng=rng).emerge(
-            org, task="self_ask",
-            fallback=narration.fallback_self_ask, on_token=on_token,
-            model=model, timeout=timeout))
+            org,
+            task="self_ask",
+            fallback=narration.fallback_self_ask,
+            on_token=on_token,
+            model=model,
+            timeout=timeout,
+        ),
+    )
     if question is None:
         question = narration.fallback_self_ask(state_snapshot(org))
     return question
 
 
-def self_answer(org, question, model=None, timeout=None, rng=None,
-                on_token=None):
+def self_answer(org, question, model=None, timeout=None, rng=None, on_token=None):
     """First-person answer to the organism's own question;
     deterministic reply offline or on repeat."""
     answer = dedup_emerge(
         org,
         lambda: ThoughtArena(rng=rng).emerge(
-            org, task="self_answer", question=question,
-            fallback=lambda snap: narration.fallback_self_answer(
-                snap, question),
-            on_token=on_token, model=model, timeout=timeout))
+            org,
+            task="self_answer",
+            question=question,
+            fallback=lambda snap: narration.fallback_self_answer(snap, question),
+            on_token=on_token,
+            model=model,
+            timeout=timeout,
+        ),
+    )
     if answer is None:
-        answer = narration.fallback_self_answer(state_snapshot(org),
-                                                question)
+        answer = narration.fallback_self_answer(state_snapshot(org), question)
     return answer
 
 
 # -- mud companion --------------------------------------------------------------
 
-def mud_decide(org, user_message, model=None, timeout=None, rng=None,
-                 on_token=None):
+
+def mud_decide(org, user_message, model=None, timeout=None, rng=None, on_token=None):
     """One MUD move chosen by the organism itself.
 
     The game situation is passed as the user message; the thought arena
@@ -155,6 +196,11 @@ def mud_decide(org, user_message, model=None, timeout=None, rng=None,
     usable, so the caller can fall back to the wanderer.
     """
     return ThoughtArena(rng=rng).emerge(
-        org, task="mud", user_message=user_message,
-        fallback=lambda _snap: None, on_token=on_token,
-        model=model, timeout=timeout)
+        org,
+        task="mud",
+        user_message=user_message,
+        fallback=lambda _snap: None,
+        on_token=on_token,
+        model=model,
+        timeout=timeout,
+    )
