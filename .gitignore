@@ -30,3 +30,8 @@ wheels/
 .idea/
 *.swp
 *~
+
+# session exports / runtime artifacts
+groups.json
+kimi-export-*.md
+session-ses_*.md
