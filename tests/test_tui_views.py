@@ -177,6 +177,13 @@ def test_inner_renderable_shows_mental_state(org):
     assert "curious" in text
 
 
+def test_inner_renderable_uses_gauge_bars(org):
+    org.store.arousal = 0.75
+    text = _render(tui_views.inner_renderable(org), width=80)
+    assert "█" in text, "expected solid bar characters in the renderable output"
+    assert "0.75" in text
+
+
 def test_inner_renderable_shows_loop_and_arena(org):
     org.store.activity = {
         "rules_tried": 4, "derivations": 2, "rules_committed": 1,

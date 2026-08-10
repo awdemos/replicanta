@@ -46,7 +46,7 @@ import speech
 import tui_commands
 import tui_views
 import voice
-from tui_views import STYLE_DIM, STYLE_ORG
+from tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
 from organism import Organism
 
 
@@ -236,7 +236,6 @@ class CellDetailScreen(ModalScreen):
 
 
 # role -> log style (Rich markup); engine events get their own styles
-STYLE_USER = "cyan"
 STYLE_DREAM = "magenta"
 STYLE_LEARNED = "yellow"
 STYLE_SELF = "italic yellow"

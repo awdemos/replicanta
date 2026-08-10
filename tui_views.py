@@ -189,7 +189,7 @@ def inner_renderable(org):
                 }.get(label, "blue")
                 grid.add_row(
                     label,
-                    Bar(size=1.0, begin=0.0, end=value, width=20, color=color),
+                    Bar(size=1.0, begin=0.0, end=value, width=24, color=color),
                     f"{value:.2f}",
                 )
         panels.append(Panel(grid, title="mental state", border_style="cyan"))
@@ -212,7 +212,7 @@ def inner_renderable(org):
                 size=1.0,
                 begin=0.0,
                 end=derived / max(tried, 1),
-                width=20,
+                width=24,
                 color="green",
             ),
             f"{tried} questions → {derived} derivations "
@@ -223,8 +223,8 @@ def inner_renderable(org):
             Bar(
                 size=1.0,
                 begin=0.0,
-                end=committed / max(derived, 1),
-                width=20,
+                end=min(committed / max(derived, 1), 1.0),
+                width=24,
                 color="blue",
             ),
             f"{committed} rules committed · {promoted} dreams "

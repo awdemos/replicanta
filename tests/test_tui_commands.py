@@ -77,9 +77,12 @@ def test_help_text_lists_all_commands_and_keys():
     text = help_text()
     for name in COMMAND_NAMES:
         assert name in text
-    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "F7", "ctrl+q",
+    for key in ("ctrl+p", "F1", "ctrl+s", "ctrl+t", "F7", "F8", "ctrl+q",
                 "tab", "up/down"):
         assert key in text
+    assert "mental-state gauges" in text
+    assert "thought metabolism" in text
+    assert "neural memory grid" in text
 
 
 def test_history_push_strips_and_skips_empty():
