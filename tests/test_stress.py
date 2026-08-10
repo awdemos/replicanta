@@ -154,7 +154,7 @@ def test_discarded_dream_bumps_stress(tmp_path):
     before = meter.value
     unsupported = [{"rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
                     "combo": "red_true", "head": "q99"}]
-    engine.validate(unsupported)
+    engine.promote(unsupported)
     assert meter.value == pytest.approx(before + 0.04)
 
 
@@ -182,7 +182,7 @@ def test_promoted_dream_no_stress(tmp_path):
     engine.rng = __import__("random").Random(42)
     before = meter.value
     dreams = engine.dream(count=5)
-    engine.validate(dreams)
+    engine.promote(dreams)
     assert meter.value == pytest.approx(before)
 
 

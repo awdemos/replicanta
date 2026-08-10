@@ -20,7 +20,8 @@ from llmclient import seed_for as _seed_for  # noqa: F401
 
 
 def state_snapshot(org):
-    """Compact text-ready snapshot of the organism's mind."""
+    """Compact text-ready snapshot of the organism's mind. Also records
+    an activity snapshot (activity.record_digest) as a side effect."""
     m = org.metrics()
     top_beliefs = sorted(org.store.beliefs().items(),
                          key=lambda kv: -kv[1])[:6]

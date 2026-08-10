@@ -233,7 +233,7 @@ def test_dream_validates_and_promotes(tmp_path):
     engine = _make_dreamer(tmp_path)
     engine.rng = random.Random(42)
     dreams = engine.dream(count=5)
-    promoted = engine.validate(dreams)
+    promoted = engine.promote(dreams)
     # at least one dream should promote (apple/ball share color+shape)
     assert len(promoted) >= 1
 
@@ -241,7 +241,7 @@ def test_dream_discards_unsupported(tmp_path):
     engine = _make_dreamer(tmp_path)
     unsupported = [{"rule": 'q99(x) = bel(x, "color", "red"), bel(x, "drinkable", "true")',
                     "combo": "red_true", "head": "q99"}]
-    promoted = engine.validate(unsupported)
+    promoted = engine.promote(unsupported)
     assert promoted == []
 
 from organism import Lifecycle, Metrics
@@ -470,7 +470,7 @@ def test_tui_narrate_stays_dream_when_sleeping(tmp_path):
     app = OrganismApp(org)
     calls = []
     app._self_talk_on = True
-    org.lifecycle._transition("sleep")
+    org.lifecycle.transition("sleep")
     app.refresh_status = lambda: None
     app._maybe_self_talk = lambda: calls.append("self_talk")
     app._narrate = lambda: calls.append("narrate")

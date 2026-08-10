@@ -60,7 +60,8 @@ def is_stalled(goal, cycle, current):
 
 
 def goal_progress(store):
-    """Return a human-readable progress line for the active goal."""
+    """Return a human-readable progress line for the active goal, or
+    None when no goal is active."""
     goal = store.active_goal()
     if not goal:
         return None

@@ -66,7 +66,7 @@ class BeliefStore:
         self.last_diary_cycle = 0
         self.last_reflect_cycle = 0
         self.activity = {}       # neurosymbolic activity counters (activity.py)
-        self._surprise_this_tick = False
+        self.surprise_this_tick = False
         self.on_adverse = None   # callback(amount) fired on contradiction
         self.on_utterance = None # callback(role, text) fired on chat lines
         self.dirty = False        # any state changed since last save()
@@ -90,7 +90,7 @@ class BeliefStore:
         })
         while len(surprises) > 10:
             surprises.pop(0)
-        self._surprise_this_tick = True
+        self.surprise_this_tick = True
 
     def add(self, belief, conf):
         obj, attr, val = belief
@@ -508,10 +508,11 @@ class SelfQuestioner:
     beliefs. With chaos probability, generalizes a successful derivation
     into a committed rule."""
 
-    def __init__(self, store, mind, dir_path):
+    def __init__(self, store, mind, dir_path, stress=None):
         self.store = store
         self.mind = mind
         self.dir_path = dir_path
+        self.stress = stress
 
     def _next_rule_id(self):
         self.store.rule_counter += 1
@@ -529,7 +530,7 @@ class SelfQuestioner:
         self.store.note_activity("rules_tried")
         derived = self.mind.query_rule(rule, head)
         if not derived:
-            if getattr(self, "stress", None) is not None:
+            if self.stress is not None:
                 self.stress.bump(0.01)  # failed question = adverse
             return []
         attr_a, val_a = attr_val_a
@@ -567,10 +568,11 @@ class DreamEngine:
     against the reasoner; supported dreams promote to committed rules and
     derived beliefs; unsupported dreams are discarded with a log line."""
 
-    def __init__(self, store, mind):
+    def __init__(self, store, mind, stress=None):
         self.store = store
         self.mind = mind
         self.rng = random.Random()
+        self.stress = stress
 
     def _attr_val_pairs(self):
         return sorted({(a, v) for (_o, a, v) in self.store.beliefs()})
@@ -591,7 +593,9 @@ class DreamEngine:
             dreams.append({"rule": rule, "combo": combo, "head": head})
         return dreams
 
-    def validate(self, dreams):
+    def promote(self, dreams):
+        """Promote supported dreams: commits their rules, adds the derived
+        beliefs, bumps stress on discards and records the memory."""
         promoted = []
         for dream in dreams:
             derived = self.mind.query_rule(dream["rule"], dream["head"])
@@ -599,7 +603,7 @@ class DreamEngine:
                 self.store.note_activity("dreams_discarded")
                 self.store.activity["discarded_streak"] = \
                     self.store.activity.get("discarded_streak", 0) + 1
-                if getattr(self, "stress", None) is not None:
+                if self.stress is not None:
                     self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
             self.store.note_activity("dreams_promoted")
@@ -645,9 +649,9 @@ class Lifecycle:
             return self.state
         self.store.cycle += 1
         if self.state == "wake":
-            self._transition("sleep")
+            self.transition("sleep")
         else:
-            self._transition("wake")
+            self.transition("wake")
         return self.state
 
     def advance(self):
@@ -660,7 +664,7 @@ class Lifecycle:
             self.store.save()
             return "dead"
         new_state = "sleep" if self.state == "wake" else "wake"
-        self._transition(new_state)
+        self.transition(new_state)
         return new_state
 
     def _track_fade(self):
@@ -672,7 +676,7 @@ class Lifecycle:
             if self.store.fade_streak >= self.FADE_LIMIT:
                 self.store.remember(
                     "faded", f"faded at cycle {self.store.cycle}")
-                self._transition("dead")
+                self.transition("dead")
         else:
             self.store.fade_streak = 0
 
@@ -681,9 +685,9 @@ class Lifecycle:
         cleared. `store.save()` still needs to be called by the caller."""
         self.store.fade_streak = 0
         self.store.stress = StressMeter.BASELINE
-        self._transition("wake")
+        self.transition("wake")
 
-    def _transition(self, new_state):
+    def transition(self, new_state):
         self.state = new_state
         self.state_started = time.time()
 
@@ -753,10 +757,11 @@ class Organism:
         self.store = BeliefStore(dir_path)
         self.mind = Mind(dir_path / "organism.scl")
         self.window = AttentionWindow(self.store.beliefs())
-        self.questioner = SelfQuestioner(self.store, self.mind, dir_path)
-        self.dreamer = DreamEngine(self.store, self.mind)
-        self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.meter = StressMeter(self.store)
+        self.questioner = SelfQuestioner(self.store, self.mind, dir_path,
+                                         stress=self.meter)
+        self.dreamer = DreamEngine(self.store, self.mind, stress=self.meter)
+        self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.mental = MentalState(self.store)
         self.probe = probe if probe is not None else SystemProbe()
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
@@ -765,8 +770,6 @@ class Organism:
             lambda role, text: self.hooks.fire("utterance", self, text=text)
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
-        self.questioner.stress = self.meter
-        self.dreamer.stress = self.meter
         self._since_sense = self.SENSE_INTERVAL  # sense on the first tick
         self._since_save = 0.0
         self._last_stress_band = 0
@@ -788,7 +791,7 @@ class Organism:
         self.store.scl_path = self.dir_path / "organism.scl"
         self.store.state_path = self.dir_path / "state.json"
         if self.store.fade_streak >= Lifecycle.FADE_LIMIT:
-            self.lifecycle._transition("dead")
+            self.lifecycle.transition("dead")
         for obj in LEGACY_OBJECTS:
             self.store.beliefs_map = {(o, a, v): c for (o, a, v), c
                                       in self.store.beliefs_map.items()
@@ -828,7 +831,7 @@ class Organism:
         for name in self.skills.archive_stale(
                 self.store.cycle, limit=self.SKILL_STALE_CYCLES):
             self.store.remember("skill", f"archived: {name}")
-        for name in self.skills.flush(self.store.cycle):
+        for name in self.skills.flush():
             self.store.remember("skill", f"deprecated low-effectiveness: {name}")
         genome = self.store.genome_dirty
         self.store.save()
@@ -847,7 +850,7 @@ class Organism:
         events = []
         if self.lifecycle.state == "dead":
             return events
-        self.store._surprise_this_tick = False
+        self.store.surprise_this_tick = False
         was_insane = self.store.insane
         self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)
         if self.mental.tick(sleeping=(self.lifecycle.state == "sleep"),
@@ -887,7 +890,7 @@ class Organism:
                 and not reflect_triggered:
             events.append({"kind": "want_reflect"})
             reflect_triggered = True
-        if getattr(self.store, "_surprise_this_tick", False) \
+        if self.store.surprise_this_tick \
                 and not reflect_triggered:
             events.append({"kind": "want_reflect"})
             reflect_triggered = True
@@ -1090,7 +1093,7 @@ class Organism:
             raise ValueError(f"cannot force state {target!r}")
         if self.lifecycle.state == "dead" or self.lifecycle.state == target:
             return []
-        self.lifecycle._transition(target)
+        self.lifecycle.transition(target)
         if target == "sleep":
             promoted = self._sleep()
             return [{"kind": "state", "to": "sleep"},
@@ -1146,7 +1149,7 @@ class Organism:
     def _sleep(self):
         self.dreamer.rng = random.Random()
         dreams = self.dreamer.dream(count=3)
-        promoted = self.dreamer.validate(dreams)
+        promoted = self.dreamer.promote(dreams)
         self.store.attention = self.window.pairs
         self.flush(force=True)
         return promoted

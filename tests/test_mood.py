@@ -131,7 +131,7 @@ def test_revive_clears_mood_state(tmp_path):
     org = _organism(tmp_path)
     org.hear("you are garbage")
     assert _mood_belief(org) == "hurt"
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
     org.revive()
     events = org.tick(1.0)
     assert {"kind": "mood", "mood": "calm"} in events

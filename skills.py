@@ -135,7 +135,7 @@ class SkillStore:
                 archived.append(self._archive(skill))
         return archived
 
-    def flush(self, cycle):
+    def flush(self):
         """Archive skills that stayed below the effectiveness floor after
         enough uses. Returns the names archived."""
         archived = []

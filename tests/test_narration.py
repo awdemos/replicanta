@@ -138,7 +138,7 @@ def test_felt_experience_reacts_to_stress(org):
 
 
 def _sleep(org):
-    org.lifecycle._transition("sleep")
+    org.lifecycle.transition("sleep")
 
 
 def test_build_prompt_dream_intro_when_sleeping(org):
@@ -207,26 +207,26 @@ def test_fallback_summary_wake(org):
 
 
 def test_fallback_summary_sleep(org):
-    org.lifecycle._transition("sleep")
+    org.lifecycle.transition("sleep")
     text = fallback_summary(state_snapshot(org))
     assert "dreaming" in text and "cycle 3" in text
 
 
 def test_fallback_summary_dead(org):
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
     text = fallback_summary(state_snapshot(org))
     assert "faded" in text and "2 beliefs" in text and "light" in text
 
 
 def test_fallback_respond_dead(org):
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
     text = fallback_respond(state_snapshot(org), "still there?")
     assert "faded" in text and "still there?" in text
     assert "Thank you for speaking to me" in text
 
 
 def _dead(org):
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
 
 
 def test_build_prompt_dead_intro(org):

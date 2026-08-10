@@ -82,7 +82,7 @@ def test_dream_validation_counts_promoted_and_discarded(tmp_path):
     org.flush(force=True)
     dreams = org.dreamer.dream(count=1)
     org.store.chaos = 0.0   # no random rule-commit muddies the counts
-    org.dreamer.validate(dreams)
+    org.dreamer.promote(dreams)
     a = org.store.activity
     assert a.get("dreams_promoted", 0) + a.get("dreams_discarded", 0) == 1
 

@@ -43,6 +43,13 @@ ROGUE_THOUGHT = ("Draft a rogue thought of your own, spun from nowhere - "
 TEMP_MIN = 0.7      # lower bound for the per-round temperature jitter
 TEMP_MAX = 0.85     # upper bound
 
+
+class NoUsableCandidateError(ValueError):
+    """The model responded but every candidate was unusable — a content
+    failure, not a transport failure, so it must not mark the voice
+    offline. Subclasses ValueError so existing except-ValueError callers
+    still catch it."""
+
 # candidate cleaning (meta preambles, echoed instructions,
 # repetition loops) lives in llmclient; the alias keeps the
 # existing import seam for callers and tests.
@@ -113,6 +120,10 @@ class ThoughtArena:
             else:
                 result = self._debate(org, snapshot, build, model,
                                       timeout, surprise, temperature)
+        except NoUsableCandidateError:
+            # content failure (model answered, nothing usable) — the
+            # voice itself is fine, so don't mark it offline
+            return self._fallback(org.store, snapshot, user_message, fallback)
         except (urllib.error.URLError, OSError, ValueError, RuntimeError):
             llmclient.note_voice_failure()
             return self._fallback(org.store, snapshot, user_message, fallback)
@@ -147,7 +158,7 @@ class ThoughtArena:
                                temperature, org=org)
         draft = _clean_candidate(draft)
         if not draft:
-            raise ValueError("quick take produced no usable candidate")
+            raise NoUsableCandidateError("quick take produced no usable candidate")
         return draft
 
     def _debate(self, org, snapshot, build, model, timeout,
@@ -170,7 +181,7 @@ class ThoughtArena:
         drafts = [_clean_candidate(d) for d in drafts]
         drafts = [d for d in drafts if d]
         if not drafts:
-            raise ValueError("debate produced no usable candidate")
+            raise NoUsableCandidateError("debate produced no usable candidate")
         if len(drafts) == 1:
             return drafts[0]
         critique = self._generate(

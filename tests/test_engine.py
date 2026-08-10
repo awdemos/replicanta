@@ -61,7 +61,7 @@ def test_tick_fades_to_dead_event_under_critical_stress(tmp_path):
 
 def test_tick_on_dead_is_quiet(tmp_path):
     org = _organism(tmp_path)
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
     assert org.tick(1.0) == []
 
 
@@ -155,7 +155,7 @@ def test_force_state_rejects_unknown_target(tmp_path):
 
 def test_force_state_dead_is_noop(tmp_path):
     org = _organism(tmp_path)
-    org.lifecycle._transition("dead")
+    org.lifecycle.transition("dead")
     assert org.force_state("sleep") == []
 
 
