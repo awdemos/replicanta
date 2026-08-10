@@ -41,7 +41,7 @@ def _is_learn_goal(text):
     return any(text.lower().startswith(p) for p in LEARN_GOAL_PREFIXES)
 
 
-def update_progress(goal, current, cycle):
+def update_progress(goal, cycle, current):
     """Stamp progress on a goal so stalled detection can compare."""
     if current != goal.get("last_progress_current", -1):
         goal["last_progress_current"] = current

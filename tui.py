@@ -1028,11 +1028,10 @@ class OrganismApp(App):
             return
         hint, self._mud_hint = self._mud_hint, None
         gen = self._mud_turn_gen
-        choice = {}
-        command = mud.choose_action(game, hint=hint, rng=self._rng,
-                                    org=self.org, out=choice)
+        command, reason = mud.choose_action(game, hint=hint, rng=self._rng,
+                                            org=self.org)
         self.call_from_thread(self._mud_apply, game, command, "organism",
-                              gen, choice.get("reason"))
+                              gen, reason)
 
     def _mud_apply(self, game, command, actor="organism", gen=None,
                    reason=None):

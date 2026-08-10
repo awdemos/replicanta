@@ -925,11 +925,11 @@ class Organism:
                 facts = sum(1 for (o, _a, _v) in self.store.beliefs()
                             if o == "user")
                 done = facts >= goal["marker"] + self.GOAL_LEARN_GROWTH
-                goals.update_progress(goal, facts, self.store.cycle)
+                goals.update_progress(goal, self.store.cycle, facts)
             else:
                 progress = self.store.cycle - goal["created_cycle"]
                 done = progress >= self.GOAL_PURSUIT_CYCLES
-                goals.update_progress(goal, progress, self.store.cycle)
+                goals.update_progress(goal, self.store.cycle, progress)
             if done:
                 finished = self.store.complete_active_goal()
                 self.store.remember(

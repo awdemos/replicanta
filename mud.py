@@ -489,12 +489,11 @@ def fallback_action(game, rng):
     return "go " + rng.choice(sorted(room.exits))
 
 
-def choose_action(game, hint=None, rng=None, generate=None, org=None,
-                  out=None):
+def choose_action(game, hint=None, rng=None, generate=None, org=None):
     """The organism's next move: ask the voice, parse it, fall back to
-    the wanderer when the voice is silent or speaks nonsense. When
-    `out` is a dict, the organism's stated reason (or the honest
-    fallback excuse) is stored under "reason"."""
+    the wanderer when the voice is silent or speaks nonsense. Returns
+    (command, reason) — the reason is the organism's stated because-line,
+    or the honest fallback excuse when the wanderer chose."""
     rng = rng if rng is not None else random.Random()
     if generate is None:
         def generate(prompt):
@@ -515,9 +514,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None,
     if command is None:
         command = fallback_action(game, rng)
         reason = "the inner voice was silent — wandering on instinct"
-    if out is not None:
-        out["reason"] = reason
-    return command
+    return command, reason
 
 
 # -- scenario generation -------------------------------------------------------

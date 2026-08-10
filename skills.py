@@ -116,17 +116,20 @@ class SkillStore:
             skill.effectiveness = max(0.0, min(1.0, skill.effectiveness))
         atomic_write_text(self._path(skill.name), self._render(skill))
 
+    def _archive(self, skill):
+        """Move one skill file into archive/; returns the skill name."""
+        archive = self.dir_path / "archive"
+        archive.mkdir(parents=True, exist_ok=True)
+        self._path(skill.name).rename(archive / self._path(skill.name).name)
+        return skill.name
+
     def archive_stale(self, cycle, limit=100):
         """Move skills untouched for `limit` cycles to archive/; returns
         the names archived."""
         archived = []
         for skill in self.list():
             if cycle - skill.updated_cycle >= limit:
-                archive = self.dir_path / "archive"
-                archive.mkdir(parents=True, exist_ok=True)
-                self._path(skill.name).rename(
-                    archive / self._path(skill.name).name)
-                archived.append(skill.name)
+                archived.append(self._archive(skill))
         return archived
 
     def flush(self, cycle):
@@ -135,11 +138,7 @@ class SkillStore:
         archived = []
         for skill in self.list():
             if skill.uses >= 10 and skill.effectiveness < 0.2:
-                archive = self.dir_path / "archive"
-                archive.mkdir(parents=True, exist_ok=True)
-                self._path(skill.name).rename(
-                    archive / self._path(skill.name).name)
-                archived.append(skill.name)
+                archived.append(self._archive(skill))
         return archived
 
     def relevant(self, context, limit=3):

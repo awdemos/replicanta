@@ -312,14 +312,14 @@ def test_fallback_wanders_elsewhere():
 
 def test_choose_uses_generated_command():
     game = MudGame()
-    cmd = mud.choose_action(game, generate=lambda p: "go north")
+    cmd, _reason = mud.choose_action(game, generate=lambda p: "go north")
     assert cmd == "go north"
 
 
 def test_choose_falls_back_on_nonsense():
     game = MudGame()
-    cmd = mud.choose_action(game, rng=random.Random(0),
-                            generate=lambda p: "purple elephants")
+    cmd, _reason = mud.choose_action(game, rng=random.Random(0),
+                                     generate=lambda p: "purple elephants")
     assert cmd == "go north"      # wanderer in the clearing
 
 
@@ -329,7 +329,7 @@ def test_choose_falls_back_on_exception():
     def boom(prompt):
         raise RuntimeError("voice offline")
 
-    assert mud.choose_action(game, generate=boom) == "go north"
+    assert mud.choose_action(game, generate=boom)[0] == "go north"
 
 
 def test_choose_passes_hint_into_prompt():
@@ -358,39 +358,34 @@ def test_parse_action_with_reason_none_when_only_command():
 
 def test_choose_captures_stated_reason():
     game = MudGame()
-    out = {}
-    cmd = mud.choose_action(
-        game, out=out,
-        generate=lambda p: "because the dark hall pulls at me\ngo north")
+    cmd, reason = mud.choose_action(
+        game, generate=lambda p: "because the dark hall pulls at me\ngo north")
     assert cmd == "go north"
-    assert out["reason"] == "because the dark hall pulls at me"
+    assert reason == "because the dark hall pulls at me"
 
 
 def test_choose_reason_none_when_voice_gives_only_command():
     game = MudGame()
-    out = {}
-    mud.choose_action(game, out=out, generate=lambda p: "go north")
-    assert out["reason"] is None
+    _cmd, reason = mud.choose_action(game, generate=lambda p: "go north")
+    assert reason is None
 
 
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
-    out = {}
-    cmd = mud.choose_action(game, rng=random.Random(0), out=out,
-                            generate=lambda p: "purple elephants")
+    cmd, reason = mud.choose_action(game, rng=random.Random(0),
+                                    generate=lambda p: "purple elephants")
     assert cmd == "go north"
-    assert "silent" in out["reason"]
+    assert "silent" in reason
 
 
 def test_choose_reason_scrubs_prompt_echoes():
     game = MudGame()
-    out = {}
     raw = ("Draft a candidate answer, following the task instruction "
            "above exactly.\n"
            "because the key glints\ngo down")
-    cmd = mud.choose_action(game, out=out, generate=lambda p: raw)
+    cmd, reason = mud.choose_action(game, generate=lambda p: raw)
     assert cmd == "go down"
-    assert out["reason"] == "because the key glints"
+    assert reason == "because the key glints"
 
 
 # -- scenario generation -------------------------------------------------------

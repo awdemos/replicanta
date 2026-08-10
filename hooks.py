@@ -98,21 +98,31 @@ class HookEngine:
         org.store.attention = org.window.pairs
 
     # -- firing --------------------------------------------------------------
+    def _ensure_runtime(self):
+        """Lazily init the Lua runtime. Returns the disabled message when
+        lupa is missing (and latches _available False), None on success.
+        Caller must hold self._lock."""
+        if self._available is False:
+            return "lua hooks disabled: the 'lupa' package is not installed"
+        try:
+            if self._lua is None:
+                self._lua = self._runtime()
+                self._available = True
+        except ImportError:
+            self._available = False
+            return "lua hooks disabled: the 'lupa' package is not installed"
+        return None
+
     def fire(self, event, org, text=None):
         """Call on_<event>(ctx) in every script. Never raises."""
         if not self.scripts or event not in EVENTS:
             return
         with self._lock:
-            if self._available is False:
-                return
-            try:
-                if self._lua is None:
-                    self._lua = self._runtime()
-                    self._available = True
-            except ImportError:
-                self._available = False
-                self.emit("lua hooks disabled: the 'lupa' package "
-                          "is not installed")
+            was_latched = self._available is False
+            disabled = self._ensure_runtime()
+            if disabled is not None:
+                if not was_latched:
+                    self.emit(disabled)
                 return
             ctx = self._ctx(org, event, text)
             for script in self.scripts:
@@ -134,16 +144,9 @@ class HookEngine:
         if not script.is_file():
             return f"/lua: no {name} in {self.scripts_dir}"
         with self._lock:
-            if self._available is False:
-                return "lua hooks disabled: the 'lupa' package is not installed"
-            try:
-                if self._lua is None:
-                    self._lua = self._runtime()
-                    self._available = True
-            except ImportError:
-                self._available = False
-                return ("lua hooks disabled: the 'lupa' package "
-                        "is not installed")
+            disabled = self._ensure_runtime()
+            if disabled is not None:
+                return disabled
             try:
                 self._lua.execute(script.read_text())
                 main = self._lua.globals()["main"]
