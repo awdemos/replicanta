@@ -9,10 +9,10 @@ from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import narration
+import llmclient
 import pytest
 from arena import ThoughtArena
-from narration import probe_voice, voice_online, voice_status
+from llmclient import probe_voice, voice_online, voice_status
 from organism import BeliefStore, Lifecycle, Metrics
 from conftest import patch_generate
 
@@ -95,9 +95,9 @@ def test_voice_unknown_before_any_probe():
 def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
     calls = []
     patch_generate(monkeypatch, lambda *a, **k: calls.append(1) or "should not happen")
-    narration.reset_voice()
-    narration.note_voice_failure()
-    narration.note_voice_failure()   # streak -> offline
+    llmclient.reset_voice()
+    llmclient.note_voice_failure()
+    llmclient.note_voice_failure()   # streak -> offline
     text = ThoughtArena().emerge(org)
     assert calls == []
     assert "belief" in text  # deterministic fallback summary
@@ -115,9 +115,9 @@ def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
 
 def test_arena_success_clears_offline(org, monkeypatch):
     patch_generate(monkeypatch, lambda *a, **k: "a clear small thought")
-    narration.note_voice_failure()
-    narration.note_voice_failure()
+    llmclient.note_voice_failure()
+    llmclient.note_voice_failure()
     assert voice_online() is False
-    narration.reset_voice()
+    llmclient.reset_voice()
     ThoughtArena().emerge(org)
     assert voice_online() is True

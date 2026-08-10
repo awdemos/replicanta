@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import extensions
-import narration
+import llmclient
 import pytest
 import speech
 
@@ -28,10 +28,10 @@ def patch_generate(monkeypatch, fake):
 
 @pytest.fixture(autouse=True)
 def _reset_voice_state():
-    narration.reset_voice()
+    llmclient.reset_voice()
     extensions.reset()
     speech.reset()
     yield
-    narration.reset_voice()
+    llmclient.reset_voice()
     extensions.reset()
     speech.reset()

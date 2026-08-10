@@ -136,7 +136,7 @@ def test_structured_tasks_never_go_rogue(org, monkeypatch):
     patch_generate(monkeypatch, lambda prompt, *a, **k: calls.append(prompt) or "x")
     org.store.chaos = 1.0
     out = ThoughtArena(rng=_AlwaysZero()).emerge(
-        org, prompt_kwargs={"reflect": True}, structured=True,
+        org, task="reflect", structured=True,
         fallback=lambda _snap: None)
     assert out == "x"
     assert len(calls) == 5
@@ -149,7 +149,7 @@ def test_task_fallback_used_on_debate_failure(org, monkeypatch):
         raise RuntimeError("ollama down")
 
     patch_generate(monkeypatch, boom)
-    out = ThoughtArena().emerge(org, prompt_kwargs={"ask_user": True},
+    out = ThoughtArena().emerge(org, task="ask_user",
                                 fallback=lambda _snap: "fallback question?")
     assert out == "fallback question?"
 

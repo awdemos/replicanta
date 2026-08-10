@@ -40,7 +40,7 @@ import fileutil
 import groupchat
 import listen
 import mud
-import narration
+import llmclient
 import nursery
 import speech
 import tui_commands
@@ -507,7 +507,7 @@ class OrganismApp(App):
                   f"{s.irrationality:.2f}")
         mic = " 🎙" if self.listener.recording else ""
         spoken = " 🔊" if speech.enabled else ""
-        voice = narration.voice_status()
+        voice = llmclient.voice_status()
         clock = self.org.probe.clock_utc()
         text = (f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · "
                 f"{mental}  │  {voice}{mic}{spoken}  {clock}")
@@ -798,7 +798,7 @@ class OrganismApp(App):
                 "see /camera list)", STYLE_WARN)
             return
         try:
-            sight = narration.describe_image(frame)
+            sight = llmclient.describe_image(frame)
         except Exception as exc:  # noqa: BLE001 — vision model offline etc.
             self.call_from_thread(
                 self._append_log, f"sight failed: {exc}", STYLE_WARN)
@@ -1099,7 +1099,7 @@ class OrganismApp(App):
         if not args:
             self._append_log(
                 f"camera: /dev/video{self.camera.device} · vision model "
-                f"{narration.VISION_MODEL} · /camera list · "
+                f"{llmclient.VISION_MODEL} · /camera list · "
                 "/camera use <device>", STYLE_DIM)
             return
         if args[0] == "list":
@@ -1237,14 +1237,14 @@ class OrganismApp(App):
     @work(thread=True)
     def _probe_voice_worker(self):
         try:
-            narration.probe_voice()
+            llmclient.probe_voice()
         finally:
             self._probing_voice = False
         self.call_from_thread(self._announce_voice)
 
     def _announce_voice(self):
         """Tell the user once per voice-state flip how the organism speaks."""
-        state = narration.voice_status()
+        state = llmclient.voice_status()
         if state != self._voice_announced:
             self._voice_announced = state
             if state == "offline":
@@ -1389,7 +1389,7 @@ class OrganismApp(App):
         self._bottombar_text = (
             f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
             f"{m.rule_count} rules · inner voice "
-            f"{narration.voice_status()}{spoken}{mic}{playing} · "
+            f"{llmclient.voice_status()}{spoken}{mic}{playing} · "
             f"{self.org.probe.clock_utc()}{busy}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)")

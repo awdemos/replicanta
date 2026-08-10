@@ -10,6 +10,7 @@ from typing import ClassVar
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import extensions
+import llmclient
 import learning
 import sentiment
 
@@ -141,7 +142,7 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
     extensions.approve(_path(tmp_path))
     import random
     snap = narration.state_snapshot(FakeOrg(tmp_path))
-    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(80)}
+    seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(80)}
     assert "a question about gravity" in seeds
 
 

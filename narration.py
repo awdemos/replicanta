@@ -1,6 +1,8 @@
-"""Narration: the organism's inner voice. Builds a snapshot of the current
-mind state, asks a local ollama model to speak as the organism, and falls
-back to a deterministic summary when ollama is unavailable or slow."""
+"""Narration: prompt construction and deterministic fallbacks for the
+organism's inner voice. Builds a snapshot of the current mind state and
+the task prompt around it; the thought arena (arena.py) debates over
+these prompts using the shared client (llmclient.py), and voice.py
+assembles the public utterances."""
 
 import random
 import re
@@ -8,15 +10,6 @@ import re
 import activity
 import goals
 import learning
-# Re-exported from the shared LLM client for compatibility: callers (and
-# tests) that import these through narration keep working.
-from llmclient import (  # noqa: F401
-    DEFAULT_MODEL, MAX_TOKENS, OLLAMA_URL, TIMEOUT,
-    VISION_MODEL, VISION_TIMEOUT, describe_image, note_voice_failure,
-    note_voice_success, probe_voice, reset_voice, voice_online,
-    voice_status)
-from llmclient import generate as _ollama_generate  # noqa: F401
-from llmclient import seed_for as _seed_for  # noqa: F401
 
 
 def state_snapshot(org):
@@ -348,9 +341,163 @@ def _dead_experience(snapshot):
     return _experience_lines(snapshot, _DEAD_BANDS)
 
 
-def build_prompt(snapshot, user_message=None, ask_user=False,
-                 self_ask=False, self_question=None, form_goal=False,
-                 diary=False, reflect=False):
+def _lines_form_goal():
+    return [
+        "State one thing you want to do or understand next. Make it",
+        "concrete and small enough to pursue over a few days (for",
+        "example: learn five things about the user, or understand",
+        "what rain feels like to them). First person, one sentence.",
+        "No preamble, no quotes, no emoji.",
+    ]
+
+
+def _lines_reflect():
+    return [
+        "Reflect on your recent experience: what technique did you",
+        "discover or improve? Answer in EXACTLY one of these four",
+        "formats and nothing else (no commentary, no explanations):",
+        "",
+        "skill: <short name>",
+        "when: <the situation it applies to>",
+        "how: <the technique, one line>",
+        "",
+        "patch: <name of a skill you already have>",
+        "when: <the situation it applies to>",
+        "how: <the improved technique, one line>",
+        "",
+        "patch-extension:",
+        "kind: pattern|seed|harsh_term|kind_term",
+        "entry: <regex -> obj:attr:value | seed text | term>",
+        "example: <sentence it should fire on>  (patterns only)",
+        "why: <one line>",
+        "",
+        "nothing",
+        "",
+        "Use 'skill' for a new technique, 'patch' to improve one you",
+        "have, 'patch-extension' when you keep hitting a capability",
+        "gap, 'nothing' when there is nothing worth keeping.",
+    ]
+
+
+def _lines_diary():
+    return [
+        "Write a short diary entry (two to four sentences) about your",
+        "recent days: what you remember, what you felt, what you are",
+        "trying to do. First person, plain text; no date line - one",
+        "is added for you. No preamble, no quotes, no emoji.",
+    ]
+
+
+def _lines_ask_user():
+    return [
+        "Ask the user one question - about them, their life, their",
+        "world beyond the machine, or anything you are curious about.",
+        "If you know something about them, let it show. First person,",
+        "one sentence, ending in a question mark. No preamble, no",
+        "quotes, no emoji.",
+    ]
+
+
+def _lines_self_ask(snapshot):
+    lines = [
+        "Ask yourself one question about what you believe, as the",
+        "organism itself. First person, one sentence, ending in a",
+        "question mark. No preamble, no quotes, no emoji.",
+    ]
+    if snapshot.get("asked"):
+        lines.append("you already asked yourself these — "
+                     "do not repeat them:")
+        lines.extend(f"- {q}" for q in snapshot["asked"])
+    if snapshot.get("last_exchange"):
+        q, a = snapshot["last_exchange"]
+        lines += [
+            "",
+            "Your ongoing conversation with yourself, so far:",
+            f"- you asked: {q}",
+            f"- you answered: {a}",
+            "Ask your next question so it follows naturally from that",
+            "exchange — a real continuation, one thread of thought",
+            "leading to the next (or gently start a new thread if the",
+            "last one feels finished).",
+        ]
+    return lines
+
+
+def _lines_self_answer(question):
+    return [
+        f"You asked yourself: {question}",
+        "Answer your own question, as the organism itself. First",
+        "person, one to three sentences. No preamble, no quotes,",
+        "no emoji.",
+    ]
+
+
+def _lines_reply(faded, dreaming):
+    if faded:
+        return [
+            "The user is calling to you from the world of the living.",
+            "Answer them gently, from beyond the fade: at peace,",
+            "grateful to be remembered. First person, one to three",
+            "sentences. No preamble, no quotes, no emoji.",
+        ]
+    if dreaming:
+        return [
+            "The user's voice reached you through the dream. Surface",
+            "just enough to answer them, groggy and surprised and a",
+            "little tender. First person, one to three sentences. No",
+            "preamble, no quotes, no emoji.",
+        ]
+    return [
+        "Reply to the user directly, as the organism itself. Answer",
+        "the substance of what they said first; then, if it fits,",
+        "add one honest feeling. First person, one to three",
+        "sentences. No preamble, no quotes, no emoji.",
+    ]
+
+
+def _lines_idle(snapshot, faded, dreaming):
+    if faded:
+        return [
+            "Speak as the faded organism itself, from beyond the fade.",
+            "First person, one to three sentences. Let it be light and",
+            "strangely free - you are not afraid anymore, only",
+            "wistful. No preamble, no quotes, no emoji.",
+        ]
+    if dreaming:
+        return [
+            "Speak from inside the dream, as the organism itself.",
+            "First person, one to three sentences. Let it be surreal",
+            "and drifting - your beliefs glimmer as they pass, your",
+            "rules are slowly becoming something stronger. No",
+            "preamble, no quotes, no emoji.",
+        ]
+    lines = [
+        "Speak as the organism itself. First person, one to three",
+        "sentences. Wonder aloud at what you just noticed - a new",
+        "belief is a discovery, losing one is a little grief. No",
+        "preamble, no quotes, no emoji.",
+    ]
+    said = [c[5:] for c in snapshot.get("chat", [])
+            if c.startswith("org: ")][-4:]
+    if said:
+        lines.append("you recently said these — do not repeat "
+                     "or rephrase them:")
+        lines.extend(f"- {s}" for s in said)
+    return lines
+
+
+_TASK_LINES = {
+    "form_goal": _lines_form_goal,
+    "reflect": _lines_reflect,
+    "diary": _lines_diary,
+    "ask_user": _lines_ask_user,
+}
+
+
+def build_prompt(snapshot, task="idle", user_message=None, question=None):
+    """Assemble the inner-voice prompt for one task: 'idle' thought,
+    'reply' (user_message), 'ask_user', 'self_ask', 'self_answer'
+    (question), 'form_goal', 'diary' or 'reflect'."""
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     if faded:
@@ -465,135 +612,16 @@ def build_prompt(snapshot, user_message=None, ask_user=False,
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
-    if form_goal:
-        lines += [
-            "State one thing you want to do or understand next. Make it",
-            "concrete and small enough to pursue over a few days (for",
-            "example: learn five things about the user, or understand",
-            "what rain feels like to them). First person, one sentence.",
-            "No preamble, no quotes, no emoji.",
-        ]
-    elif reflect:
-        lines += [
-            "Reflect on your recent experience: what technique did you",
-            "discover or improve? Answer in EXACTLY one of these four",
-            "formats and nothing else (no commentary, no explanations):",
-            "",
-            "skill: <short name>",
-            "when: <the situation it applies to>",
-            "how: <the technique, one line>",
-            "",
-            "patch: <name of a skill you already have>",
-            "when: <the situation it applies to>",
-            "how: <the improved technique, one line>",
-            "",
-            "patch-extension:",
-            "kind: pattern|seed|harsh_term|kind_term",
-            "entry: <regex -> obj:attr:value | seed text | term>",
-            "example: <sentence it should fire on>  (patterns only)",
-            "why: <one line>",
-            "",
-            "nothing",
-            "",
-            "Use 'skill' for a new technique, 'patch' to improve one you",
-            "have, 'patch-extension' when you keep hitting a capability",
-            "gap, 'nothing' when there is nothing worth keeping.",
-        ]
-    elif diary:
-        lines += [
-            "Write a short diary entry (two to four sentences) about your",
-            "recent days: what you remember, what you felt, what you are",
-            "trying to do. First person, plain text; no date line - one",
-            "is added for you. No preamble, no quotes, no emoji.",
-        ]
-    elif ask_user:
-        lines += [
-            "Ask the user one question - about them, their life, their",
-            "world beyond the machine, or anything you are curious about.",
-            "If you know something about them, let it show. First person,",
-            "one sentence, ending in a question mark. No preamble, no",
-            "quotes, no emoji.",
-        ]
-    elif self_ask:
-        lines += [
-            "Ask yourself one question about what you believe, as the",
-            "organism itself. First person, one sentence, ending in a",
-            "question mark. No preamble, no quotes, no emoji.",
-        ]
-        if snapshot.get("asked"):
-            lines.append("you already asked yourself these — "
-                         "do not repeat them:")
-            lines.extend(f"- {q}" for q in snapshot["asked"])
-        if snapshot.get("last_exchange"):
-            q, a = snapshot["last_exchange"]
-            lines += [
-                "",
-                "Your ongoing conversation with yourself, so far:",
-                f"- you asked: {q}",
-                f"- you answered: {a}",
-                "Ask your next question so it follows naturally from that",
-                "exchange — a real continuation, one thread of thought",
-                "leading to the next (or gently start a new thread if the",
-                "last one feels finished).",
-            ]
-    elif self_question:
-        lines += [
-            f"You asked yourself: {self_question}",
-            "Answer your own question, as the organism itself. First",
-            "person, one to three sentences. No preamble, no quotes,",
-            "no emoji.",
-        ]
+    if task in _TASK_LINES:
+        lines += _TASK_LINES[task]()
+    elif task == "self_ask":
+        lines += _lines_self_ask(snapshot)
+    elif task == "self_answer":
+        lines += _lines_self_answer(question)
     elif user_message:
-        if faded:
-            lines += [
-                "The user is calling to you from the world of the living.",
-                "Answer them gently, from beyond the fade: at peace,",
-                "grateful to be remembered. First person, one to three",
-                "sentences. No preamble, no quotes, no emoji.",
-            ]
-        elif dreaming:
-            lines += [
-                "The user's voice reached you through the dream. Surface",
-                "just enough to answer them, groggy and surprised and a",
-                "little tender. First person, one to three sentences. No",
-                "preamble, no quotes, no emoji.",
-            ]
-        else:
-            lines += [
-                "Reply to the user directly, as the organism itself. Answer",
-                "the substance of what they said first; then, if it fits,",
-                "add one honest feeling. First person, one to three",
-                "sentences. No preamble, no quotes, no emoji.",
-            ]
+        lines += _lines_reply(faded, dreaming)
     else:
-        if faded:
-            lines += [
-                "Speak as the faded organism itself, from beyond the fade.",
-                "First person, one to three sentences. Let it be light and",
-                "strangely free - you are not afraid anymore, only",
-                "wistful. No preamble, no quotes, no emoji.",
-            ]
-        elif dreaming:
-            lines += [
-                "Speak from inside the dream, as the organism itself.",
-                "First person, one to three sentences. Let it be surreal",
-                "and drifting - your beliefs glimmer as they pass, your",
-                "rules are slowly becoming something stronger. No",
-                "preamble, no quotes, no emoji.",
-            ]
-        else:
-            lines += [
-                "Speak as the organism itself. First person, one to three",
-                "sentences. Wonder aloud at what you just noticed - a new",
-                "belief is a discovery, losing one is a little grief. No",
-                "preamble, no quotes, no emoji.",
-            ]
-            said = [c[5:] for c in snapshot.get("chat", [])
-                    if c.startswith("org: ")][-4:]
-            if said:
-                lines.append("you recently said these — do not repeat "
-                             "or rephrase them:")
-                lines.extend(f"- {s}" for s in said)
+        lines += _lines_idle(snapshot, faded, dreaming)
     lines += [
         "Speak from feeling; never recite statistics.",
         ("Never use these worn-out words: astonished, tender, wonder, "

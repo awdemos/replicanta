@@ -65,23 +65,24 @@ class ThoughtArena:
         self._timeout = timeout
 
     # -- public ----------------------------------------------------------
-    def emerge(self, org, user_message=None, prompt_kwargs=None,
+    def emerge(self, org, user_message=None, task="idle", question=None,
                fallback=None, structured=False, on_token=None,
                model=None, timeout=None, quick=False):
         """Run a full debate and return the winning candidate.
 
-        prompt_kwargs are forwarded to narration.build_prompt to select
-        the task (ask_user, self_ask, self_question, form_goal, diary,
-        reflect); user_message selects the reply task. fallback is a
-        callable taking the state snapshot, used when the voice is
-        offline or the debate fails (default: the local summary/reply).
-        structured=True suppresses the rogue-thought injection so the
-        output contract (e.g. the reflection format) survives. The
-        debate itself cannot stream, so a winner is replayed through
-        on_token in word chunks to keep the incremental display alive.
-        quick=True replaces the five-call debate with a single cleaned
-        generation — for many-speaker contexts (group chat) where a
-        full debate per utterance would cost minutes.
+        task selects the prompt shape (idle, ask_user, self_ask,
+        self_answer, form_goal, diary, reflect); question carries the
+        self-question for the self_answer task; user_message selects the
+        reply task. fallback is a callable taking the state snapshot,
+        used when the voice is offline or the debate fails (default: the
+        local summary/reply). structured=True suppresses the
+        rogue-thought injection so the output contract (e.g. the
+        reflection format) survives. The debate itself cannot stream, so
+        a winner is replayed through on_token in word chunks to keep the
+        incremental display alive. quick=True replaces the five-call
+        debate with a single cleaned generation — for many-speaker
+        contexts (group chat) where a full debate per utterance would
+        cost minutes.
         """
         model = (model or self._model
                  or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL))
@@ -111,8 +112,8 @@ class ThoughtArena:
         # instant instead of paying an ollama timeout on every utterance
         if llmclient.voice_online() is False:
             return self._fallback(org.store, snapshot, user_message, fallback)
-        build = {"user_message": user_message}
-        build.update(prompt_kwargs or {})
+        build = {"task": task, "user_message": user_message,
+                 "question": question}
         try:
             if quick:
                 result = self._quick_take(org, snapshot, build, model,

@@ -17,7 +17,6 @@ from narration import (
     _dead_experience,
     _dream_experience,
     _felt_experience,
-    _ollama_generate,
     build_prompt,
     fallback_respond,
     fallback_summary,
@@ -284,7 +283,7 @@ def test_ollama_generate_parses_response(monkeypatch):
         return FakeResp(json.dumps({"response": "hello"}).encode())
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-    assert _ollama_generate("prompt", "qwen2.5:3b", 5) == "hello"
+    assert llmclient.generate("prompt", "qwen2.5:3b", 5) == "hello"
 
 
 def test_ollama_generate_raises_on_connection_error(monkeypatch):
@@ -293,7 +292,7 @@ def test_ollama_generate_raises_on_connection_error(monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", boom)
     with pytest.raises(urllib.error.URLError):
-        _ollama_generate("prompt", "qwen2.5:3b", 5)
+        llmclient.generate("prompt", "qwen2.5:3b", 5)
 
 
 def test_narrate_falls_back_on_ollama_error_field(org, monkeypatch):
@@ -364,7 +363,7 @@ def test_every_prompt_forbids_reciting_statistics(org):
 
 def test_seed_pool_draws_from_lived_state(org):
     snap = state_snapshot(org)
-    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(20)}
+    seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(20)}
     assert len(seeds) > 1  # rotation actually varies
 
 
@@ -430,19 +429,19 @@ def test_seed_pool_excludes_env_metrics(org):
     org.store.add(("cpu", "load", "high"), 0.9)
     org.store.add(("self", "wants", "rain"), 0.9)
     snap = state_snapshot(org)
-    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(50)}
+    seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(50)}
     assert not any("cpu" in s for s in seeds)
 
 
 def test_seed_pool_includes_imaginative_seeds(org):
     snap = state_snapshot(org)
-    seeds = {narration._seed_for(snap, random.Random(i)) for i in range(50)}
+    seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(50)}
     assert any("wonder" in s or "cannot verify" in s or "ask the user" in s
                for s in seeds)
 
 
 def test_build_prompt_ask_user_branch(org):
-    prompt = build_prompt(state_snapshot(org), ask_user=True)
+    prompt = build_prompt(state_snapshot(org), task="ask_user")
     assert "Ask the user one question" in prompt
     assert "ending in a question mark" in prompt
 
@@ -490,7 +489,7 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 
 
 def test_default_model_is_qwen3_5():
-    assert narration.DEFAULT_MODEL == "qwen3.5:latest"
+    assert llmclient.DEFAULT_MODEL == "qwen3.5:latest"
 
 
 def test_strip_think_removes_block():
@@ -524,7 +523,7 @@ def test_ollama_generate_disables_thinking(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    _ollama_generate("prompt", "qwen3:14b", 5)
+    llmclient.generate("prompt", "qwen3:14b", 5)
     assert b'"think": false' in captured["body"]
 
 
@@ -542,7 +541,7 @@ def test_ollama_generate_strips_think_block(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda *a, **k: _Resp())
-    assert _ollama_generate("prompt", "m", 5) == "clean answer"
+    assert llmclient.generate("prompt", "m", 5) == "clean answer"
 
 
 def test_build_prompt_shows_voice_examples(org):
@@ -654,17 +653,17 @@ def test_musing_prompt_steers_away_from_recent_musings(org):
 
 def test_seed_for_avoids_recent_seeds(org):
     snap = state_snapshot(org)
-    first = narration._seed_for(snap, random.Random(42))
-    second = narration._seed_for(snap, random.Random(42), exclude=[first])
+    first = llmclient.seed_for(snap, random.Random(42))
+    second = llmclient.seed_for(snap, random.Random(42), exclude=[first])
     assert second != first
 
 
 def test_seed_for_falls_back_to_full_pool_when_all_excluded(org):
     snap = state_snapshot(org)
     rng = random.Random(7)
-    all_seeds = {narration._seed_for(snap, random.Random(i))
+    all_seeds = {llmclient.seed_for(snap, random.Random(i))
                  for i in range(40)}
-    chosen = narration._seed_for(snap, rng, exclude=list(all_seeds))
+    chosen = llmclient.seed_for(snap, rng, exclude=list(all_seeds))
     assert chosen in all_seeds
 
 

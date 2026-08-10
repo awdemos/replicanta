@@ -9,7 +9,7 @@ from typing import ClassVar
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import narration
+import llmclient
 import pytest
 from narration import (
     build_prompt,
@@ -46,13 +46,13 @@ def org(tmp_path):
 # -- build_prompt branches -----------------------------------------------------
 
 def test_build_prompt_self_ask_instruction(org):
-    prompt = build_prompt(state_snapshot(org), self_ask=True)
+    prompt = build_prompt(state_snapshot(org), task="self_ask")
     assert "Ask yourself one question" in prompt
     assert "question mark" in prompt
 
 
 def test_build_prompt_self_answer_includes_question(org):
-    prompt = build_prompt(state_snapshot(org), self_question="why am I here?")
+    prompt = build_prompt(state_snapshot(org), task="self_answer", question="why am I here?")
     assert "why am I here?" in prompt
     assert "Answer your own question" in prompt
 
@@ -101,7 +101,7 @@ def test_self_ask_uses_ollama_when_up(org, monkeypatch):
 def test_self_ask_skips_ollama_when_voice_offline(org, monkeypatch):
     calls = []
     patch_generate(monkeypatch, lambda *a, **k: calls.append(1))
-    narration.note_voice_failure()
-    narration.note_voice_failure()   # streak -> offline
+    llmclient.note_voice_failure()
+    llmclient.note_voice_failure()   # streak -> offline
     assert self_ask(org).endswith("?")
     assert calls == []

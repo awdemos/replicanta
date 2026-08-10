@@ -98,10 +98,10 @@ def test_describe_image_posts_base64(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(llmclient.urllib.request, "urlopen", fake_urlopen)
-    out = narration.describe_image(b"\xff\xd8fake-jpeg")
+    out = llmclient.describe_image(b"\xff\xd8fake-jpeg")
     assert out == "a desk with a lamp"
     assert seen["payload"]["images"] == ["/9hmYWtlLWpwZWc="]
-    assert seen["payload"]["model"] == narration.VISION_MODEL
+    assert seen["payload"]["model"] == llmclient.VISION_MODEL
 
 
 def test_describe_image_raises_on_ollama_error(monkeypatch):
@@ -119,7 +119,7 @@ def test_describe_image_raises_on_ollama_error(monkeypatch):
     monkeypatch.setattr(
         llmclient.urllib.request, "urlopen", lambda req, timeout: _Resp())
     with pytest.raises(RuntimeError):
-        narration.describe_image(b"x")
+        llmclient.describe_image(b"x")
 
 
 # -- organism + prompt ----------------------------------------------------------
