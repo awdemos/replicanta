@@ -119,9 +119,7 @@ def _mental_state(org):
         value = getattr(store, attr, None)
         if isinstance(value, float):
             scalars.append((label, value))
-    mood = next(
-        (v for (o, a, v) in store.beliefs() if (o, a) == ("self", "mood")),
-        None)
+    mood = store.belief_value("self", "mood")
     return scalars + ([("mood", mood)] if mood is not None else [])
 
 
@@ -142,6 +140,22 @@ def _pending_proposal(org):
     else:
         preview = entry.get("text", "?")
     return f"{kind}: {preview}"
+
+
+def _perpetuation_stats(store):
+    """The perpetuation-loop counters shared by inner_renderable and
+    inner_view; None when there is no activity yet."""
+    a = store.activity
+    if not a:
+        return None
+    return {
+        "cycle": max(store.cycle, 1),
+        "tried": a.get("rules_tried", 0),
+        "derived": a.get("derivations", 0),
+        "committed": a.get("rules_committed", 0),
+        "promoted": a.get("dreams_promoted", 0),
+        "discarded": a.get("dreams_discarded", 0),
+    }
 
 
 def inner_renderable(org):
@@ -180,14 +194,14 @@ def inner_renderable(org):
                 )
         panels.append(Panel(grid, title="mental state", border_style="cyan"))
 
-    a = store.activity
-    if a:
-        cycle = max(store.cycle, 1)
-        tried = a.get("rules_tried", 0)
-        derived = a.get("derivations", 0)
-        committed = a.get("rules_committed", 0)
-        promoted = a.get("dreams_promoted", 0)
-        discarded = a.get("dreams_discarded", 0)
+    stats = _perpetuation_stats(store)
+    if stats:
+        cycle = stats["cycle"]
+        tried = stats["tried"]
+        derived = stats["derived"]
+        committed = stats["committed"]
+        promoted = stats["promoted"]
+        discarded = stats["discarded"]
         grid = Table.grid(padding=(0, 2))
         grid.add_column(style="bold")
         grid.add_column(justify="left")
@@ -262,14 +276,14 @@ def inner_view(org):
                 lines.append(f"{conf_bar(value)} {value:.2f} {label}")
     else:
         lines.append("(no mental state yet)")
-    a = store.activity
-    if a:
-        cycle = max(store.cycle, 1)
-        tried = a.get("rules_tried", 0)
-        derived = a.get("derivations", 0)
-        committed = a.get("rules_committed", 0)
-        promoted = a.get("dreams_promoted", 0)
-        discarded = a.get("dreams_discarded", 0)
+    stats = _perpetuation_stats(store)
+    if stats:
+        cycle = stats["cycle"]
+        tried = stats["tried"]
+        derived = stats["derived"]
+        committed = stats["committed"]
+        promoted = stats["promoted"]
+        discarded = stats["discarded"]
         lines += ["", "perpetuation loop", ""]
         lines.append(
             f"{tried} questions → {derived} derivations "

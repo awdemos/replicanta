@@ -67,7 +67,7 @@ def _add_activity(store):
 
 def test_activity_digest_reports_counters(org):
     _add_activity(org.store)
-    text = activity.digest(org.store)
+    text = activity.record_digest(org.store)
     assert "self-questions" in text
     assert "derivations" in text
     assert "rules" in text
@@ -77,10 +77,10 @@ def test_activity_digest_reports_counters(org):
 def test_activity_digest_snapshot_pruning(org):
     _add_activity(org.store)
     org.store.cycle = 5
-    activity.digest(org.store, cycles=30)
+    activity.record_digest(org.store, cycles=30)
     org.store.cycle = 50
     _add_activity(org.store)
-    text = activity.digest(org.store, cycles=30)
+    text = activity.record_digest(org.store, cycles=30)
     # Should compare against a snapshot within the last 30 cycles.
     assert "last 30 cycles" in text or "last 45 cycles" in text
 

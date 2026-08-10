@@ -500,9 +500,7 @@ class OrganismApp(App):
             lc.state, "🧠")
         word = {"wake": "awake", "sleep": "asleep",
                 "dead": "faded"}.get(lc.state, lc.state)
-        mood = next(
-            (v for (o, a, v) in self.org.store.beliefs()
-             if (o, a) == ("self", "mood")), "calm")
+        mood = self.org.store.belief_value("self", "mood", "calm")
         s = self.org.store
         mental = (f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
                   f"{s.irrationality:.2f}")
@@ -1257,7 +1255,7 @@ class OrganismApp(App):
 
     # -- spoken voice (piper tts) ------------------------------------------
     @work(thread=True)
-    def _voice_get(self, name):
+    def _voice_download(self, name):
         """Download a piper voice from huggingface in the background, then
         adopt it. Failure just logs — the current voice is kept."""
         self.call_from_thread(
@@ -1368,9 +1366,7 @@ class OrganismApp(App):
         icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
         word = {"wake": "awake", "sleep": "asleep",
                 "dead": "faded"}.get(lc.state, lc.state)
-        mood = next(
-            (v for (o, a, v) in self.org.store.beliefs()
-             if (o, a) == ("self", "mood")), "—")
+        mood = self.org.store.belief_value("self", "mood", "—")
         m = self.org.metrics()
         busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
                 if self._busy() else "")
@@ -1424,10 +1420,8 @@ class OrganismApp(App):
     def _org_name(self):
         """Card title for the organism: its learned name (the user can give
         it one with 'your name is …'), else its nursery dir name."""
-        return next(
-            (v for (o, a, v) in self.org.store.beliefs()
-             if (o, a) == ("self", "name")),
-            self.org.dir_path.name or "replicanta")
+        return self.org.store.belief_value(
+            "self", "name", self.org.dir_path.name or "replicanta")
 
     def _log_chat(self, role, text, stamp=True):
         if role == "user":
@@ -1828,7 +1822,7 @@ class OrganismApp(App):
                         f"/voice use: no voice {args[1]!r} — have: {have}. "
                         f"/voice get {args[1]} downloads it", STYLE_WARN)
             elif args[0] == "get" and len(args) == 2:
-                self._voice_get(args[1])
+                self._voice_download(args[1])
             else:
                 self._append_log(
                     "/voice [on|off] · /voice list · /voice use name · "

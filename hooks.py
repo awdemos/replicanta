@@ -64,8 +64,7 @@ class HookEngine:
 
     def _ctx(self, org, event, text):
         m = org.metrics()
-        mood = next((v for (o, a, v) in org.store.beliefs()
-                     if (o, a) == ("self", "mood")), "calm")
+        mood = org.store.belief_value("self", "mood", "calm")
         return self._lua.table(
             event=event,
             text=text,

@@ -93,8 +93,10 @@ def summary_lines(store):
     return lines
 
 
-def digest(store, cycles=30):
-    """A short narrative of recent learning activity, for the voice prompt.
+def record_digest(store, cycles=30):
+    """Record an activity snapshot and return a short narrative of recent
+    learning activity, for the voice prompt. Mutates store.activity
+    (appends/prunes snapshots) — the name says so.
 
     Compares current counters against a snapshot taken roughly `cycles`
     cycles ago. If no history exists yet, reports lifetime totals.

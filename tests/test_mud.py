@@ -22,11 +22,14 @@ def _at(room="cave mouth"):
 
 def _org(name="Testling", user="Tester"):
     """Minimal organism-like stub for premise/scenario tests."""
+    beliefs = [("self", "name", name), ("user", "name", user)]
     return SimpleNamespace(
-        store=SimpleNamespace(beliefs=lambda: [
-            ("self", "name", name),
-            ("user", "name", user),
-        ]),
+        store=SimpleNamespace(
+            beliefs=lambda: beliefs,
+            belief_value=lambda obj, attr, default=None: next(
+                (v for (o, _a, v) in beliefs if (o, _a) == (obj, attr)),
+                default),
+        ),
         dir_path=Path("testling"),
     )
 

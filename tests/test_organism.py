@@ -1060,7 +1060,7 @@ def test_tui_voice_use_unknown_suggests_get(monkeypatch, tmp_path):
 def test_tui_voice_get_runs_download_worker(monkeypatch, tmp_path):
     got = []
     app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
-    app._voice_get = lambda name: got.append(name)
+    app._voice_download = lambda name: got.append(name)
     app.handle_command("/voice get en_GB-alan-low")
     assert got == ["en_GB-alan-low"]
 

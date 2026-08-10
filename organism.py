@@ -152,6 +152,11 @@ class BeliefStore:
     def beliefs(self):
         return dict(self.beliefs_map)
 
+    def belief_value(self, obj, attr, default=None):
+        """Value of the first (obj, attr) belief, else default."""
+        return next((v for (bo, ba, v) in self.beliefs()
+                     if (bo, ba) == (obj, attr)), default)
+
     def archived(self):
         return dict(self.archived_map)
 

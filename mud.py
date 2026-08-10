@@ -336,9 +336,7 @@ def _org_name(org):
     """Best-effort organism name from beliefs or directory."""
     if org is None:
         return "the organism"
-    name = next(
-        (v for (o, a, v) in org.store.beliefs() if (o, a) == ("self", "name")),
-        None)
+    name = org.store.belief_value("self", "name")
     if name:
         return name
     return getattr(org, "dir_path", None) and getattr(org.dir_path, "name", None) or "the organism"
@@ -348,9 +346,7 @@ def _user_name(org):
     """Best-effort user name from beliefs."""
     if org is None:
         return "the user"
-    return next(
-        (v for (o, a, v) in org.store.beliefs() if (o, a) == ("user", "name")),
-        "the user")
+    return org.store.belief_value("user", "name", "the user")
 
 
 def build_premise(org, scenario=None) -> str:

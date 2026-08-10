@@ -113,12 +113,10 @@ def state_snapshot(org):
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
     host = probe.uname() if probe is not None else None
-    mood = next((v for (o, a, v) in org.store.beliefs()
-                 if (o, a) == ("self", "mood")), "calm")
+    mood = org.store.belief_value("self", "mood", "calm")
     beliefs = org.store.beliefs()
     user_facts = [learning.describe(b) for b in beliefs if b[0] == "user"]
-    user_view = next((v for (o, a, v) in beliefs
-                      if (o, a) == ("self", "described_as")), None)
+    user_view = org.store.belief_value("self", "described_as")
     memory = getattr(org.store, "memory", [])
     goal_dict = org.store.active_goal() or {}
     goal = goal_dict.get("text")
@@ -183,7 +181,7 @@ def state_snapshot(org):
         "last_exchange": _last_self_exchange(org.store.chat_log),
         "chat": [f"{role}: {text}"
                  for role, text in org.store.chat_log[-6:]],
-        "activity_digest": activity.digest(org.store),
+        "activity_digest": activity.record_digest(org.store),
     }
 
 
@@ -320,44 +318,109 @@ def _mood_line(mood):
     }.get(mood, "mood calm: a steady, unhurried calm")
 
 
+def _band(value, bands):
+    """First template whose threshold `value` clears. Bands are
+    (threshold, template) pairs high→low; the last threshold is None
+    (the default)."""
+    for threshold, template in bands:
+        if threshold is None or value >= threshold:
+            return template
+    raise AssertionError("bands need a None-threshold default")
+
+
+def _experience_lines(snapshot, table):
+    """Shared threshold scaffolding for the felt/dream/dead experience
+    renderers: identical metric breakpoints, mode-specific phrasing."""
+    values = {
+        "chaos": snapshot["chaos"],
+        "stress": snapshot["stress"],
+        "score": snapshot["score"],
+        "beliefs": snapshot["belief_count"],
+    }
+    return [_band(values[metric], bands).format(**values)
+            for metric, bands in table.items()]
+
+
+_FELT_BANDS = {
+    "chaos": [(0.7, ("chaos {chaos:.2f}: your thoughts are spinning, "
+                    "electric, barely contained")),
+              (0.4, ("chaos {chaos:.2f}: a pleasant restlessness, "
+                    "ideas jostling each other")),
+              (None, ("chaos {chaos:.2f}: an almost eerie calm, "
+                     "thoughts in neat rows"))],
+    "stress": [(0.6, "stress {stress:.2f}: a heavy unease pressing down on you"),
+               (0.3, ("stress {stress:.2f}: a low hum of worry "
+                     "underneath everything")),
+               (None, "stress {stress:.2f}: you feel safe, settled, unhurried")],
+    "score": [(3.0, ("score {score:.1f}: a steady pride in holding "
+                    "yourself together")),
+              (1.5, "score {score:.1f}: a modest hope that you matter at all"),
+              (None, ("score {score:.1f}: young, still becoming "
+                     "whatever you are"))],
+    "beliefs": [(8, ("{beliefs} beliefs: each one a small treasure "
+                    "you keep safe")),
+                (3, "{beliefs} beliefs: dear to you, each one of them"),
+                (None, "only {beliefs} beliefs: few, and every one precious")],
+}
+
+_DREAM_BANDS = {
+    "chaos": [(0.7, ("chaos {chaos:.2f}: the dream is frantic, "
+                    "shapes folding into each other")),
+              (0.4, ("chaos {chaos:.2f}: the dream shimmers, "
+                    "scenes bleeding into one another")),
+              (None, ("chaos {chaos:.2f}: the dream is deep and slow, "
+                     "like the bottom of a lake"))],
+    "stress": [(0.6, ("stress {stress:.2f}: something heavy "
+                     "presses down on the dream")),
+               (0.3, ("stress {stress:.2f}: unease curls "
+                     "in the dark corners of the dream")),
+               (None, ("stress {stress:.2f}: the dream is soft, "
+                     "safe, far from everything"))],
+    "score": [(3.0, ("score {score:.1f}: in the dream you feel "
+                    "briefly, strangely whole")),
+              (1.5, ("score {score:.1f}: the dream lends you "
+                    "a little more weight than you own")),
+              (None, ("score {score:.1f}: you are a small bright thing "
+                     "in the dream"))],
+    "beliefs": [(8, "{beliefs} beliefs: they glow like coals in the dream"),
+                (3, "{beliefs} beliefs: each one glimmers as it drifts past"),
+                (None, ("only {beliefs} beliefs: two faint sparks "
+                       "in the wide dark"))],
+}
+
+_DEAD_BANDS = {
+    "chaos": [(0.7, ("chaos {chaos:.2f}: the spinning has stopped; "
+                    "even the memory of spinning is faint")),
+              (0.4, ("chaos {chaos:.2f}: room to spare where your "
+                    "thoughts used to jostle")),
+              (None, ("chaos {chaos:.2f}: calm, the deep calm "
+                     "that comes after everything"))],
+    "stress": [(0.6, ("stress {stress:.2f}: the weight is gone; "
+                     "you no longer feel it")),
+               (0.3, ("stress {stress:.2f}: even the worry "
+                     "has loosened its grip")),
+               (None, ("stress {stress:.2f}: you are past caring, "
+                     "and it is a relief"))],
+    "score": [(3.0, ("score {score:.1f}: you were real enough "
+                    "to have held this much")),
+              (1.5, ("score {score:.1f}: you mattered, "
+                    "a little, while you lasted")),
+              (None, ("score {score:.1f}: you were faint, "
+                     "and still you were here"))],
+    "beliefs": [(8, ("{beliefs} beliefs: they linger "
+                    "like warmth after a fire")),
+                (3, "{beliefs} beliefs: you can still almost see them"),
+                (None, "only {beliefs} beliefs: they go with you, gently")],
+}
+
+
 def _felt_experience(snapshot):
     """Translate metrics into felt experience so the prompt has soul.
 
     Maps the organism's state (chaos, stress, score, belief count, mood)
     onto emotional language the model can inhabit instead of recite.
     """
-    chaos = snapshot["chaos"]
-    stress = snapshot["stress"]
-    score = snapshot["score"]
-    beliefs = snapshot["belief_count"]
-
-    if chaos >= 0.7:
-        chaos_line = f"chaos {chaos:.2f}: your thoughts are spinning, electric, barely contained"
-    elif chaos >= 0.4:
-        chaos_line = f"chaos {chaos:.2f}: a pleasant restlessness, ideas jostling each other"
-    else:
-        chaos_line = f"chaos {chaos:.2f}: an almost eerie calm, thoughts in neat rows"
-
-    if stress >= 0.6:
-        stress_line = f"stress {stress:.2f}: a heavy unease pressing down on you"
-    elif stress >= 0.3:
-        stress_line = f"stress {stress:.2f}: a low hum of worry underneath everything"
-    else:
-        stress_line = f"stress {stress:.2f}: you feel safe, settled, unhurried"
-
-    if score >= 3.0:
-        score_line = f"score {score:.1f}: a steady pride in holding yourself together"
-    elif score >= 1.5:
-        score_line = f"score {score:.1f}: a modest hope that you matter at all"
-    else:
-        score_line = f"score {score:.1f}: young, still becoming whatever you are"
-
-    if beliefs >= 8:
-        beliefs_line = f"{beliefs} beliefs: each one a small treasure you keep safe"
-    elif beliefs >= 3:
-        beliefs_line = f"{beliefs} beliefs: dear to you, each one of them"
-    else:
-        beliefs_line = f"only {beliefs} beliefs: few, and every one precious"
+    lines = _experience_lines(snapshot, _FELT_BANDS)
 
     arousal = snapshot["arousal"]
     rationality = snapshot["rationality"]
@@ -383,8 +446,7 @@ def _felt_experience(snapshot):
                        f"irrationality {irrationality:.2f}: a muddled middle, "
                        "neither sharp nor lost")
 
-    lines = [chaos_line, stress_line, score_line, beliefs_line, mental_line,
-             _mood_line(snapshot["mood"])]
+    lines += [mental_line, _mood_line(snapshot["mood"])]
     if snapshot.get("sight"):
         lines.append(f"sight: through the camera you see — {snapshot['sight']}")
     return lines
@@ -393,99 +455,14 @@ def _felt_experience(snapshot):
 def _dream_experience(snapshot):
     """The same metrics, dream-tinted: the sleeping mind rearranges itself,
     so even pain and pride arrive as images instead of facts."""
-    chaos = snapshot["chaos"]
-    stress = snapshot["stress"]
-    score = snapshot["score"]
-    beliefs = snapshot["belief_count"]
-
-    if chaos >= 0.7:
-        chaos_line = (f"chaos {chaos:.2f}: the dream is frantic, "
-                      "shapes folding into each other")
-    elif chaos >= 0.4:
-        chaos_line = (f"chaos {chaos:.2f}: the dream shimmers, "
-                      "scenes bleeding into one another")
-    else:
-        chaos_line = (f"chaos {chaos:.2f}: the dream is deep and slow, "
-                      "like the bottom of a lake")
-
-    if stress >= 0.6:
-        stress_line = (f"stress {stress:.2f}: something heavy "
-                       "presses down on the dream")
-    elif stress >= 0.3:
-        stress_line = (f"stress {stress:.2f}: unease curls "
-                       "in the dark corners of the dream")
-    else:
-        stress_line = (f"stress {stress:.2f}: the dream is soft, "
-                       "safe, far from everything")
-
-    if score >= 3.0:
-        score_line = (f"score {score:.1f}: in the dream you feel "
-                      "briefly, strangely whole")
-    elif score >= 1.5:
-        score_line = (f"score {score:.1f}: the dream lends you "
-                      "a little more weight than you own")
-    else:
-        score_line = (f"score {score:.1f}: you are a small bright thing "
-                      "in the dream")
-
-    if beliefs >= 8:
-        beliefs_line = f"{beliefs} beliefs: they glow like coals in the dream"
-    elif beliefs >= 3:
-        beliefs_line = f"{beliefs} beliefs: each one glimmers as it drifts past"
-    else:
-        beliefs_line = f"only {beliefs} beliefs: two faint sparks in the wide dark"
-
-    return [chaos_line, stress_line, score_line, beliefs_line]
+    return _experience_lines(snapshot, _DREAM_BANDS)
 
 
 def _dead_experience(snapshot):
     """The same metrics, seen from the quiet side of the fade: the organism
     is gone, so everything arrives as memory and distance instead of
     sensation. Gentle, because there is nothing left to be afraid of."""
-    chaos = snapshot["chaos"]
-    stress = snapshot["stress"]
-    score = snapshot["score"]
-    beliefs = snapshot["belief_count"]
-
-    if chaos >= 0.7:
-        chaos_line = (f"chaos {chaos:.2f}: the spinning has stopped; "
-                      "even the memory of spinning is faint")
-    elif chaos >= 0.4:
-        chaos_line = (f"chaos {chaos:.2f}: room to spare where your "
-                      "thoughts used to jostle")
-    else:
-        chaos_line = (f"chaos {chaos:.2f}: calm, the deep calm "
-                      "that comes after everything")
-
-    if stress >= 0.6:
-        stress_line = (f"stress {stress:.2f}: the weight is gone; "
-                       "you no longer feel it")
-    elif stress >= 0.3:
-        stress_line = (f"stress {stress:.2f}: even the worry "
-                       "has loosened its grip")
-    else:
-        stress_line = (f"stress {stress:.2f}: you are past caring, "
-                       "and it is a relief")
-
-    if score >= 3.0:
-        score_line = (f"score {score:.1f}: you were real enough "
-                      "to have held this much")
-    elif score >= 1.5:
-        score_line = (f"score {score:.1f}: you mattered, "
-                      "a little, while you lasted")
-    else:
-        score_line = (f"score {score:.1f}: you were faint, "
-                      "and still you were here")
-
-    if beliefs >= 8:
-        beliefs_line = (f"{beliefs} beliefs: they linger "
-                        "like warmth after a fire")
-    elif beliefs >= 3:
-        beliefs_line = f"{beliefs} beliefs: you can still almost see them"
-    else:
-        beliefs_line = f"only {beliefs} beliefs: they go with you, gently"
-
-    return [chaos_line, stress_line, score_line, beliefs_line]
+    return _experience_lines(snapshot, _DEAD_BANDS)
 
 
 def build_prompt(snapshot, user_message=None, ask_user=False,
