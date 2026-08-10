@@ -377,15 +377,11 @@
 
   import asyncio
   import sys
-  from pathlib import Path
-
   from textual.containers import VerticalScroll
   from textual.widgets import ListView, Static, TabbedContent
 
-  sys.path.insert(0, str(Path(__file__).parent.parent))
-
-  from organism import Organism
-  from tui import OrganismApp
+  from replicanta.organism import Organism
+  from replicanta.tui import OrganismApp
 
 
   def _headless_app(monkeypatch, tmp_path):
@@ -488,7 +484,7 @@
   Kill the existing tmux TUI process and restart:
   ```bash
   kill <pid>
-  tmux send-keys -t orgtui-fix:1.1 "cd /var/home/a/code/replicanta && .venv/bin/python -m tui --dir /home/a/.tmp/opencode/replicanta-selfhearing --org selfhearing --chaos 0" Enter
+  tmux send-keys -t orgtui-fix:1.1 "cd /var/home/a/code/replicanta && .venv/bin/replicanta --dir /home/a/.tmp/opencode/replicanta-selfhearing --org selfhearing --chaos 0" Enter
   ```
   Capture the pane and verify: top bar, sidebar, bottom bar, tabs, and scrolling.
 

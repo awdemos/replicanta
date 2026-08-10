@@ -432,11 +432,11 @@ def test_rename_group_flow_updates_disk_and_sidebar(monkeypatch, tmp_path):
     nursery_mod.assign(app.root, "fern", "thinkers")
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._prompt_rename_group("thinkers")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             app.screen.dismiss("dreamers")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert nursery_mod.load_groups(app.root) == {"dreamers": ["fern"]}
             lv = app.query_one("#sidebar-list", ListView)
             names = [item.name for item in lv.children]
@@ -454,16 +454,16 @@ def test_organism_menu_move_to_group_assigns(monkeypatch, tmp_path):
     nursery_mod.create_group(app.root, "thinkers")
 
     async def check():
-        async with app.run_test():
-            app._open_org_menu("fern")
-            await asyncio.sleep(0.05)
-            app.screen.dismiss(("group", "fern"))
-            await asyncio.sleep(0.05)
-            from replicanta.tui import GroupPickScreen
+        from replicanta.tui import GroupPickScreen
 
+        async with app.run_test() as pilot:
+            app._open_org_menu("fern")
+            await pilot.pause()
+            app.screen.dismiss(("group", "fern"))
+            await pilot.pause()
             assert isinstance(app.screen, GroupPickScreen)
             app.screen.dismiss("thinkers")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert nursery_mod.group_of(app.root, "fern") == "thinkers"
 
     asyncio.run(check())
@@ -476,16 +476,16 @@ def test_group_pick_new_group_creates_and_assigns(monkeypatch, tmp_path):
     _make_fern(app)
 
     async def check():
-        async with app.run_test():
-            app._pick_group_for("fern")
-            await asyncio.sleep(0.05)
-            app.screen.dismiss("new")
-            await asyncio.sleep(0.05)
-            from replicanta.tui import NamePromptScreen
+        from replicanta.tui import NamePromptScreen
 
+        async with app.run_test() as pilot:
+            app._pick_group_for("fern")
+            await pilot.pause()
+            app.screen.dismiss("new")
+            await pilot.pause()
             assert isinstance(app.screen, NamePromptScreen)
             app.screen.dismiss("fresh group")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert nursery_mod.group_of(app.root, "fern") == "fresh group"
 
     asyncio.run(check())

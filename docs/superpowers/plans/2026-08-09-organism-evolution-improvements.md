@@ -66,7 +66,7 @@
 
   In `narration.py`, add:
   ```python
-  import activity
+  from replicanta import activity
   ...
   "activity_digest": activity.digest(org.store),
   ```
@@ -97,7 +97,7 @@
   Expected: PASS.
 
   ```bash
-  git add activity.py narration.py tests/test_evolution.py
+  git add src/replicanta/activity.py src/replicanta/narration.py tests/test_evolution.py
   git commit -m "feat(evolution): include activity digest in voice prompts"
   ```
 
@@ -139,7 +139,7 @@
       with the goal text."""
       import re
       words = set(re.findall(r"[a-z]{3,}", text.lower()))
-      from learning import describe
+      from replicanta.learning import describe
       count = 0
       for (obj, attr, val), _conf in store.beliefs().items():
           if obj != "user":
@@ -157,7 +157,7 @@
 - [ ] **Step 2: Add goal progress to `state_snapshot()`**
 
   ```python
-  from goals import goal_progress
+  from replicanta.goals import goal_progress
   ...
   "goal_progress": goal_progress(org.store),
   ```
@@ -176,7 +176,7 @@
 
   In `organism.py`, `add_goal()` should also store a `strategy` field:
   ```python
-  from goals import formulate_subgoals
+  from replicanta.goals import formulate_subgoals
   ...
   def add_goal(self, text):
       self.store.goals.append({
