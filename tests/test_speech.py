@@ -124,9 +124,9 @@ def test_set_voice_by_name_filename_and_path(tmp_path, monkeypatch):
 
 def test_set_voice_unknown_keeps_current(tmp_path, monkeypatch):
     _fake_voices_dir(tmp_path, monkeypatch)
-    before = speech.MODEL_PATH
+    before = speech.model_path()
     assert speech.set_voice("en_GB-nope-low") is None
-    assert speech.MODEL_PATH == before       # unchanged
+    assert speech.model_path() == before     # unchanged
 
 
 def test_set_voice_drops_cached_model(tmp_path, monkeypatch):

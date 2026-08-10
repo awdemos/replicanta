@@ -13,6 +13,7 @@ from typing import ClassVar
 import extensions
 import goals
 import learning
+import mud
 import scallopy
 import sentiment
 from fileutil import atomic_write_text
@@ -227,11 +228,10 @@ class BeliefStore:
 
     def load_mud_session(self):
         """Load the persisted mud.MudSession, or None when the file is
-        missing or corrupt. Imports mud lazily to avoid a circular import."""
+        missing or corrupt."""
         if not self.mud_state_path.exists():
             return None
         try:
-            import mud
             return mud.MudSession.from_json(
                 json.loads(self.mud_state_path.read_text()))
         except Exception:  # noqa: BLE001 — a corrupt save must never kill the organism

@@ -25,7 +25,7 @@ from pathlib import Path
 
 VOICES_DIR = Path(__file__).parent / "voices"
 _DEFAULT_MODEL = VOICES_DIR / "en_US-lessac-medium.onnx"
-MODEL_PATH = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
+_model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
 
 HF_VOICE_URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/"
                 "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}")
@@ -41,12 +41,17 @@ _voice_lock = threading.Lock()
 def available():
     """True when a piper model file is present (packages may still be
     missing — failures are contained at speak time)."""
-    return MODEL_PATH.exists()
+    return _model_path.exists()
+
+
+def model_path():
+    """Path of the active piper model (mutated by set_voice/reset)."""
+    return _model_path
 
 
 def voice_name():
     """Name of the active voice, e.g. 'en_US-lessac-medium'."""
-    return MODEL_PATH.stem
+    return _model_path.stem
 
 
 def list_voices():
@@ -61,14 +66,14 @@ def set_voice(spec):
     ('en_US-lessac-medium'), a filename ('en_US-lessac-medium.onnx') or
     an .onnx path. Returns the resolved path, or None if not found —
     in which case the current voice is kept."""
-    global MODEL_PATH, _voice
+    global _model_path, _voice
     candidates = [Path(spec)]
     if not Path(spec).suffix:
         candidates.append(VOICES_DIR / f"{spec}.onnx")
     candidates.append(VOICES_DIR / spec)
     for cand in candidates:
         if cand.suffix == ".onnx" and cand.exists():
-            MODEL_PATH = cand
+            _model_path = cand
             _voice = None          # next speak loads the new model
             return cand
     return None
@@ -146,7 +151,7 @@ def _load_voice():
     with _voice_lock:
         if _voice is None:
             from piper import PiperVoice
-            _voice = PiperVoice.load(str(MODEL_PATH))
+            _voice = PiperVoice.load(str(_model_path))
     return _voice
 
 
@@ -168,10 +173,10 @@ def _speak(text):
 
 def reset():
     """Test hook: drop the flag, cached voice, voice choice and queue."""
-    global enabled, _voice, MODEL_PATH
+    global enabled, _voice, _model_path
     enabled = False
     _voice = None
-    MODEL_PATH = Path(os.environ.get("REPLICANTA_VOICE_MODEL")
+    _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL")
                       or _DEFAULT_MODEL)
     while True:
         try:

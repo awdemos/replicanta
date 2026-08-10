@@ -1792,13 +1792,15 @@ class OrganismApp(App):
         elif name == "/voice":
             args = parts[1:]
             if not args or args[0] in ("on", "off"):
-                speech.set_enabled(not speech.enabled if not args
-                                   else args[0] == "on")
+                if args:
+                    speech.set_enabled(args[0] == "on")
+                else:
+                    speech.set_enabled(not speech.enabled)
                 state = "on" if speech.enabled else "off"
                 if speech.enabled and not speech.available():
                     self._append_log(
                         f"spoken voice {state}, but no piper model at "
-                        f"{speech.MODEL_PATH} — staying mute "
+                        f"{speech.model_path()} — staying mute "
                         f"(/voice get en_US-lessac-medium)", STYLE_WARN)
                 elif speech.enabled:
                     self._append_log(

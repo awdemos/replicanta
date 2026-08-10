@@ -13,6 +13,7 @@ license = { text = "MIT" }
 # wheel from wheels/ alongside this package (see readme.md).
 dependencies = [
     "textual>=1.0",
+    "rich",        # direct: tui_views.py imports it (textual pulls it too)
     "numpy",      # core: listen.py/speech.py arrays; imported by tests
     "lupa>=2.0",  # core: hooks.py Lua runtime; exercised by the test suite
 ]
