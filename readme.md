@@ -28,6 +28,8 @@ blame it for its opinions — you taught it most of them.
 
 **Early release public beta stage, under active development, PRs welcome.**
 
+![Replicanta TUI entities demo](docs/assets/replicanta-entities.gif)
+
 ```mermaid
 flowchart TD
     A["User input or idle tick"] --> B["hear() / sense()"]
