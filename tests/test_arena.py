@@ -384,6 +384,18 @@ def test_clean_candidate_strips_group_context_scaffolding():
         "Rain makes the attic feel smaller, in a good way."
 
 
+def test_clean_candidate_strips_rogue_thought_echo():
+    """A partial echo of the ROGUE_THOUGHT instruction (just the first
+    sentence, without the marker tail) is scaffolding, not speech."""
+    from arena import ROGUE_THOUGHT, _clean_candidate
+    first_sentence = ROGUE_THOUGHT.split(". ")[0] + "."
+    assert "no preamble" not in first_sentence.lower()  # the uncovered case
+    raw = first_sentence + "\nThe cellar smells of rain tonight."
+    assert _clean_candidate(raw) == "The cellar smells of rain tonight."
+    # verbatim full echo (with the marker tail) is also stripped
+    assert _clean_candidate(ROGUE_THOUGHT) == ""
+
+
 def test_clean_candidate_keeps_genuine_first_person():
     from arena import _clean_candidate
     raw = "I asked myself about the rain, and I still have no answer."

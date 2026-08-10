@@ -53,7 +53,8 @@ _META_TAIL_RE = re.compile(
     r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
     r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
 _INSTRUCTION_ECHO_RE = re.compile(
-    r"(?im)^\s*(?:draft a candidate answer.*|then,?\s+(?:evaluate|revise)"
+    r"(?im)^\s*(?:draft a candidate answer.*|draft a rogue thought.*"
+    r"|then,?\s+(?:evaluate|revise)"
     r".*|attack both candidates.*|which candidate is better\??.*"
     r"|draft)$")
 # fragments of the utterance prompts that chatty models echo back verbatim
@@ -66,6 +67,7 @@ _INSTRUCTION_MARKERS = (
     "ask yourself one question", "speak from feeling",
     "reply to the user", "ask the user one question",
     "candidate answer", "attack both", "which candidate",
+    "spun from nowhere",
     "you are in a group chat", "recent group conversation",
     "reply to the group",
 )
