@@ -396,6 +396,21 @@ def test_clean_candidate_strips_rogue_thought_echo():
     assert _clean_candidate(ROGUE_THOUGHT) == ""
 
 
+def test_clean_candidate_strips_draft_variants():
+    """Every line opening with 'draft'/'drafting' is scaffolding, and a
+    'Draft:'/'Response:' label is unwrapped from the answer."""
+    from arena import _clean_candidate
+    assert _clean_candidate(
+        "Drafting a reply to the user now.\nThe attic hums.") == \
+        "The attic hums."
+    assert _clean_candidate("Draft: The attic hums.") == "The attic hums."
+    assert _clean_candidate("Response: The attic hums.") == \
+        "The attic hums."
+    # but the word 'draft' inside genuine speech is untouched
+    assert _clean_candidate("A cold draft slips under the door.") == \
+        "A cold draft slips under the door."
+
+
 def test_clean_candidate_keeps_genuine_first_person():
     from arena import _clean_candidate
     raw = "I asked myself about the rain, and I still have no answer."

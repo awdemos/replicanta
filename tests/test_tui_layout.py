@@ -715,3 +715,25 @@ def test_mud_fresh_organism_move_still_applies(monkeypatch, tmp_path):
             assert game.turns == 1
 
     asyncio.run(check())
+
+
+def test_mud_organism_move_shows_its_reason(monkeypatch, tmp_path):
+    """The organism's stated reason is logged (dim) just before its
+    command, so a move never appears unmotivated."""
+    import mud as mud_mod
+    from textual.widgets import RichLog
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            game = mud_mod.MudGame()
+            app._mud_game = game
+            app._mud_apply(game, "go north", gen=app._mud_turn_gen,
+                           reason="because the cave mouth calls")
+            lines = [str(line.text) for line in
+                     app.query_one("#dreams", RichLog).lines]
+            idx = next(i for i, line in enumerate(lines)
+                       if "cave mouth calls" in line)
+            assert "> go north" in lines[idx + 1]
+
+    asyncio.run(check())

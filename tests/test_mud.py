@@ -344,6 +344,55 @@ def test_choose_passes_hint_into_prompt():
     assert "go east!" in seen["prompt"]
 
 
+# -- reasons ---------------------------------------------------------------------
+
+def test_parse_action_with_reason_splits_chatter():
+    raw = "because the torch glows like a promise\ngo north"
+    assert mud.parse_action_with_reason(raw) == (
+        "go north", "because the torch glows like a promise")
+
+
+def test_parse_action_with_reason_none_when_only_command():
+    assert mud.parse_action_with_reason("go north") == ("go north", None)
+
+
+def test_choose_captures_stated_reason():
+    game = MudGame()
+    out = {}
+    cmd = mud.choose_action(
+        game, out=out,
+        generate=lambda p: "because the dark hall pulls at me\ngo north")
+    assert cmd == "go north"
+    assert out["reason"] == "because the dark hall pulls at me"
+
+
+def test_choose_reason_none_when_voice_gives_only_command():
+    game = MudGame()
+    out = {}
+    mud.choose_action(game, out=out, generate=lambda p: "go north")
+    assert out["reason"] is None
+
+
+def test_choose_fallback_reason_is_honest():
+    game = MudGame()
+    out = {}
+    cmd = mud.choose_action(game, rng=random.Random(0), out=out,
+                            generate=lambda p: "purple elephants")
+    assert cmd == "go north"
+    assert "silent" in out["reason"]
+
+
+def test_choose_reason_scrubs_prompt_echoes():
+    game = MudGame()
+    out = {}
+    raw = ("Draft a candidate answer, following the task instruction "
+           "above exactly.\n"
+           "because the key glints\ngo down")
+    cmd = mud.choose_action(game, out=out, generate=lambda p: raw)
+    assert cmd == "go down"
+    assert out["reason"] == "because the key glints"
+
+
 # -- scenario generation -------------------------------------------------------
 
 def test_validate_scenario():

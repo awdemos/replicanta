@@ -49,14 +49,16 @@ _META_PREFIX_RE = re.compile(
     r"(?is)^.*?(?:here\s+(?:is|'s)\s+(?:a|the|my)?\s*"
     r"(?:draft|candidate|answer|response|reply|possible answer)[^:\n]*:|"
     r"draft(?:\s+of\s+a\s+candidate\s+answer)?:)\s*")
+# labels chatty models prepend to the answer itself ("Draft: …",
+# "Response: …") — strip the label, keep the answer
+_LABEL_PREFIX_RE = re.compile(
+    r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*")
 _META_TAIL_RE = re.compile(
     r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
     r"revised)|evaluation:|critique:|assessment:|weakness).*$",)
 _INSTRUCTION_ECHO_RE = re.compile(
-    r"(?im)^\s*(?:draft a candidate answer.*|draft a rogue thought.*"
-    r"|then,?\s+(?:evaluate|revise)"
-    r".*|attack both candidates.*|which candidate is better\??.*"
-    r"|draft)$")
+    r"(?im)^\s*(?:draft(?:ing)?\b.*|then,?\s+(?:evaluate|revise)"
+    r".*|attack both candidates.*|which candidate is better\??.*)$")
 # fragments of the utterance prompts that chatty models echo back verbatim
 # (build_prompt instructions, group-chat context); a line containing any of
 # these is scaffolding, not speech
@@ -110,6 +112,7 @@ def _clean_candidate(text):
     text = _META_PREFIX_RE.sub("", text.strip(), count=1)
     text = _META_TAIL_RE.sub("", text)
     text = _strip_instruction_echoes(text)
+    text = _LABEL_PREFIX_RE.sub("", text.strip())
     text = text.strip().strip('"').strip()
     if _is_repetition_loop(text):
         return ""

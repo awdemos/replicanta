@@ -1061,12 +1061,14 @@ class OrganismApp(App):
             return
         hint, self._mud_hint = self._mud_hint, None
         gen = self._mud_turn_gen
+        choice = {}
         command = mud.choose_action(game, hint=hint, rng=self._rng,
-                                    org=self.org)
+                                    org=self.org, out=choice)
         self.call_from_thread(self._mud_apply, game, command, "organism",
-                              gen)
+                              gen, choice.get("reason"))
 
-    def _mud_apply(self, game, command, actor="organism", gen=None):
+    def _mud_apply(self, game, command, actor="organism", gen=None,
+                   reason=None):
         if actor == "organism":
             self._mud_thinking = False
         if self._mud_game is not game:
@@ -1081,6 +1083,8 @@ class OrganismApp(App):
                 STYLE_DIM)
             self._mud_schedule()
             return
+        if actor == "organism" and reason:
+            self._append_log(reason, STYLE_DIM)
         self._append_log(f"> {command}", STYLE_SELF)
         result = game.act_event(command, actor=actor)
         self._append_log(result.text, STYLE_DREAM)

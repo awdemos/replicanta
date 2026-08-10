@@ -364,8 +364,10 @@ def action_prompt(game, org=None, hint=None):
     """Compact decision prompt: room, map, story, inventory, legal commands,
     and an optional one-shot nudge shouted by the user."""
     lines = [
-        ("You are playing a tiny text adventure. Reply with exactly one "
-         "command and nothing else."),
+        ("You are playing a tiny text adventure. First write one short "
+         "sentence about why you choose your move, starting with "
+         "'because'. Then, on a new line, write exactly one command "
+         "and nothing else."),
     ]
     if org is not None:
         lines.append(f"You are {_org_name(org)}. {_user_name(org)} is watching "
@@ -397,20 +399,43 @@ def action_prompt(game, org=None, hint=None):
     return "\n".join(lines)
 
 
+_COMMAND_STARTERS = ("go", "take", "get", "grab", "look", "move",
+                     "walk", "inventory", "inv")
+
+
+def _command_words(line):
+    """Normalized command words for a line, or None when the line is
+    not a command."""
+    line = line.lower().lstrip(">").strip().strip('"').rstrip(".")
+    words = [w for w in line.split() if w not in _FILLER]
+    if not words:
+        return None
+    if words[0] in _COMMAND_STARTERS or words[0] in DIR_ALIASES:
+        return words
+    return None
+
+
 def parse_action(text):
     """Model output -> one command string, or None when unusable."""
+    return parse_action_with_reason(text)[0]
+
+
+def parse_action_with_reason(text):
+    """Model output -> (command, reason): the first command-like line
+    normalized, plus whatever else the organism said as its stated
+    reason (None when it offered nothing but the command)."""
     if not text:
-        return None
-    for line in text.strip().lower().splitlines():
-        line = line.strip().lstrip(">").strip().strip('"').rstrip(".")
-        words = [w for w in line.split() if w not in _FILLER]
-        if not words:
-            continue
-        if (words[0] in ("go", "take", "get", "grab", "look", "move",
-                         "walk", "inventory", "inv")
-                or words[0] in DIR_ALIASES):
-            return " ".join(words)
-    return None
+        return None, None
+    command = None
+    reason_lines = []
+    for line in text.strip().splitlines():
+        words = _command_words(line.strip())
+        if command is None and words is not None:
+            command = " ".join(words)
+        elif line.strip():
+            reason_lines.append(line.strip())
+    reason = " ".join(reason_lines).strip() or None
+    return command, reason
 
 
 def parse_player_command(text):
@@ -463,9 +488,12 @@ def fallback_action(game, rng):
     return "go " + rng.choice(sorted(room.exits))
 
 
-def choose_action(game, hint=None, rng=None, generate=None, org=None):
+def choose_action(game, hint=None, rng=None, generate=None, org=None,
+                  out=None):
     """The organism's next move: ask the voice, parse it, fall back to
-    the wanderer when the voice is silent or speaks nonsense."""
+    the wanderer when the voice is silent or speaks nonsense. When
+    `out` is a dict, the organism's stated reason (or the honest
+    fallback excuse) is stored under "reason"."""
     rng = rng if rng is not None else random.Random()
     if generate is None:
         def generate(prompt):
@@ -473,13 +501,22 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
             return narration._ollama_generate(
                 prompt, model=MUD_MODEL, timeout=MUD_TIMEOUT,
                 temperature=0.7)
-    raw = None
+    command = reason = None
     try:
+        import arena
         raw = generate(action_prompt(game, org=org, hint=hint))
+        # the voice is chatty; scrub echoed prompt scaffolding before
+        # reading the move and its reason
+        command, reason = parse_action_with_reason(
+            arena._clean_candidate(raw or ""))
     except Exception:  # noqa: BLE001, S110 — a silent voice means wandering
         pass
-    command = parse_action(raw)
-    return command if command is not None else fallback_action(game, rng)
+    if command is None:
+        command = fallback_action(game, rng)
+        reason = "the inner voice was silent — wandering on instinct"
+    if out is not None:
+        out["reason"] = reason
+    return command
 
 
 # -- scenario generation -------------------------------------------------------
