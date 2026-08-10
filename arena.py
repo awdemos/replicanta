@@ -86,7 +86,7 @@ class ThoughtArena:
         """
         model = (model or self._model
                  or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL))
-        timeout = timeout or self._timeout or llmclient.TIMEOUT
+        timeout = timeout or self._timeout or llmclient.default_timeout()
         snapshot = narration.state_snapshot(org)
         # every debate circles a different concrete thing — this rotation is
         # what keeps the idle voice from repeating itself; the last few

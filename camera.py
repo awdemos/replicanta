@@ -59,7 +59,8 @@ def match_camera(cams, spec):
 class Camera:
     """One frame at a time from a USB camera. `grabber` is injectable for
     tests; the real path opens the device, discards warmup frames, and
-    JPEG-encodes one frame. Never raises."""
+    JPEG-encodes one frame. grab() never raises; set_device() raises
+    LookupError when no camera matches."""
 
     def __init__(self, grabber=None):
         self._grabber = grabber

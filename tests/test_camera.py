@@ -101,7 +101,7 @@ def test_describe_image_posts_base64(monkeypatch):
     out = llmclient.describe_image(b"\xff\xd8fake-jpeg")
     assert out == "a desk with a lamp"
     assert seen["payload"]["images"] == ["/9hmYWtlLWpwZWc="]
-    assert seen["payload"]["model"] == llmclient.VISION_MODEL
+    assert seen["payload"]["model"] == llmclient.vision_model()
 
 
 def test_describe_image_raises_on_ollama_error(monkeypatch):

@@ -412,7 +412,7 @@ def test_validate_scenario():
             },
         },
     }
-    scenario = mud.validate_scenario(data)
+    scenario = mud.scenario_or_default(data)
     assert scenario.title == "The Tiny Tower"
     assert scenario.rooms["foyer"].exits["up"] == "tower"
 
@@ -431,7 +431,7 @@ def test_validate_scenario_falls_back_on_bad_exits():
             },
         },
     }
-    scenario = mud.validate_scenario(data)
+    scenario = mud.scenario_or_default(data)
     assert scenario.title == "The Amulet of Vatox"
 
 

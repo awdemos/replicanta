@@ -7,21 +7,33 @@ command, and a forgiving parser executes it. When the voice is offline
 or answers nonsense, a random wanderer steps in so the game never
 stalls. Moves need little brains: REPLICANTA_MUD_MODEL defaults to a
 small fast model, REPLICANTA_MUD_TIMEOUT caps each decision.
+
+Deliberate style island: this module keeps type annotations (the rest
+of the codebase is unannotated) because scenario JSON crosses a
+parsing boundary where the shapes earn their keep.
 """
 
+import fileutil
 import json
 import logging
 import os
 import random
 from dataclasses import dataclass, field
+from typing import TypedDict
 
-import fileutil
 import llmclient
 
 logger = logging.getLogger(__name__)
 
-MUD_MODEL = os.environ.get("REPLICANTA_MUD_MODEL", "qwen2.5:3b")
-MUD_TIMEOUT = int(os.environ.get("REPLICANTA_MUD_TIMEOUT", "60"))
+
+def _mud_model():
+    """Decision model (env: REPLICANTA_MUD_MODEL, read per call)."""
+    return os.environ.get("REPLICANTA_MUD_MODEL", "qwen2.5:3b")
+
+
+def _mud_timeout():
+    """Per-decision timeout seconds (env: REPLICANTA_MUD_TIMEOUT, per call)."""
+    return int(os.environ.get("REPLICANTA_MUD_TIMEOUT", "60"))
 
 DIR_ALIASES = {"n": "north", "s": "south", "e": "east", "w": "west",
                "u": "up", "d": "down"}
@@ -40,13 +52,22 @@ class Room:
     is_goal: bool = False
 
 
+class WinCondition(TypedDict, total=False):
+    """How a scenario is won: take 'item', or reach 'room'. 'win_text'
+    optionally overrides the flavor line spoken when the item is taken
+    (scenario data, so generated scenarios can narrate their own win)."""
+    item: str
+    room: str
+    win_text: str
+
+
 @dataclass
 class Scenario:
     title: str
     premise: str
     start_room: str
     rooms: dict[str, Room]
-    win_condition: dict = field(default_factory=dict)
+    win_condition: WinCondition = field(default_factory=dict)
 
 
 @dataclass
@@ -99,10 +120,6 @@ class MudSession:
         )
 
 
-def slug(name: str) -> str:
-    return fileutil.slug(name)
-
-
 def default_scenario() -> Scenario:
     """The built-in deterministic dungeon: mossy clearing, cave, locked gate."""
     return Scenario(
@@ -144,7 +161,9 @@ def default_scenario() -> Scenario:
                 is_goal=True,
             ),
         },
-        win_condition={"item": "amulet"},
+        win_condition={"item": "amulet",
+                           "win_text": ("You lift the amulet. "
+                                        "The dungeon exhales")},
     )
 
 
@@ -155,7 +174,7 @@ class MudGame:
     def __init__(self, scenario=None, session=None):
         self.scenario = scenario or default_scenario()
         self.session = session or MudSession(
-            scenario_id=slug(self.scenario.title),
+            scenario_id=fileutil.slug(self.scenario.title),
             scenario_title=self.scenario.title,
             premise=self.scenario.premise,
         )
@@ -268,8 +287,9 @@ class MudGame:
                 self.inventory.append(held)
                 self.session.inventory_log.append((held, self.turns))
                 if held == self.scenario.win_condition.get("item"):
-                    if held == "amulet":
-                        text = ("You lift the amulet. The dungeon exhales — "
+                    custom = self.scenario.win_condition.get("win_text")
+                    if custom:
+                        text = (f"{custom} — "
                                 f"you have won, in {self.turns} turns.")
                     else:
                         text = (f"You take the {held}. The dungeon exhales — "
@@ -340,7 +360,10 @@ def _org_name(org):
     name = org.store.belief_value("self", "name")
     if name:
         return name
-    return getattr(org, "dir_path", None) and getattr(org.dir_path, "name", None) or "the organism"
+    dir_path = getattr(org, "dir_path", None)
+    if dir_path is not None and getattr(dir_path, "name", None):
+        return dir_path.name
+    return "the organism"
 
 
 def _user_name(org):
@@ -495,7 +518,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
     if generate is None:
         def generate(prompt):
             return llmclient.generate(
-                prompt, model=MUD_MODEL, timeout=MUD_TIMEOUT,
+                prompt, model=_mud_model(), timeout=_mud_timeout(),
                 temperature=0.7)
     command = reason = None
     try:
@@ -541,8 +564,9 @@ def _scenario_generation_prompt(description, org):
     )
 
 
-def validate_scenario(data) -> Scenario:
-    """Validate and normalize scenario JSON, falling back to the default."""
+def scenario_or_default(data) -> Scenario:
+    """Validate and normalize scenario JSON; any error substitutes the
+    default scenario (with a logged warning) rather than failing."""
     try:
         title = data["title"]
         premise = data["premise"]
@@ -629,8 +653,9 @@ def scenario_to_json(scenario) -> dict:
 
 
 def scenario_from_json(data) -> Scenario:
-    """JSON dict -> Scenario, using the same validation as generation."""
-    return validate_scenario(data)
+    """JSON dict -> Scenario, substituting the default on bad input
+    (same contract as scenario_or_default)."""
+    return scenario_or_default(data)
 
 
 def generate_scenario(description, org, generate=None) -> Scenario:
@@ -638,7 +663,7 @@ def generate_scenario(description, org, generate=None) -> Scenario:
     if generate is None:
         def generate(prompt):
             return llmclient.generate(
-                prompt, model=MUD_MODEL, timeout=MUD_TIMEOUT, temperature=0.7)
+                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=0.7)
     prompt = _scenario_generation_prompt(description, org)
     try:
         raw = generate(prompt)
@@ -649,7 +674,7 @@ def generate_scenario(description, org, generate=None) -> Scenario:
                 if not line.strip().startswith("```"))
             text = text.strip()
         data = json.loads(text)
-        return validate_scenario(data)
+        return scenario_or_default(data)
     except Exception as exc:  # noqa: BLE001
         logger.warning("MUD scenario generation failed: %s; using default", exc)
         return default_scenario()

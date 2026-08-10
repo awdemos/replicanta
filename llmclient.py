@@ -17,12 +17,29 @@ import urllib.request
 import extensions
 
 DEFAULT_MODEL = "qwen3.5:latest"
-VISION_MODEL = os.environ.get("REPLICANTA_VISION_MODEL", "moondream")
-VISION_TIMEOUT = int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
-OLLAMA_URL = os.environ.get(
-    "OLLAMA_URL", "http://localhost:11434/api/generate")
 MAX_TOKENS = 180
-TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "240"))
+
+
+def vision_model():
+    """Vision model name (env: REPLICANTA_VISION_MODEL, read per call)."""
+    return os.environ.get("REPLICANTA_VISION_MODEL", "moondream")
+
+
+def vision_timeout():
+    """Vision timeout seconds (env: REPLICANTA_VISION_TIMEOUT, per call)."""
+    return int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
+
+
+def ollama_url():
+    """Ollama generate endpoint (env: OLLAMA_URL, read per call so tests
+    and runtime overrides are not frozen at import)."""
+    return os.environ.get(
+        "OLLAMA_URL", "http://localhost:11434/api/generate")
+
+
+def default_timeout():
+    """Generation timeout seconds (env: OLLAMA_TIMEOUT, read per call)."""
+    return int(os.environ.get("OLLAMA_TIMEOUT", "240"))
 # per-call ceiling; a 27b-class model chews a 1k-token prompt for ~90s
 
 VOICE_PROBE_TIMEOUT = 2      # seconds for the /api/tags reachability probe
@@ -53,7 +70,7 @@ def reset_voice():
 
 
 def _tags_url():
-    parts = urllib.parse.urlsplit(OLLAMA_URL)
+    parts = urllib.parse.urlsplit(ollama_url())
     return urllib.parse.urlunsplit(
         (parts.scheme, parts.netloc, "/api/tags", "", ""))
 
@@ -129,10 +146,12 @@ def _strip_special(text):
     return text.strip()
 
 
-def generate_with_stats(prompt, model, timeout=TIMEOUT, temperature=0.95):
+def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     """(text, stats) from ollama /api/generate, non-streaming; stats are
     the exact prompt/gen token counts from ollama's eval fields. Raises
     on failure."""
+    if timeout is None:
+        timeout = default_timeout()
     payload = json.dumps({
         "model": model,
         "prompt": prompt,
@@ -142,7 +161,7 @@ def generate_with_stats(prompt, model, timeout=TIMEOUT, temperature=0.95):
                     "repeat_penalty": 1.1, "stop": _STOP_TOKENS},
     }).encode()
     req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
+        ollama_url(), data=payload,
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
@@ -153,14 +172,18 @@ def generate_with_stats(prompt, model, timeout=TIMEOUT, temperature=0.95):
     return _strip_special(_strip_think(data.get("response", ""))), stats
 
 
-def generate(prompt, model, timeout=TIMEOUT, temperature=0.95):
+def generate(prompt, model, timeout=None, temperature=0.95):
     """POST to ollama /api/generate, non-streaming. Raises on failure."""
     return generate_with_stats(prompt, model, timeout, temperature)[0]
 
 
-def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):
+def describe_image(image_bytes, model=None, timeout=None):
     """JPEG bytes -> a short scene description from a local vision model
     (ollama /api/generate with base64 images). Raises on failure."""
+    if model is None:
+        model = vision_model()
+    if timeout is None:
+        timeout = vision_timeout()
     payload = json.dumps({
         "model": model,
         "prompt": ("Describe what is visible in this image in one or two "
@@ -171,7 +194,7 @@ def describe_image(image_bytes, model=VISION_MODEL, timeout=VISION_TIMEOUT):
         "options": {"num_predict": 80, "temperature": 0.3},
     }).encode()
     req = urllib.request.Request(
-        OLLAMA_URL, data=payload,
+        ollama_url(), data=payload,
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())

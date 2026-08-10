@@ -18,9 +18,12 @@ import os
 import threading
 
 SAMPLE_RATE = 16000
-MODEL_NAME = os.environ.get("REPLICANTA_STT_MODEL", "base")
-DEVICE = os.environ.get("REPLICANTA_STT_DEVICE", "cpu")
-COMPUTE = os.environ.get("REPLICANTA_STT_COMPUTE", "int8")
+def _stt_config():
+    """(model, device, compute) for WhisperModel, read per call so the
+    REPLICANTA_STT_* env overrides are not frozen at import."""
+    return (os.environ.get("REPLICANTA_STT_MODEL", "base"),
+            os.environ.get("REPLICANTA_STT_DEVICE", "cpu"),
+            os.environ.get("REPLICANTA_STT_COMPUTE", "int8"))
 MIN_SECONDS = 0.25   # shorter captures are treated as accidental taps
 
 
@@ -192,6 +195,7 @@ class Listener:
         with self._model_lock:
             if self._model is None:
                 from faster_whisper import WhisperModel
+                model, device, compute = _stt_config()
                 self._model = WhisperModel(
-                    MODEL_NAME, device=DEVICE, compute_type=COMPUTE)
+                    model, device=device, compute_type=compute)
             return self._model

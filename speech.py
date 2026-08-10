@@ -12,6 +12,10 @@ switches among downloaded ones, download_voice() fetches a new one.
 REPLICANTA_VOICE_MODEL overrides the default starting model. Playback
 goes through PulseAudio/PipeWire, so it reaches the host's sound server
 even inside a Toolbx container.
+
+Deliberate shape: unlike camera.py/listen.py (classes with injectable
+seams), speech is a module-level singleton — one sound server, one
+voice, one queue per process. reset() is the test hook.
 """
 
 import io

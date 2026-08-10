@@ -994,17 +994,18 @@ class OrganismApp(App):
         """A saved generated scenario by slug, or the built-in default.
         The slug comes from a resumed session on disk, so re-validate it
         the same way writes produce it before touching the filesystem."""
-        if not slug or mud.slug(slug) != slug:
+        if not slug or fileutil.slug(slug) != slug:
             return None
         path = (self._mud_artifacts_dir() / "mud" / "scenarios"
                 / f"{slug}.json")
         try:
             if path.exists():
                 return mud.scenario_from_json(json.loads(path.read_text()))
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            self._append_log(f"mud: couldn't load scenario {slug} ({exc})",
+                             STYLE_WARN)
         default = mud.default_scenario()
-        if mud.slug(default.title) == slug:
+        if fileutil.slug(default.title) == slug:
             return default
         return None
 
@@ -1013,7 +1014,7 @@ class OrganismApp(App):
         try:
             directory = self._mud_artifacts_dir() / "mud" / "scenarios"
             directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"{mud.slug(scenario.title)}.json"
+            path = directory / f"{fileutil.slug(scenario.title)}.json"
             fileutil.atomic_write_text(
                 path, json.dumps(mud.scenario_to_json(scenario), indent=1))
             self._append_log(f"scenario saved: artifacts/mud/scenarios/"
@@ -1099,7 +1100,7 @@ class OrganismApp(App):
         if not args:
             self._append_log(
                 f"camera: /dev/video{self.camera.device} · vision model "
-                f"{llmclient.VISION_MODEL} · /camera list · "
+                f"{llmclient.vision_model()} · /camera list · "
                 "/camera use <device>", STYLE_DIM)
             return
         if args[0] == "list":
@@ -1155,9 +1156,10 @@ class OrganismApp(App):
         use <id|name> = choose the device for future recordings."""
         if not args:
             mic = self.listener.mic_spec or "default"
+            stt_model, stt_device, stt_compute = listen._stt_config()
             self._append_log(
-                f"microphone: {mic} · stt {listen.MODEL_NAME} "
-                f"({listen.DEVICE}/{listen.COMPUTE}) · "
+                f"microphone: {mic} · stt {stt_model} "
+                f"({stt_device}/{stt_compute}) · "
                 "/microphone list · /microphone use <device>", STYLE_DIM)
             return
         if args[0] == "list":

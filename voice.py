@@ -8,12 +8,11 @@ voice imports both, narration imports neither."""
 import extensions
 import narration
 from arena import ThoughtArena
-from llmclient import TIMEOUT
 from narration import dedup_emerge, state_snapshot
 from skills import Skill
 
 
-def narrate(org, model=None, timeout=TIMEOUT, rng=None):
+def narrate(org, model=None, timeout=None, rng=None):
     """First-person idle thought, or None when the only thoughts on
     offer restate what was just said — silence beats an echo."""
     return dedup_emerge(
@@ -22,7 +21,7 @@ def narrate(org, model=None, timeout=TIMEOUT, rng=None):
                                              timeout=timeout))
 
 
-def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
+def respond(org, user_text, model=None, timeout=None, rng=None,
             on_token=None, quick=False):
     """First-person reply to the user; quick=True uses one cleaned
     generation for many-speaker contexts. The winner is replayed
@@ -35,7 +34,7 @@ def respond(org, user_text, model=None, timeout=TIMEOUT, rng=None,
 
 # -- skills: reflection loop -------------------------------------------------
 
-def reflect(org, model=None, timeout=TIMEOUT, rng=None):
+def reflect(org, model=None, timeout=None, rng=None):
     """One reflection cycle: distill a skill, patch one, or 'nothing'.
     Structured task, parsed and applied to the skill store; offline or
     unparseable is a quiet no-op — never a fake skill."""
@@ -76,7 +75,7 @@ def reflect(org, model=None, timeout=TIMEOUT, rng=None):
 
 # -- goals --------------------------------------------------------------------
 
-def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
+def form_goal(org, model=None, timeout=None, rng=None):
     """One concrete intention grounded in what the organism knows;
     deterministic goal offline."""
     return ThoughtArena(rng=rng).emerge(
@@ -87,7 +86,7 @@ def form_goal(org, model=None, timeout=TIMEOUT, rng=None):
 
 # -- artifacts ----------------------------------------------------------------
 
-def diary_entry(org, model=None, timeout=TIMEOUT, rng=None):
+def diary_entry(org, model=None, timeout=None, rng=None):
     """One short diary entry about recent days; deterministic entry
     offline."""
     return ThoughtArena(rng=rng).emerge(
@@ -98,7 +97,7 @@ def diary_entry(org, model=None, timeout=TIMEOUT, rng=None):
 
 # -- curiosity toward the user -------------------------------------------------
 
-def ask_user(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
+def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
     """One curious question for the user, grounded in a seed;
     deterministic question offline."""
     return ThoughtArena(rng=rng).emerge(
@@ -109,7 +108,7 @@ def ask_user(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
 
 # -- self-talk ----------------------------------------------------------------
 
-def self_ask(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
+def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
     """One self-question, steered away from its own recent questions;
     deterministic template offline or on repeat."""
     question = dedup_emerge(
@@ -123,7 +122,7 @@ def self_ask(org, model=None, timeout=TIMEOUT, rng=None, on_token=None):
     return question
 
 
-def self_answer(org, question, model=None, timeout=TIMEOUT, rng=None,
+def self_answer(org, question, model=None, timeout=None, rng=None,
                 on_token=None):
     """First-person answer to the organism's own question;
     deterministic reply offline or on repeat."""
