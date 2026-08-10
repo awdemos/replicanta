@@ -150,6 +150,18 @@ def test_inner_view_shows_pending_proposal(org, tmp_path):
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
     assert "seed: what if the rain is curious" in view
+    assert "auto-applied" in view
+
+
+def test_inner_view_shows_manual_approval_when_auto_off(org, tmp_path):
+    org.store.auto_apply_patches = False
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "extensions.json").write_text(
+        '{"version": 0, "entries": [], "pending": '
+        '{"kind": "seed", "text": "what if the rain is curious"}}')
+    view = tui_views.inner_view(org)
+    assert "pending proposal" in view
     assert "/approve to apply" in view
 
 
@@ -228,6 +240,67 @@ def _stocked_org(org):
     org.store.remember("mud", "found a torch")
     org.store.add_goal("learn the user's name", marker=1, strategy="ask")
     return org
+
+
+def test_mind_renderable_shows_top_beliefs(org):
+    org.store.add(("self", "likes", "rain"), 0.9)
+    org.store.add(("self", "fears", "fading"), 0.4)
+    text = _render(tui_views.mind_renderable(org))
+    assert "top beliefs" in text
+    assert "self:likes=rain" in text
+    assert "genome:" in text
+
+
+def test_mind_renderable_shows_confidence_bars(org):
+    org.store.add(("user", "name", "sam"), 0.8)
+    text = _render(tui_views.mind_renderable(org))
+    assert "▮" in text or "█" in text, "expected a confidence bar"
+    assert "0.80" in text
+
+
+def test_mind_renderable_shows_rules_and_attention(org):
+    org.store.commit_rule('q1(x) = bel(x, "a", "b")', 1)
+    org.store.attention = {("color", "blue")}
+    text = _render(tui_views.mind_renderable(org))
+    assert "committed rules" in text
+    assert "attention" in text
+    assert "color=blue" in text
+
+
+def test_mind_renderable_shows_goals_and_skills(org):
+    org.store.add_goal("learn five things about the user", marker=0)
+    org.store.complete_active_goal()
+    text = _render(tui_views.mind_renderable(org))
+    assert "goals" in text
+    assert "learn five things about the user" in text
+    assert "done" in text
+
+
+def test_memory_renderable_shows_episodes(org):
+    org.store.remember("learned", "your name is sam")
+    text = _render(tui_views.memory_renderable(org))
+    assert "episodes" in text
+    assert "learned" in text
+    assert "your name is sam" in text
+
+
+def test_memory_renderable_shows_user_facts_and_self_view(org):
+    org.store.add(("user", "name", "sam"), 0.8)
+    org.store.add(("self", "described_as", "brave"), 0.8)
+    text = _render(tui_views.memory_renderable(org))
+    assert "what it knows about you" in text
+    assert "your name is sam" in text
+    assert "what you said it is" in text
+    assert "brave" in text
+
+
+def test_memory_renderable_lists_artifacts(org, tmp_path):
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "diary.md").write_text("dear diary")
+    text = _render(tui_views.memory_renderable(org))
+    assert "artifacts" in text
+    assert "diary.md" in text
 
 
 def test_cells_layout_returns_metadata_grid(org):

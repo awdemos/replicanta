@@ -1,7 +1,9 @@
-"""Extensions feature (tier B): the organism's approval-gated genome
-patches — a validated, versioned registry of extra learning patterns,
-utterance seeds and sentiment vocabulary in artifacts/extensions.json.
-Nothing applies without /approve; /revert rolls back."""
+"""Extensions feature (tier B): the organism's self-patch registry — a
+validated, versioned registry of extra learning patterns, utterance seeds
+and sentiment vocabulary in artifacts/extensions.json.
+
+By default patches auto-apply; manual approve/reject is available when
+auto_apply is False. /revert rolls back the last applied entry."""
 
 import sys
 from pathlib import Path
@@ -67,20 +69,29 @@ def test_validate_seed_and_terms():
 
 # -- registry round trips -------------------------------------------------------
 
-def test_propose_approve_flow(tmp_path):
+def test_propose_auto_applies_by_default(tmp_path):
     path = _path(tmp_path)
-    extensions.propose(path, _good_pattern())
-    assert extensions.pending()["regex"] == "i adore ([a-z '-]+)"
-    applied = extensions.approve(path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is not None
     assert applied["kind"] == "pattern"
     assert extensions.pending() is None
     assert extensions.registry()["version"] == 1
     assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
 
 
+def test_propose_stages_when_not_auto_apply(tmp_path):
+    path = _path(tmp_path)
+    extensions.propose(path, _good_pattern(), auto_apply=False)
+    assert extensions.pending()["regex"] == "i adore ([a-z '-]+)"
+    applied = extensions.approve(path)
+    assert applied["kind"] == "pattern"
+    assert extensions.pending() is None
+    assert extensions.registry()["version"] == 1
+
+
 def test_reject_clears_pending(tmp_path):
     path = _path(tmp_path)
-    extensions.propose(path, _good_pattern())
+    extensions.propose(path, _good_pattern(), auto_apply=False)
     rejected = extensions.reject(path)
     assert rejected is not None
     assert extensions.pending() is None
@@ -89,9 +100,10 @@ def test_reject_clears_pending(tmp_path):
 
 def test_revert_removes_last_applied(tmp_path):
     path = _path(tmp_path)
-    extensions.propose(path, _good_pattern())
+    extensions.propose(path, _good_pattern(), auto_apply=False)
     extensions.approve(path)
-    extensions.propose(path, {"kind": "seed", "text": "a quiet thought"})
+    extensions.propose(path, {"kind": "seed", "text": "a quiet thought"},
+                       auto_apply=False)
     extensions.approve(path)
     reverted = extensions.revert_last(path)
     assert reverted["kind"] == "seed"
@@ -105,8 +117,7 @@ def test_revert_removes_last_applied(tmp_path):
 
 def test_learning_extract_uses_registry_pattern(tmp_path):
     extensions.load_global(_path(tmp_path))
-    extensions.propose(_path(tmp_path), _good_pattern())
-    extensions.approve(_path(tmp_path))
+    extensions.propose(_path(tmp_path), _good_pattern(), auto_apply=True)
     facts = learning.extract("i adore hiking")
     assert (("user", "like_hiking", "true"), False) in facts
 
@@ -114,8 +125,8 @@ def test_learning_extract_uses_registry_pattern(tmp_path):
 def test_sentiment_uses_registry_terms(tmp_path):
     extensions.load_global(_path(tmp_path))
     extensions.propose(_path(tmp_path),
-                       {"kind": "harsh_term", "text": "blork"})
-    extensions.approve(_path(tmp_path))
+                       {"kind": "harsh_term", "text": "blork"},
+                       auto_apply=True)
     assert sentiment.harshness("you are a blork") > 0.0
     assert sentiment.harshness("you are lovely") == 0.0
 
@@ -138,8 +149,8 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
 
     extensions.load_global(_path(tmp_path))
     extensions.propose(_path(tmp_path),
-                       {"kind": "seed", "text": "a question about gravity"})
-    extensions.approve(_path(tmp_path))
+                       {"kind": "seed", "text": "a question about gravity"},
+                       auto_apply=True)
     import random
     snap = narration.state_snapshot(FakeOrg(tmp_path))
     seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(80)}

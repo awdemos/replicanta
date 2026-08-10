@@ -39,40 +39,61 @@ def chat_card(who, text, timestamp=None, border_style=None):
     )
 
 
+def _human_size(n):
+    """Bytes -> compact human form (B, KB, MB)."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
 def mind_view(org):
-    """The Mind tab: top beliefs with confidence bars, committed rules,
-    attention focus, genome stats. Read-only; rebuilt on every tick."""
+    """The Mind tab: a human-readable snapshot of what the organism is
+    currently holding as true, aiming for, and paying attention to.
+    Read-only; rebuilt on every tick."""
     m = org.metrics()
-    lines = ["top beliefs", ""]
+    lines = ["top beliefs", "",
+             ("(▮ = confidence; more blocks means the organism holds it "
+              "more strongly)"), ""]
     top = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])
     for (obj, attr, val), conf in top[:_BELIEF_LIMIT]:
         lines.append(f"{conf_bar(conf)} {conf:.2f} {obj}:{attr}={val}")
     if not top:
-        lines.append("(no beliefs yet)")
+        lines += [("(no beliefs yet — say something like \"my name is "
+                   "Sam\" or \"i like rain\")"), ""]
     if org.store.goals:
         lines += ["", "goals", ""]
         active = org.store.active_goal()
         if active:
+            strategy = active.get("strategy")
+            strategy_line = f"   strategy: {strategy}" if strategy else ""
             lines.append(
-                f"→ {active['text']} (since cycle {active['created_cycle']})")
+                f"→ now trying: {active['text']} "
+                f"(since cycle {active['created_cycle']}){strategy_line}")
         for g in [g for g in org.store.goals
                   if g["done_cycle"] is not None][-3:]:
-            lines.append(f"done (cycle {g['done_cycle']}): {g['text']}")
+            lines.append(f"   done (cycle {g['done_cycle']}): {g['text']}")
     skill_store = getattr(org, "skills", None)
     skill_list = skill_store.list() if skill_store is not None else []
     if skill_list:
-        lines += ["", "skills", ""]
+        lines += ["", "skills", "",
+                  "(techniques the organism has learned and can reuse)", ""]
         for s in skill_list[:8]:
             lines.append(f"{s.name} (used {s.uses}×) — when {s.when}")
     if org.store.rules:
-        lines += ["", "committed rules", ""]
+        lines += ["", "committed rules", "",
+                  "(derived patterns the organism treats as reliable)", ""]
         lines += [text for text, _depth in org.store.rules[:_RULE_LIMIT]]
     if org.store.attention:
         pairs = sorted(f"{a}={v}" for a, v in org.store.attention)
-        lines += ["", "attention: " + ", ".join(pairs)]
+        lines += ["", "attention: " + ", ".join(pairs),
+                  ("(only beliefs matching the focus window strongly "
+                   "influence replies right now)")]
     lines += ["",
               (f"genome: {m.belief_count} beliefs · {m.rule_count} rules · "
-               f"depth {m.total_depth} · score {m.score():.1f}")]
+               f"depth {m.total_depth} · consciousness score "
+               f"{m.score():.1f}")]
     activity_lines = activity.summary_lines(org.store)
     if activity_lines:
         lines += [""] + activity_lines
@@ -80,28 +101,35 @@ def mind_view(org):
 
 
 def memory_view(org):
-    """The Memory tab: every episode (cycle-stamped), what the organism
-    knows about the user, and what the user said the organism is."""
-    lines = ["episodes", ""]
+    """The Memory tab: the organism's episodic diary, what it has learned
+    about the user, how the user describes it, and any saved artifacts.
+    Read-only; rebuilt on every tick."""
+    lines = ["episodes", "",
+             ("(notable moments from the organism's life, stamped by the "
+              "cycle they happened)"), ""]
     for ep in org.store.memory:
         lines.append(f"cycle {ep['cycle']:<4} {ep['kind']:<8} {ep['text']}")
     if not org.store.memory:
-        lines.append("(nothing remembered yet)")
+        lines += [("(nothing remembered yet — events appear here when the "
+                   "organism dreams, learns, or fades)"), ""]
     beliefs = org.store.beliefs()
     user_facts = [describe(b) for b in beliefs if b[0] == "user"]
     if user_facts:
-        lines += ["", "what it knows about you", ""]
+        lines += ["", "what it knows about you", "",
+                  "(facts extracted from what you said)", ""]
         lines += [f"- {f}" for f in user_facts]
     views = [v for (o, a, v) in beliefs if (o, a) == ("self", "described_as")]
     if views:
-        lines += ["", "what you said it is", ""]
+        lines += ["", "what you said it is", "",
+                  "(labels you have given the organism)", ""]
         lines += [f"- {v}" for v in views]
     artifacts = org.store.dir_path / "artifacts"
     if artifacts.is_dir():
         files = sorted(p for p in artifacts.iterdir() if p.is_file())
         if files:
-            lines += ["", "artifacts", ""]
-            lines += [f"- {p.name} ({p.stat().st_size} bytes)"
+            lines += ["", "artifacts", "",
+                      "(files the organism has written)", ""]
+            lines += [f"- {p.name} ({_human_size(p.stat().st_size)})"
                       for p in files]
     return "\n".join(lines)
 
@@ -156,6 +184,236 @@ def _perpetuation_stats(store):
         "promoted": a.get("dreams_promoted", 0),
         "discarded": a.get("dreams_discarded", 0),
     }
+
+
+def _belief_style(obj):
+    if obj == "self":
+        return "magenta"
+    if obj == "user":
+        return "cyan"
+    return "blue"
+
+
+def mind_renderable(org):
+    """The Mind tab as rich renderables: top beliefs with confidence bars,
+    goals, skills, rules, attention, and genome/activity footer. Rebuilt
+    every tick."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    panels = []
+    store = org.store
+
+    top = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])
+    if top:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="dim", justify="right")
+        grid.add_column(justify="left")
+        grid.add_column(justify="left")
+        grid.add_column(justify="right", style="dim")
+        for (obj, attr, val), conf in top[:_BELIEF_LIMIT]:
+            style = _belief_style(obj)
+            grid.add_row(
+                f"{conf:.2f}",
+                Text(conf_bar(conf), style=style),
+                Text(f"{obj}:{attr}={val}", style=style),
+                f"({obj})",
+            )
+        caption = Text(
+            "▮ = confidence; more blocks means the organism holds it "
+            "more strongly",
+            style="dim",
+        )
+        panels.append(
+            Panel(
+                Group(grid, Text(""), caption),
+                title="top beliefs",
+                border_style="cyan",
+            )
+        )
+
+    if store.goals:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="bold")
+        grid.add_column(justify="left")
+        active = store.active_goal()
+        if active:
+            strategy = active.get("strategy")
+            strategy_text = f"  · strategy: {strategy}" if strategy else ""
+            grid.add_row(
+                Text("→", style="green"),
+                Text.assemble(
+                    ("now trying: ", "bold"),
+                    (active["text"], ""),
+                    (f"  (since cycle {active['created_cycle']})", "dim"),
+                    (strategy_text, "dim"),
+                ),
+            )
+        completed = [g for g in store.goals if g["done_cycle"] is not None][-3:]
+        for g in completed:
+            grid.add_row(
+                Text("✓", style="dim"),
+                Text.assemble(
+                    (f"done (cycle {g['done_cycle']}): ", "dim"),
+                    (g["text"], "italic"),
+                ),
+            )
+        panels.append(Panel(grid, title="goals", border_style="green"))
+
+    skill_store = getattr(org, "skills", None)
+    skill_list = skill_store.list() if skill_store is not None else []
+    if skill_list:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="bold")
+        grid.add_column(justify="left")
+        for s in skill_list[:8]:
+            grid.add_row(
+                Text(s.name, style="yellow"),
+                Text.assemble(
+                    (f"used {s.uses}×", "dim"),
+                    ("  ·  ", "dim"),
+                    (f"when {s.when}", ""),
+                ),
+            )
+        caption = Text(
+            "techniques the organism has learned and can reuse", style="dim"
+        )
+        panels.append(
+            Panel(Group(grid, Text(""), caption), title="skills",
+                  border_style="yellow")
+        )
+
+    if store.rules:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(justify="left")
+        for text, _depth in store.rules[:_RULE_LIMIT]:
+            grid.add_row(Text(text, style="blue"))
+        caption = Text(
+            "derived patterns the organism treats as reliable", style="dim"
+        )
+        panels.append(
+            Panel(Group(grid, Text(""), caption), title="committed rules",
+                  border_style="blue")
+        )
+
+    if store.attention:
+        pairs = sorted(f"{a}={v}" for a, v in store.attention)
+        body = Group(
+            Text(", ".join(pairs)),
+            Text(
+                "only beliefs matching the focus window strongly influence "
+                "replies right now",
+                style="dim",
+            ),
+        )
+        panels.append(
+            Panel(body, title="attention", border_style="yellow")
+        )
+
+    m = org.metrics()
+    genome_text = (f"{m.belief_count} beliefs · {m.rule_count} rules · "
+                   f"depth {m.total_depth} · consciousness score "
+                   f"{m.score():.1f}")
+    footer = Text.assemble(
+        ("genome: ", "bold"),
+        (genome_text, ""),
+    )
+    activity_lines = activity.summary_lines(store)
+    if activity_lines:
+        footer = Group(footer, Text(""), Text("\n".join(activity_lines)))
+    panels.append(Panel(footer, title="activity", border_style="dim"))
+
+    return Group(*panels)
+
+
+def memory_renderable(org):
+    """The Memory tab as rich renderables: episodes, user facts,
+    self-description labels, and saved artifacts. Rebuilt every tick."""
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    panels = []
+    store = org.store
+
+    if store.memory:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="dim", justify="right")
+        grid.add_column(style="bold")
+        grid.add_column(justify="left")
+        for ep in store.memory:
+            grid.add_row(
+                f"cycle {ep['cycle']}",
+                ep["kind"],
+                ep["text"],
+            )
+        panels.append(Panel(grid, title="episodes", border_style="magenta"))
+    else:
+        panels.append(
+            Panel(
+                Text(
+                    "nothing remembered yet — events appear here when the "
+                    "organism dreams, learns, or fades",
+                    style="dim",
+                ),
+                title="episodes",
+                border_style="magenta",
+            )
+        )
+
+    beliefs = store.beliefs()
+    user_facts = [describe(b) for b in beliefs if b[0] == "user"]
+    if user_facts:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column()
+        for f in user_facts:
+            grid.add_row(Text(f"• {f}"))
+        caption = Text("facts extracted from what you said", style="dim")
+        panels.append(
+            Panel(
+                Group(grid, Text(""), caption),
+                title="what it knows about you",
+                border_style="cyan",
+            )
+        )
+
+    views = [v for (o, a, v) in beliefs if (o, a) == ("self", "described_as")]
+    if views:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column()
+        for v in views:
+            grid.add_row(Text(f"• {v}"))
+        caption = Text("labels you have given the organism", style="dim")
+        panels.append(
+            Panel(
+                Group(grid, Text(""), caption),
+                title="what you said it is",
+                border_style="green",
+            )
+        )
+
+    artifacts = store.dir_path / "artifacts"
+    if artifacts.is_dir():
+        files = sorted(p for p in artifacts.iterdir() if p.is_file())
+        if files:
+            grid = Table.grid(padding=(0, 1))
+            grid.add_column(style="bold")
+            grid.add_column(justify="right", style="dim")
+            for p in files:
+                grid.add_row(p.name, _human_size(p.stat().st_size))
+            caption = Text("files the organism has written", style="dim")
+            panels.append(
+                Panel(
+                    Group(grid, Text(""), caption),
+                    title="artifacts",
+                    border_style="blue",
+                )
+            )
+
+    return Group(*panels)
 
 
 def inner_renderable(org):
@@ -243,12 +501,13 @@ def inner_renderable(org):
 
     proposal = _pending_proposal(org)
     if proposal:
+        auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
+        action = "auto-applied" if auto else "/approve to apply · /reject to discard"
         panels.append(
             Panel(
                 Group(
                     Text(proposal),
-                    Text("(/approve to apply · /reject to discard)",
-                         style="dim"),
+                    Text(f"({action})", style="dim"),
                 ),
                 title="pending proposal",
                 border_style="yellow",
@@ -302,7 +561,9 @@ def inner_view(org):
     if proposal:
         lines += ["", "pending proposal", ""]
         lines.append(proposal)
-        lines.append("(/approve to apply · /reject to discard)")
+        auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
+        lines.append("auto-applied" if auto
+                     else "(/approve to apply · /reject to discard)")
     return "\n".join(lines)
 
 

@@ -1298,8 +1298,10 @@ class OrganismApp(App):
         self._mind_text = tui_views.mind_view(self.org)
         self._memory_text = tui_views.memory_view(self.org)
         self._inner_text = tui_views.inner_view(self.org)
-        self.query_one("#mind", Static).update(self._mind_text)
-        self.query_one("#memory", Static).update(self._memory_text)
+        self.query_one("#mind", Static).update(
+            tui_views.mind_renderable(self.org))
+        self.query_one("#memory", Static).update(
+            tui_views.memory_renderable(self.org))
         self.query_one("#inner", Static).update(
             tui_views.inner_renderable(self.org))
         text, self._cells_grid = tui_views.cells_layout(self.org)
@@ -1507,18 +1509,34 @@ class OrganismApp(App):
             return
         if result["action"] == "proposal":
             entry = result["entry"]
-            self.org.store.remember(
-                "skill", f"proposed a patch ({entry['kind']})")
+            applied = result.get("applied")
+            auto = self.org.store.auto_apply_patches
+            if applied is not None:
+                self.org.store.remember(
+                    "skill", f"patch applied ({entry['kind']})")
+                self._append_log(
+                    f"patch applied ({entry['kind']}) — live now, no "
+                    "restart needed", STYLE_LEARNED, stamp=True)
+                self.notify(f"patch applied ({entry['kind']})",
+                            severity="information")
+            else:
+                self.org.store.remember(
+                    "skill", f"proposed a patch ({entry['kind']})")
             if entry["kind"] == "pattern":
                 detail = f"{entry['regex']} -> {entry['template']}"
             else:
                 detail = entry.get("text", "")
-            body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
-                    "/approve to accept · /reject to discard")
+            if auto:
+                body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
+                        "auto-apply is on; toggle with /auto-apply off")
+            else:
+                body = (f"{detail}\nwhy: {entry.get('why', '')}\n"
+                        "/approve to accept · /reject to discard")
             self._write_card(f"{self._org_name()} · proposes a patch",
                              body, "yellow")
-            self.notify("patch proposed — /approve or /reject",
-                        severity="warning")
+            self.notify("patch proposed — /approve or /reject" if not auto
+                        else "patch applied automatically",
+                        severity="warning" if not auto else "information")
             self.refresh_status()
             return
         self.org.store.remember(
@@ -1866,6 +1884,18 @@ class OrganismApp(App):
                                  STYLE_DIM, stamp=True)
             else:
                 self._append_log("/reject: no pending patch.", STYLE_DIM)
+        elif name == "/auto-apply":
+            args = parts[1:]
+            if args and args[0] in ("on", "off"):
+                self.org.store.auto_apply_patches = (args[0] == "on")
+                self.org.store.dirty = True
+                state = "on" if self.org.store.auto_apply_patches else "off"
+                self._append_log(f"auto-apply patches: {state}", STYLE_DIM)
+            else:
+                state = "on" if self.org.store.auto_apply_patches else "off"
+                self._append_log(
+                    f"auto-apply patches is {state} — "
+                    "use /auto-apply on|off", STYLE_DIM)
         elif name == "/revert":
             entry = extensions.revert_last(
                 self.org.dir_path / "artifacts" / "extensions.json")

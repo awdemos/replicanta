@@ -851,10 +851,11 @@ def test_tui_set_reflection_proposal_shows_card(monkeypatch, tmp_path):
 
 def test_tui_approve_applies_pending(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
     ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry())
+                    _proposal_entry(), auto_apply=False)
     app.handle_command("/approve")
     assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
     assert any("applied" in line for line in logged)
@@ -862,6 +863,7 @@ def test_tui_approve_applies_pending(monkeypatch, tmp_path):
 
 def test_tui_approve_without_pending(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
     app.handle_command("/approve")
@@ -870,10 +872,11 @@ def test_tui_approve_without_pending(monkeypatch, tmp_path):
 
 def test_tui_reject_discards_pending(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
+    app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
     ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry())
+                    _proposal_entry(), auto_apply=False)
     app.handle_command("/reject")
     assert ext_mod.pending() is None
     assert ext_mod.active_entries("pattern") == []
@@ -885,11 +888,37 @@ def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
     logged = []
     _patch_app(monkeypatch, app, logged)
     ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
-                    _proposal_entry())
+                    _proposal_entry(), auto_apply=False)
     ext_mod.approve(app.org.dir_path / "artifacts" / "extensions.json")
     app.handle_command("/revert")
     assert ext_mod.active_entries("pattern") == []
     assert any("reverted" in line for line in logged)
+
+
+def test_tui_auto_apply_patches_default_on(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    assert app.org.store.auto_apply_patches is True
+
+
+def test_tui_auto_apply_toggle(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    app.handle_command("/auto-apply off")
+    assert not app.org.store.auto_apply_patches
+    assert any("auto-apply patches: off" in line for line in logged)
+    app.handle_command("/auto-apply on")
+    assert app.org.store.auto_apply_patches
+    assert any("auto-apply patches: on" in line for line in logged)
+
+
+def test_tui_proposal_auto_applies_when_setting_on(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+    logged = []
+    _patch_app(monkeypatch, app, logged)
+    ext_mod.propose(app.org.dir_path / "artifacts" / "extensions.json",
+                    _proposal_entry(), auto_apply=True)
+    assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
 
 
 # -- nursery: /new, /swap, /organisms -----------------------------------------

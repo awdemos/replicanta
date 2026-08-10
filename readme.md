@@ -16,10 +16,10 @@ friend you can take on adventures in MUD mode with `/mud`.
 
 The organism(s) learns from what you tell it and can change itself: it writes
 files (genome, state, artifacts, diary), proposes edits to its own learning
-code (nothing applies without your `/approve` — read every proposal before
-accepting it), runs whatever Lua hook scripts you put in `scripts/` (Lua was
-deliberately chosen as a scripting language due to its simplicity over Python),
-downloads voice models, and sends prompts to your local ollama.
+code (by default patches auto-apply; toggle with `/auto-apply on|off`), runs
+whatever Lua hook scripts you put in `scripts/` (Lua was deliberately chosen
+as a scripting language due to its simplicity over Python), downloads voice
+models, and sends prompts to your local ollama.
 
 Everything an entity says — text and synthesized speech alike — is
 AI-generated: it can be wrong, odd, or unsettling, and it is never advice.
@@ -141,8 +141,9 @@ bar shows state, mood, belief/rule counts, and voice status.
 - `/mud` — toggle the dungeon crawl. Type direct moves like `go north` or
   `take torch` while it's running. `/mud map|story|quest`, `/mud
   pause|resume|step`, `/mud reset`, `/mud scenario <description>`.
-- Self-patches are staged in `artifacts/extensions.json`. `/approve`,
-  `/reject`, and `/revert` gate them; nothing applies without you.
+- Self-patches are staged in `artifacts/extensions.json`. By default they
+  auto-apply; use `/auto-apply off` to require `/approve` or `/reject`. `/revert`
+  rolls back the last applied patch.
 - `/reload` — re-read Lua hook scripts. `/lua name.lua` — run one on demand.
 - `/new fern` — create an organism; `/swap default` — switch;
   `/organisms` — list. Click an organism in the sidebar for its menu

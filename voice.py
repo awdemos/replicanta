@@ -50,9 +50,12 @@ def reflect(org, model=None, timeout=None, rng=None):
         ok, _reason = extensions.validate(result["entry"])
         if not ok:
             return {"action": "none"}
-        extensions.propose(
+        entry = extensions.propose(
             org.dir_path / "artifacts" / "extensions.json",
-            result["entry"])
+            result["entry"],
+            auto_apply=getattr(org.store, "auto_apply_patches", True))
+        if entry is not None:
+            result["applied"] = entry
         return result
     store = getattr(org, "skills", None)
     if store is None:

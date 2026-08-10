@@ -72,6 +72,7 @@ class BeliefStore:
         self.on_utterance = None # callback(role, text) fired on chat lines
         self.dirty = False        # any state changed since last save()
         self.genome_dirty = False # beliefs/rules changed -> .scl needs rewrite
+        self.auto_apply_patches = True  # organism self-patches apply immediately
 
     # -- belief operations -------------------------------------------------
     def note_activity(self, key, n=1):
@@ -272,6 +273,7 @@ class BeliefStore:
             "last_diary_cycle": self.last_diary_cycle,
             "last_reflect_cycle": self.last_reflect_cycle,
             "activity": self.activity,
+            "auto_apply_patches": self.auto_apply_patches,
         }
         atomic_write_text(self.state_path, json.dumps(state, indent=2))
         self.dirty = False
@@ -302,6 +304,7 @@ class BeliefStore:
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
         self.last_reflect_cycle = state.get("last_reflect_cycle", 0)
+        self.auto_apply_patches = state.get("auto_apply_patches", True)
         self.activity = {}
         for k, v in state.get("activity", {}).items():
             if isinstance(v, (list, dict)):
