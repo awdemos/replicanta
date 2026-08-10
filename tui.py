@@ -1,9 +1,13 @@
+"""The Textual app shell: OrganismApp wires the organism core (organism.py),
+the thought arena (arena.py) and the MUD engine (mud.py) to the terminal,
+delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
+
 import json
 import os
 import random
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import ClassVar
 
@@ -41,6 +45,7 @@ import nursery
 import speech
 import tui_commands
 import tui_views
+from tui_views import STYLE_DIM, STYLE_ORG
 from organism import Organism
 
 
@@ -230,13 +235,11 @@ class CellDetailScreen(ModalScreen):
 
 
 # role -> log style (Rich markup); engine events get their own styles
-STYLE_YOU = "cyan"
-STYLE_ORG = "green"
+STYLE_USER = "cyan"
 STYLE_DREAM = "magenta"
 STYLE_LEARNED = "yellow"
 STYLE_SELF = "italic yellow"
 STYLE_WARN = "red"
-STYLE_DIM = "dim"
 
 NARRATE_INTERVAL = 45.0   # seconds between self-narrations (each = 5 LLM calls)
 VOICE_PROBE_INTERVAL = 60.0   # seconds between ollama reachability probes
@@ -510,17 +513,13 @@ class OrganismApp(App):
         text = (f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · "
                 f"{mental}  │  {voice}{mic}{spoken}  {clock}")
         self._topbar_text = text
-        try:
-            self.query_one("#topbar", Static).update(text)
-        except (ScreenStackError, NoMatches):
-            pass
+        topbar = self._safe_query("#topbar", Static)
+        if topbar is not None:
+            topbar.update(text)
 
     def _refresh_sidebar(self):
         """Rebuild the nursery sidebar, highlighting the current organism."""
-        try:
-            lv = self.query_one("#sidebar-list", ListView)
-        except (ScreenStackError, NoMatches):
-            return
+        lv = self._safe_query("#sidebar-list", ListView)
         if not isinstance(lv, ListView):
             return
         lv.clear()
@@ -611,10 +610,9 @@ class OrganismApp(App):
             return
         self._drag_candidate = None
         self._dragging = name
-        try:
-            self.query_one("#sidebar", Vertical).set_class(True, "-dragging")
-        except NoMatches:
-            pass
+        sidebar = self._safe_query("#sidebar", Vertical)
+        if sidebar is not None:
+            sidebar.set_class(True, "-dragging")
         self._pending_show(f"dragging {name} — drop on a group")
 
     def on_mouse_up(self, event):
@@ -625,11 +623,9 @@ class OrganismApp(App):
         if self._dragging is None:
             return
         name, self._dragging = self._dragging, None
-        try:
-            self.query_one("#sidebar", Vertical).set_class(False,
-                                                           "-dragging")
-        except NoMatches:
-            pass
+        sidebar = self._safe_query("#sidebar", Vertical)
+        if sidebar is not None:
+            sidebar.set_class(False, "-dragging")
         self._pending_hide()
         item, in_sidebar = self._sidebar_item_at(event.screen_x,
                                                  event.screen_y)
@@ -973,45 +969,16 @@ class OrganismApp(App):
     def _mud_artifacts_dir(self):
         return self.org.dir_path / "artifacts"
 
-    def _mud_state_path(self):
-        return self._mud_artifacts_dir() / "mud_state.json"
-
     def _mud_save_session(self, game=None):
-        """Persist the session after every turn and on stop. Prefers the
-        BeliefStore method (organism side); until that lands, write
-        artifacts/mud_state.json directly."""
+        """Persist the session after every turn and on stop via the
+        organism-side BeliefStore."""
         game = game or self._mud_game
         if game is None:
             return
-        save = getattr(self.org.store, "save_mud_session", None)
-        if callable(save):
-            try:
-                save(game.session)
-                return
-            except Exception:  # noqa: BLE001, S110 — direct-write fallback
-                pass
-        try:
-            self._mud_artifacts_dir().mkdir(parents=True, exist_ok=True)
-            fileutil.atomic_write_text(
-                self._mud_state_path(),
-                json.dumps(game.session.to_json(), indent=1))
-        except OSError as exc:
-            self._append_log(f"mud: couldn't save session ({exc})", STYLE_WARN)
+        self.org.store.save_mud_session(game.session)
 
     def _mud_load_session(self):
-        load = getattr(self.org.store, "load_mud_session", None)
-        if callable(load):
-            try:
-                return load()
-            except Exception:  # noqa: BLE001, S110 — direct-read fallback
-                pass
-        path = self._mud_state_path()
-        if not path.exists():
-            return None
-        try:
-            return mud.MudSession.from_json(json.loads(path.read_text()))
-        except (OSError, ValueError, KeyError):
-            return None
+        return self.org.store.load_mud_session()
 
     def _mud_restore(self):
         """(scenario, session) from disk for resume, or (None, None) to
@@ -1034,7 +1001,7 @@ class OrganismApp(App):
         except (OSError, ValueError):
             pass
         default = mud.default_scenario()
-        if mud._slug(default.title) == slug:
+        if mud.slug(default.title) == slug:
             return default
         return None
 
@@ -1043,7 +1010,7 @@ class OrganismApp(App):
         try:
             directory = self._mud_artifacts_dir() / "mud" / "scenarios"
             directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"{mud._slug(scenario.title)}.json"
+            path = directory / f"{mud.slug(scenario.title)}.json"
             fileutil.atomic_write_text(
                 path, json.dumps(mud.scenario_to_json(scenario), indent=1))
             self._append_log(f"scenario saved: artifacts/mud/scenarios/"
@@ -1427,14 +1394,21 @@ class OrganismApp(App):
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)")
         self._status_text = self._bottombar_text
-        try:
-            self.query_one("#bottombar", Static).update(self._bottombar_text)
-        except (ScreenStackError, NoMatches):
-            pass  # not mounted: unit tests drive handlers without a screen
+        bottombar = self._safe_query("#bottombar", Static)
+        if bottombar is not None:
+            bottombar.update(self._bottombar_text)
 
     # -- log ---------------------------------------------------------------
+    def _safe_query(self, selector, cls):
+        """query_one that returns None instead of raising when the widget is
+        not mounted (unit tests drive handlers without a screen)."""
+        try:
+            return self.query_one(selector, cls)
+        except (ScreenStackError, NoMatches):
+            return None
+
     def _stamp(self):
-        return datetime.now(UTC).astimezone().strftime("%H:%M")
+        return datetime.now(timezone.utc).astimezone().strftime("%H:%M")
 
     def _append_log(self, text, style=None, stamp=False):
         """Append one styled line to the scrollable log (markup-escaped),
@@ -1444,10 +1418,9 @@ class OrganismApp(App):
             line = f"[{style}]{line}[/{style}]"
         if stamp:
             line = f"[dim]{self._stamp()}[/dim] {line}"
-        try:
-            self.query_one("#dreams", RichLog).write(line)
-        except ScreenStackError:
-            pass  # not mounted: unit tests drive handlers without a screen
+        dreams = self._safe_query("#dreams", RichLog)
+        if dreams is not None:
+            dreams.write(line)
 
     def _org_name(self):
         """Card title for the organism: its learned name (the user can give
@@ -1459,7 +1432,7 @@ class OrganismApp(App):
 
     def _log_chat(self, role, text, stamp=True):
         if role == "user":
-            self._write_card("you", text, STYLE_YOU, stamp=stamp)
+            self._write_card("you", text, STYLE_USER, stamp=stamp)
         else:
             self._write_card(self._org_name(), text, STYLE_ORG, stamp=stamp)
 

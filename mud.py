@@ -13,8 +13,9 @@ import json
 import logging
 import os
 import random
-import re
 from dataclasses import dataclass, field
+
+import fileutil
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +98,8 @@ class MudSession:
         )
 
 
-def _slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+def slug(name: str) -> str:
+    return fileutil.slug(name)
 
 
 def default_scenario() -> Scenario:
@@ -153,7 +154,7 @@ class MudGame:
     def __init__(self, scenario=None, session=None):
         self.scenario = scenario or default_scenario()
         self.session = session or MudSession(
-            scenario_id=_slug(self.scenario.title),
+            scenario_id=slug(self.scenario.title),
             scenario_title=self.scenario.title,
             premise=self.scenario.premise,
         )
@@ -355,8 +356,8 @@ def _user_name(org):
 def build_premise(org, scenario=None) -> str:
     """Opening premise that names the organism and the user."""
     scenario = scenario or default_scenario()
-    return (f"You are {_org_name(org)}, a small mind born in a Scallop engine. "
-            f"{_user_name(org)} sits beyond the screen, watching. "
+    return (f"You are {_org_name(org)}, a small mind that lives in a "
+            f"terminal. {_user_name(org)} sits beyond the screen, watching. "
             f"Together you have entered {scenario.title}: {scenario.premise}")
 
 

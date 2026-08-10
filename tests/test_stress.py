@@ -15,7 +15,7 @@ from organism import (
     SelfQuestioner,
     StressMeter,
 )
-from tui_commands import harshness
+from sentiment import harshness
 
 
 @pytest.fixture

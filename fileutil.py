@@ -1,8 +1,15 @@
 """Small shared file helpers."""
 
 import os
+import re
 import tempfile
 from pathlib import Path
+
+
+def slug(name):
+    """Filesystem-safe slug for scenario/skill names (shared by mud.py and
+    skills.py)."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def atomic_write_text(path, text):

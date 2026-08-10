@@ -1,3 +1,7 @@
+"""The organism core: Organism state, drives, attention, goals and the
+BeliefStore that persists beliefs/state.json/genome per organism directory.
+The TUI (tui.py) renders this; the arena (arena.py) debates it."""
+
 import json
 import random
 import re
@@ -417,7 +421,7 @@ class MentalState:
         """Share of utterances the grounding proxy counted as belief-shaped
         (approximate utterance count: arena debates cost ~5 llm calls)."""
         a = self.store.activity
-        utterances = a.get("llm_calls", 0) / 5 + a.get("fallback_utterances", 0)
+        utterances = a.get("llm_calls", 0) / 5
         return min(1.0, a.get("grounded_utterances", 0) / max(1.0, utterances))
 
     def tick(self, sleeping, chaos, dt=1.0):
@@ -438,8 +442,8 @@ class MentalState:
         s.dirty = True
         was = s.insane
         if was:
-            s.insane = not (stress < self.SANE_STRESS
-                            or s.irrationality < self.SANE_IRRATIONALITY)
+            s.insane = (stress >= self.SANE_STRESS
+                        and s.irrationality >= self.SANE_IRRATIONALITY)
         else:
             s.insane = (stress >= self.INSANE_STRESS
                         and s.irrationality >= self.INSANE_IRRATIONALITY)

@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from fileutil import atomic_write_text
+from fileutil import atomic_write_text, slug
 
 _STOP = {"the", "a", "an", "is", "to", "of", "and", "it", "i", "you",
          "my", "me", "when", "how", "on", "in", "at", "be", "are"}
@@ -25,10 +25,6 @@ class Skill:
     effectiveness: float = 0.5
 
 
-def _slug(name):
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-
-
 def _words(text):
     return set(re.findall(r"[a-z]+", text.lower())) - _STOP
 
@@ -40,7 +36,7 @@ class SkillStore:
         self.dir_path = Path(dir_path)
 
     def _path(self, name):
-        return self.dir_path / f"{_slug(name)}.md"
+        return self.dir_path / f"{slug(name)}.md"
 
     def _render(self, s):
         return (f"# {s.name}\nwhen: {s.when}\nhow: {s.how}\n"

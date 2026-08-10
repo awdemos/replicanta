@@ -1,9 +1,6 @@
 """Pure UI helpers for the organism TUI: slash-command registry, tab
 completion, activity sparkline, help text. No textual imports — unit
-testable without a terminal. Sentiment scorers live in sentiment.py and
-are re-exported here for compatibility."""
-
-from sentiment import harshness, kindness  # noqa: F401
+testable without a terminal. Sentiment scorers live in sentiment.py."""
 
 COMMANDS = [
     ("/chaos", "/chaos 0..1", "set randomness 0-1"),

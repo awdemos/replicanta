@@ -318,7 +318,8 @@ class ThoughtArena:
     # -- model -----------------------------------------------------------
     def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature == 0.0:
-            text = narration._ollama_generate(prompt, model, timeout)
+            text = narration._ollama_generate(prompt, model, timeout,
+                                              temperature=temperature)
             if org is not None:
                 self._meter(org)
             return text
