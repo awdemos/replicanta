@@ -32,6 +32,8 @@ py-modules = [
     "camera",
     "extensions",
     "fileutil",
+    "goals",
+    "groupchat",
     "hooks",
     "learning",
     "listen",

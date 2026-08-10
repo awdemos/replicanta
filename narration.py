@@ -212,11 +212,13 @@ def _last_self_exchange(chat_log):
 ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
 
 
-def _seed_for(snapshot, rng):
+def _seed_for(snapshot, rng, exclude=()):
     """One concrete thing for this utterance to circle around — a belief, a
     user fact, a memory, the mood, or something imagined. Rotating the seed
     every time is what keeps the voice from repeating itself; env metrics
-    are deliberately excluded (they are background, not conversation)."""
+    are deliberately excluded (they are background, not conversation).
+    Seeds used recently (exclude) are avoided while alternatives remain,
+    so an idle organism with a static pool still wanders."""
     pool = []
     pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4]
              if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS]
@@ -234,7 +236,8 @@ def _seed_for(snapshot, rng):
     ]
     # tier B executable skills: seeds approved by the user
     pool += [e["text"] for e in extensions.active_entries("seed")]
-    return rng.choice(pool)
+    fresh = [p for p in pool if p not in set(exclude)]
+    return rng.choice(fresh or pool)
 
 
 # -- cross-cycle repetition gate --------------------------------------------

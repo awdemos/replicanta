@@ -141,7 +141,8 @@ def test_grounded_utterance_counted_when_seed_words_reused(tmp_path, monkeypatch
     monkeypatch.setattr("narration._ollama_generate", fake)
     # craft the seed deterministically: the belief itself
     monkeypatch.setattr(narration, "_seed_for",
-                        lambda snap, rng: "this belief: 0.90 cat:has_fur=true")
+                        lambda snap, rng, exclude=():
+                        "this belief: 0.90 cat:has_fur=true")
     text = ThoughtArena().emerge(org)
     assert "cat" in text
     assert org.store.activity["grounded_utterances"] == 1

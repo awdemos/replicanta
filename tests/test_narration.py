@@ -661,3 +661,35 @@ def test_musing_prompt_steers_away_from_recent_musings(org):
     assert "a quiet thought about rain." in prompt
     # user lines are not part of the steering list
     assert "- hello there" not in prompt
+
+
+def test_seed_for_avoids_recent_seeds(org):
+    snap = state_snapshot(org)
+    first = narration._seed_for(snap, random.Random(42))
+    second = narration._seed_for(snap, random.Random(42), exclude=[first])
+    assert second != first
+
+
+def test_seed_for_falls_back_to_full_pool_when_all_excluded(org):
+    snap = state_snapshot(org)
+    rng = random.Random(7)
+    all_seeds = {narration._seed_for(snap, random.Random(i))
+                 for i in range(40)}
+    chosen = narration._seed_for(snap, rng, exclude=list(all_seeds))
+    assert chosen in all_seeds
+
+
+def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
+    """Consecutive debates on an unchanged (idle) organism must not circle
+    the same seed — the recent-seed history lives on the organism."""
+    from arena import ThoughtArena
+    prompts = []
+    monkeypatch.setattr(
+        "narration._ollama_generate",
+        lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
+    ThoughtArena(rng=random.Random(1)).emerge(org)
+    ThoughtArena(rng=random.Random(1)).emerge(org)
+    seeds = [org._recent_seeds[i] for i in range(len(org._recent_seeds))]
+    assert len(seeds) == 2
+    assert seeds[0] != seeds[1]
+    assert all("what is most alive in you right now" in p for p in prompts)

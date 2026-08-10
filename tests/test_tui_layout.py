@@ -607,3 +607,111 @@ def test_plain_click_does_not_become_a_drag(monkeypatch, tmp_path):
             assert nursery_mod.group_of(app.root, "fern") is None
 
     asyncio.run(check())
+
+
+def test_group_command_start_expands_nursery_groups(monkeypatch, tmp_path):
+    """'/group start <groupname>' seats every member of the nursery group."""
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "fern", "thinkers")
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start thinkers")
+            assert set(app._group.names()) == {"default", "fern"}
+            assert app._group.members["default"] is app.org
+
+    asyncio.run(check())
+
+
+def test_group_command_start_organism_beats_same_named_group(
+        monkeypatch, tmp_path):
+    """When an organism and a group share a name, the organism wins."""
+    import nursery as nursery_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "fern")  # group named like the org
+    nursery_mod.assign(app.root, "default", "fern")
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start fern")
+            assert set(app._group.names()) == {"default", "fern"}
+            # fern itself was seated, not expanded from the group
+            assert "fern" in app._group.members
+
+    asyncio.run(check())
+
+
+def test_group_command_unknown_group_reports(monkeypatch, tmp_path):
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app.handle_command("/group start nowhere")
+            assert app._group is None
+
+    asyncio.run(check())
+
+
+# -- mud turn-generation race ------------------------------------------------
+
+def test_mud_stale_organism_move_dropped_after_user_move(monkeypatch,
+                                                         tmp_path):
+    """A move chosen before the user's command must not land after it:
+    the generation captured when the choice worker started no longer
+    matches once the user acts."""
+    import mud as mud_mod
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            game = mud_mod.MudGame()
+            app._mud_game = game
+            stale_gen = app._mud_turn_gen   # in-flight move started here
+            app.handle_chat("go north")
+            assert game.turns == 1          # user move applied instantly
+            assert app._mud_turn_gen == stale_gen + 1
+            # the late organism move arrives — the world has moved on
+            app._mud_apply(game, "go south", gen=stale_gen)
+            assert game.turns == 1          # dropped, not applied
+
+    asyncio.run(check())
+
+
+def test_mud_stale_organism_move_dropped_after_hint(monkeypatch, tmp_path):
+    """A typed hint (not a command) also invalidates an in-flight move —
+    the hint was meant for the next choice, not the one already made."""
+    import mud as mud_mod
+    app = _headless_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(app, "_maybe_respond", lambda text: None)
+
+    async def check():
+        async with app.run_test():
+            game = mud_mod.MudGame()
+            app._mud_game = game
+            stale_gen = app._mud_turn_gen
+            app.handle_chat("maybe try the door")
+            assert app._mud_turn_gen == stale_gen + 1
+            assert app._mud_hint == "maybe try the door"
+            app._mud_apply(game, "go south", gen=stale_gen)
+            assert game.turns == 0
+
+    asyncio.run(check())
+
+
+def test_mud_fresh_organism_move_still_applies(monkeypatch, tmp_path):
+    """A move chosen at the current generation applies normally."""
+    import mud as mud_mod
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            game = mud_mod.MudGame()
+            app._mud_game = game
+            app._mud_apply(game, "look", gen=app._mud_turn_gen)
+            assert game.turns == 1
+
+    asyncio.run(check())

@@ -147,8 +147,17 @@ class ThoughtArena:
         timeout = timeout or self._timeout or narration.TIMEOUT
         snapshot = narration.state_snapshot(org)
         # every debate circles a different concrete thing — this rotation is
-        # what keeps the idle voice from repeating itself
-        snapshot["seed"] = narration._seed_for(snapshot, self._rng)
+        # what keeps the idle voice from repeating itself; the last few
+        # seeds are excluded so a static pool (idle organism) still varies.
+        # The history lives on the organism object: per-organism, and it
+        # resets naturally on swap or restart.
+        recent_seeds = getattr(org, "_recent_seeds", None)
+        if recent_seeds is None:
+            from collections import deque
+            recent_seeds = org._recent_seeds = deque(maxlen=6)
+        snapshot["seed"] = narration._seed_for(snapshot, self._rng,
+                                               exclude=recent_seeds)
+        recent_seeds.append(snapshot["seed"])
         # the whole organism treats chaos as stress-nudged
         # (organism.chaos_effective()); the arena should too, so surprise
         # rises as the organism gets stressed, not just on the raw knob

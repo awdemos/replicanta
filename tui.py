@@ -353,6 +353,7 @@ class OrganismApp(App):
         self._mud_hint = None   # one-shot user nudge for the next move
         self._mud_paused = False
         self._mud_thinking = False   # a move-choice worker is in flight
+        self._mud_turn_gen = 0  # bumped by user moves/hints: stales in-flight
         self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
@@ -1059,15 +1060,27 @@ class OrganismApp(App):
             self._mud_thinking = False
             return
         hint, self._mud_hint = self._mud_hint, None
+        gen = self._mud_turn_gen
         command = mud.choose_action(game, hint=hint, rng=self._rng,
                                     org=self.org)
-        self.call_from_thread(self._mud_apply, game, command, "organism")
+        self.call_from_thread(self._mud_apply, game, command, "organism",
+                              gen)
 
-    def _mud_apply(self, game, command, actor="organism"):
+    def _mud_apply(self, game, command, actor="organism", gen=None):
         if actor == "organism":
             self._mud_thinking = False
         if self._mud_game is not game:
             return                      # stopped (or restarted) meanwhile
+        if (actor == "organism" and gen is not None
+                and gen != self._mud_turn_gen):
+            # a user move (or hint) landed while this move was being
+            # chosen — it was picked from a world that no longer
+            # exists; dropping it keeps the heartbeat honest
+            self._append_log(
+                "> (the organism hesitates — the moment passed)",
+                STYLE_DIM)
+            self._mud_schedule()
+            return
         self._append_log(f"> {command}", STYLE_SELF)
         result = game.act_event(command, actor=actor)
         self._append_log(result.text, STYLE_DREAM)
@@ -1898,9 +1911,13 @@ class OrganismApp(App):
         if self._mud_game is not None:
             command = mud.parse_player_command(text)
             if command is not None:
-                # a direct move: execute now, not a hint, not chat
+                # a direct move: execute now, not a hint, not chat. Bump
+                # the turn generation so an organism move chosen before
+                # this command cannot land after it.
+                self._mud_turn_gen += 1
                 self._mud_apply(self._mud_game, command, actor="user")
                 return
+            self._mud_turn_gen += 1     # hints invalidate in-flight moves too
             self._mud_hint = text      # shout a nudge into the next move
         if self._group is not None:
             # everyone in the group heard the line; beliefs form per
@@ -1980,6 +1997,18 @@ class OrganismApp(App):
         names = args[1:]
         if names == ["all"]:
             names = nursery.list_organisms(self.root)
+        else:
+            # nursery group names expand to their members (an organism of
+            # the same name wins — the specific entity over the collection)
+            groups = nursery.load_groups(self.root)
+            known_orgs = set(nursery.list_organisms(self.root))
+            expanded = []
+            for n in names:
+                if n in groups and n not in known_orgs:
+                    expanded.extend(m for m in groups[n] if m not in expanded)
+                else:
+                    expanded.append(n)
+            names = expanded
         # the organism you live with always takes a seat in the group
         current = self.org.dir_path.name
         if current not in names:
@@ -1988,7 +2017,7 @@ class OrganismApp(App):
         missing = [n for n in names if n not in known]
         if missing:
             self._append_log(
-                f"/group: unknown organisms: {', '.join(missing)}",
+                f"/group: unknown organisms or groups: {', '.join(missing)}",
                 STYLE_WARN)
             return
         members = {}

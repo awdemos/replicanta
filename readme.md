@@ -151,7 +151,8 @@ bar shows state, mood, belief/rule counts, and voice status.
   right-click a group header to rename it. Groups
   are pure metadata (`groups.json`) — they don't touch the organisms'
   directories, and they're unrelated to `/group` chat sessions.
-- `/group start fern willow` (or `all`) — group chat: everything you type is
+- `/group start fern willow` (or `all`, or a nursery group name) — group
+  chat: everything you type is
   broadcast to every member and each answers in turn (quick arena: one LLM
   call per reply). Address one member with `fern: …` or `@fern …`;
   `/group stop` ends it — members keep what they learned and heard.
