@@ -28,7 +28,7 @@ blame it for its opinions — you taught it most of them.
 
 **Early release public beta stage, under active development, PRs welcome.**
 
-![Replicanta TUI entities demo](docs/assets/replicanta-entities.gif)
+![Replicanta TUI demo: creating organisms, switching tabs, swapping the active entity, using /look, and chatting in a group](docs/assets/replicanta-entities.gif)
 
 ```mermaid
 flowchart TD
