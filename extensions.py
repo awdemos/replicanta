@@ -61,7 +61,10 @@ def _read(path):
     path = Path(path)
     if not path.exists():
         return dict(_EMPTY)
-    return json.loads(path.read_text())
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return dict(_EMPTY)  # a corrupt registry reads as empty
 
 
 def _write(path, registry):

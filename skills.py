@@ -55,14 +55,17 @@ class SkillStore:
                 fields[key.strip()] = value.strip()
         meta = dict(p.split("=", 1) for p in fields.get("meta", "").split()
                     if "=" in p)
-        return Skill(
-            name=lines[0][2:].strip(),
-            when=fields.get("when", ""),
-            how=fields.get("how", ""),
-            uses=int(meta.get("uses", 0)),
-            created_cycle=int(meta.get("created", 0)),
-            updated_cycle=int(meta.get("updated", 0)),
-            effectiveness=float(meta.get("effectiveness", 0.5)))
+        try:
+            return Skill(
+                name=lines[0][2:].strip(),
+                when=fields.get("when", ""),
+                how=fields.get("how", ""),
+                uses=int(meta.get("uses", 0)),
+                created_cycle=int(meta.get("created", 0)),
+                updated_cycle=int(meta.get("updated", 0)),
+                effectiveness=float(meta.get("effectiveness", 0.5)))
+        except ValueError:
+            return None  # a corrupt meta line skips the file, not the store
 
     def save(self, skill):
         """Create or patch a skill file. Patching preserves the use count

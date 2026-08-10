@@ -300,3 +300,12 @@ def test_parse_reflect_caps_long_names():
     result = narration.parse_reflect(
         "skill: " + "word " * 12 + "\nwhen: x\nhow: y")
     assert len(result["name"].split()) <= 6
+
+
+def test_parse_skips_corrupt_meta(tmp_path):
+    store = _store(tmp_path)
+    store.dir_path.mkdir(parents=True, exist_ok=True)
+    (store.dir_path / "broken.md").write_text(
+        "# broken\nwhen: x\nhow: y\nmeta: uses=notanumber\n")
+    assert store.get("broken") is None
+    assert store.list() == []

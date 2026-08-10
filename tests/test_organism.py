@@ -1085,3 +1085,11 @@ def test_tui_reply_speaks_only_when_enabled(monkeypatch, tmp_path):
     app._set_reply("i am here")
     assert spoke.wait(2.0)
     assert said == ["i am here"]
+
+
+def test_load_tolerates_corrupt_state_json(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.state_path.parent.mkdir(parents=True, exist_ok=True)
+    store.state_path.write_text("{not json")
+    store.load()   # must not raise; keeps fresh defaults
+    assert store.cycle == 0

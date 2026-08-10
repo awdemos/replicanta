@@ -279,7 +279,10 @@ class BeliefStore:
     def load(self):
         if not self.state_path.exists():
             return
-        state = json.loads(self.state_path.read_text())
+        try:
+            state = json.loads(self.state_path.read_text())
+        except (OSError, ValueError):
+            return  # a corrupt state.json must not crash startup
         self.chaos = state.get("chaos", 0.5)
         self.stress = state.get("stress", 0.05)
         self.arousal = state.get("arousal", 0.3)

@@ -123,7 +123,11 @@ class HookEngine:
                 if not was_latched:
                     self.emit(disabled)
                 return
-            ctx = self._ctx(org, event, text)
+            try:
+                ctx = self._ctx(org, event, text)
+            except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
+                self.emit(f"ctx: {exc}")
+                return
             for script in self.scripts:
                 try:
                     self._lua.execute(script.read_text())

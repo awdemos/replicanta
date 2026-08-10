@@ -143,3 +143,9 @@ def test_seed_pool_uses_registry_seeds(tmp_path):
     snap = narration.state_snapshot(FakeOrg(tmp_path))
     seeds = {narration._seed_for(snap, random.Random(i)) for i in range(80)}
     assert "a question about gravity" in seeds
+
+
+def test_read_tolerates_corrupt_registry(tmp_path):
+    path = tmp_path / "extensions.json"
+    path.write_text("{not json")
+    assert extensions._read(path) == dict(extensions._EMPTY)
