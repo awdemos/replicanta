@@ -329,6 +329,17 @@
 
 ---
 
+---
+
+**Completed as of 2026-08-10.** Phases 1–5 have all been merged into the current codebase:
+- `activity.record_digest()` in `activity.py` provides the activity digest (Phase 1).
+- `goals.py` plus `goal_progress`/`goal_strategy` in `narration.py` (Phase 2).
+- `store.activity["surprises"]` and related snapshot rendering (Phase 3).
+- `self_model` beliefs and `attention_rationale` in snapshots (Phase 4).
+- Skill effectiveness tracking and rendering in snapshots (Phase 5).
+`tests/test_evolution.py` covers activity digest, goal progress/strategy, surprise rendering,
+self-model/attention rationale, and skill effectiveness. All 656 tests pass; ruff clean.
+
 ## Phase 6: Full verification
 
 - [ ] **Step 1: Run full test suite**
