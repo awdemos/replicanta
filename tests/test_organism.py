@@ -554,9 +554,9 @@ def test_tui_status_bar_uses_words(monkeypatch, tmp_path):
     async def check():
         async with app.run_test():
             app.refresh_status()
-            assert "awake" in app._status_text
-            assert "beliefs" in app._status_text
-            assert "voice" in app._status_text
+            assert "beliefs" in app._bottombar_text
+            assert "rules" in app._bottombar_text
+            assert "inner voice" in app._bottombar_text
 
     asyncio.run(check())
 

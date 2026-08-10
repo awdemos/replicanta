@@ -349,7 +349,6 @@ class OrganismApp(App):
         self._pending_text = ""
         self._pending_visible = False
         self._busy_frame = 0
-        self._status_text = ""
         self.listener = listen.Listener()
         self.camera = camera.Camera()
         self._mud_game = None
@@ -1370,33 +1369,24 @@ class OrganismApp(App):
             self._reflect()
 
     def refresh_status(self):
-        lc = self.org.lifecycle
-        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
-        word = {"wake": "awake", "sleep": "asleep",
-                "dead": "faded"}.get(lc.state, lc.state)
-        mood = self.org.store.belief_value("self", "mood", "—")
+        """Render the custom bottom bar: counts, inner voice/model status,
+        mode flags, thinking indicator, and keyboard shortcuts. Nothing here
+        duplicates the top bar (state, mood, mental scalars, voice/mic/speech,
+        clock)."""
         m = self.org.metrics()
         busy = (f" · thinking{'.' * (self._busy_frame + 1)}"
                 if self._busy() else "")
-        spoken = " · speech on" if speech.enabled else ""
-        mic = " · 🎙 listening" if self.listener.recording else ""
         if self._mud_game is not None:
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
         else:
             playing = ""
         if self._group is not None:
             playing += f" · 👥 group ({len(self._group.names())})"
-        s = self.org.store
-        mental = (f" · a/r/i {s.arousal:.2f}/{s.rationality:.2f}/"
-                  f"{s.irrationality:.2f}")
         self._bottombar_text = (
-            f"{icon} {word} · {mood}{mental} · {m.belief_count} beliefs · "
-            f"{m.rule_count} rules · inner voice "
-            f"{llmclient.voice_status()}{spoken}{mic}{playing} · "
-            f"{self.org.probe.clock_utc()}{busy}  │  "
+            f"{m.belief_count} beliefs · {m.rule_count} rules · "
+            f"inner voice {llmclient.voice_status()}{playing}{busy}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)")
-        self._status_text = self._bottombar_text
         bottombar = self._safe_query("#bottombar", Static)
         if bottombar is not None:
             bottombar.update(self._bottombar_text)
