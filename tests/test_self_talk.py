@@ -71,10 +71,9 @@ def test_fallback_self_ask_empty_beliefs(org):
     assert fallback_self_ask(state_snapshot(org)) == "what do I really believe?"
 
 
-def test_fallback_self_answer_echoes_question(org):
+def test_fallback_self_answer_is_non_meta(org):
     a = fallback_self_answer(state_snapshot(org), "why am I here?")
-    assert "why am I here?" in a
-    assert "beliefs" in a
+    assert a and "belief" not in a and "rule" not in a
 
 
 def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
@@ -92,7 +91,8 @@ def test_self_answer_falls_back_when_ollama_down(org, monkeypatch):
         raise urllib.error.URLError("down")
 
     patch_generate(monkeypatch, boom)
-    assert "why am I here?" in self_answer(org, "why am I here?")
+    answer = self_answer(org, "why am I here?")
+    assert answer and "belief" not in answer and "rule" not in answer
 
 
 def test_self_ask_uses_ollama_when_up(org, monkeypatch):

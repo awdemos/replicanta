@@ -5,6 +5,7 @@ delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
 import json
 import os
 import random
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
@@ -31,6 +32,11 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+
+try:
+    import pyperclip
+except Exception:  # noqa: BLE001 — optional convenience, not load-bearing
+    pyperclip = None
 from textual.widgets.option_list import Option
 
 from replicanta import (
@@ -268,6 +274,8 @@ class OrganismApp(App):
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
+        Binding("ctrl+shift+c", "copy_chat", "copy chat log"),
+        Binding("ctrl+m", "toggle_mouse", "toggle mouse capture"),
     ]
 
     CSS = """
@@ -472,6 +480,34 @@ class OrganismApp(App):
         self.action_save_now()
         self._arm_hard_exit()
         self.exit()
+
+    def action_copy_chat(self):
+        """Copy the visible chat log to the system clipboard. Falls back to
+        writing plain text to a temp file if no clipboard backend is available."""
+        lines = []
+        for role, text in self.org.store.chat_log[-250:]:
+            who = "you" if role == "user" else self._org_name()
+            lines.append(f"{who}: {text}")
+        body = "\n".join(lines)
+        if pyperclip is not None:
+            try:
+                pyperclip.copy(body)
+                self._append_log("— chat log copied to clipboard —", STYLE_DIM, stamp=True)
+                return
+            except Exception:  # noqa: BLE001,S110 — clipboard may fail in ssh/tmux; fall through to file
+                pass
+        path = Path(tempfile.gettempdir()) / f"replicanta-chat-{int(time.time())}.txt"
+        path.write_text(body, encoding="utf-8")
+        self._append_log(f"— chat log saved to {path} —", STYLE_DIM, stamp=True)
+
+    def action_toggle_mouse(self):
+        """Toggle Textual's mouse capture. When captured, clicks work inside
+        the app but the terminal cannot select text. When released, native
+        terminal mouse selection (and copying) works."""
+        enabled = not self.mouse_captured
+        self.capture_mouse(enabled)
+        status = "enabled" if enabled else "disabled"
+        self._append_log(f"— mouse capture {status} (ctrl+m to toggle) —", STYLE_DIM, stamp=True)
 
     def _arm_hard_exit(self, delay=0.75):
         """Force os._exit(0) after a grace period if the interpreter is

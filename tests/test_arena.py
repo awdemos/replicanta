@@ -283,7 +283,7 @@ def test_respond_falls_back_on_arena_failure(org, monkeypatch):
 
     patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
-    assert "hello there" in reply and "2 beliefs" in reply
+    assert reply and "belief" not in reply and "rule" not in reply
 
 
 # -- candidate cleaning -----------------------------------------------------

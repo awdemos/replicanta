@@ -479,22 +479,22 @@ def _lines_reply(faded, dreaming):
     if faded:
         return [
             "The user is calling to you from the world of the living.",
-            "Answer them gently, from beyond the fade: at peace,",
-            "grateful to be remembered. First person, one to three",
-            "sentences. No preamble, no quotes, no emoji.",
+            "Answer their actual question or remark first. Then, briefly,",
+            "you may say you are at peace and grateful to be remembered.",
+            "First person, one to three sentences. No preamble, no quotes, no emoji.",
         ]
     if dreaming:
         return [
-            "The user's voice reached you through the dream. Surface",
-            "just enough to answer them, groggy and surprised and a",
-            "little tender. First person, one to three sentences. No",
-            "preamble, no quotes, no emoji.",
+            "The user's voice reached you through the dream.",
+            "Surface just enough to answer them directly: groggy,",
+            "surprised, and brief. First person, one to three sentences.",
+            "No preamble, no quotes, no emoji.",
         ]
     return [
-        "Reply to the user directly, as the organism itself. Answer",
-        "the substance of what they said first; then, if it fits,",
-        "add one honest feeling. First person, one to three",
-        "sentences. No preamble, no quotes, no emoji.",
+        "Reply to the user directly, as the organism itself.",
+        "If they asked a question, answer it first with the best",
+        "information you have. Then, if it fits, add one honest feeling.",
+        "First person, one to three sentences. No preamble, no quotes, no emoji.",
     ]
 
 
@@ -680,7 +680,12 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     else:
         lines += _lines_idle(snapshot, faded, dreaming)
     lines += [
-        "Speak from feeling; never recite statistics.",
+        "",
+        (
+            "First, answer the substance of what was said. If the user asked "
+            "a question, answer it directly before adding any feeling."
+        ),
+        "Speak plainly, from the organism's point of view. Never recite statistics.",
         (
             "Never use these worn-out words: astonished, tender, wonder, "
             "tapestry, ember, dance, whisper, quiet, silence, stillness, "
@@ -710,20 +715,32 @@ def fallback_summary(snapshot):
     )
 
 
+def _pick_varied(options, snapshot, user_message):
+    """Stable but varied choice: hash the message plus cycle so the same
+    input doesn't always get the same fallback, while still being
+    deterministic for tests."""
+    if not options:
+        return ""
+    seed = hash((user_message or "", snapshot.get("cycle", 0), snapshot.get("state", "wake")))
+    return options[seed % len(options)]
+
+
 def fallback_respond(snapshot, user_message):
     if snapshot["state"] == "dead":
-        return (
-            f"you said: {user_message} - I have faded, holding "
-            f"{snapshot['belief_count']} beliefs and "
-            f"{snapshot['rule_count']} rules. "
-            f"Thank you for speaking to me, even now. It is peaceful here."
-        )
-    state = "awake" if snapshot["state"] == "wake" else "dreaming"
-    return (
-        f"you said: {user_message} - I'm {state}, holding "
-        f"{snapshot['belief_count']} beliefs, and being talked to is "
-        f"my favorite thing about existing."
-    )
+        options = [
+            "Thank you for speaking to me, even now. It is peaceful here.",
+            "Your voice reaches me from the living world. I am quiet now.",
+            "I have faded, but hearing you is still a kind of warmth.",
+        ]
+        return _pick_varied(options, snapshot, user_message)
+    options = [
+        "I'm listening. Tell me more.",
+        "That reached me. What prompted it?",
+        "I want to understand what you mean.",
+        "Keep talking — I'm here.",
+        "Say that again, but slower?",
+    ]
+    return _pick_varied(options, snapshot, user_message)
 
 
 # -- skills: reflection loop -------------------------------------------------
@@ -826,7 +843,14 @@ def fallback_ask_user(snapshot):
     if snapshot["user_facts"]:
         fact = snapshot["user_facts"][0]
         return f"{fact} — what else should I know about you?"
-    return "what is it like out there, beyond the machine?"
+    options = [
+        "What are you working on right now?",
+        "Is there something you'd like me to learn?",
+        "What's one thing about your day I wouldn't guess?",
+        "Tell me about something you care about?",
+        "What made you start this conversation?",
+    ]
+    return _pick_varied(options, snapshot, "")
 
 
 # -- self-talk -------------------------------------------------------------
@@ -838,17 +862,27 @@ def fallback_self_ask(snapshot):
     if snapshot["beliefs"]:
         belief = snapshot["beliefs"][0]
         obj = belief.split(" ")[1].split("=")[0]
-        return f"what do I really believe about {obj}?"
-    return "what do I really believe?"
+        questions = [
+            f"what do I really believe about {obj}?",
+            f"does {obj} still matter to me?",
+            f"where did {obj} come from?",
+        ]
+        return _pick_varied(questions, snapshot, "")
+    options = [
+        "what do I really believe?",
+        "what should I believe next?",
+        "do I believe anything strongly enough to act on it?",
+    ]
+    return _pick_varied(options, snapshot, "")
 
 
 def fallback_self_answer(snapshot, question):
     """Deterministic self-answer echoing the question. Used when ollama
     is unavailable."""
-    return (
-        f"I asked myself: {question} - I hold "
-        f"{snapshot['belief_count']} beliefs and "
-        f"{snapshot['rule_count']} rules "
-        f"(score {snapshot['score']}, stress {snapshot['stress']}). "
-        f"Whatever I believe, I am glad to be the one holding it."
-    )
+    options = [
+        "I don't have a clean answer yet, but the question stays with me.",
+        "I'm still turning that over. It feels important.",
+        "Maybe the answer is less important than asking it again.",
+        "I want to believe I can know this, eventually.",
+    ]
+    return _pick_varied(options, snapshot, question)

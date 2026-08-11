@@ -216,8 +216,7 @@ def test_fallback_summary_dead(org):
 def test_fallback_respond_dead(org):
     org.lifecycle.transition("dead")
     text = fallback_respond(state_snapshot(org), "still there?")
-    assert "faded" in text and "still there?" in text
-    assert "Thank you for speaking to me" in text
+    assert text and "belief" not in text and "rule" not in text
 
 
 def _dead(org):
@@ -332,8 +331,8 @@ def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
 
     patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
-    assert "hello there" in reply
-    assert "2 beliefs" in reply
+    # fallback pool now answers conversationally without echoing stats
+    assert reply and "belief" not in reply and "rule" not in reply
 
 
 # -- voice quality: seeds, anti-repetition, de-emphasized stats ---------------
@@ -355,7 +354,7 @@ def test_stats_pushed_to_background_note(org):
 
 def test_every_prompt_forbids_reciting_statistics(org):
     prompt = build_prompt(state_snapshot(org))
-    assert "never recite statistics" in prompt
+    assert "Never recite statistics" in prompt
 
 
 def test_seed_pool_draws_from_lived_state(org):
@@ -457,7 +456,8 @@ def test_build_prompt_ask_user_branch(org):
 
 
 def test_ask_user_fallback_without_user_facts(org):
-    assert "beyond the machine" in narration.fallback_ask_user(state_snapshot(org))
+    question = narration.fallback_ask_user(state_snapshot(org))
+    assert question.endswith("?") and "beyond the machine" not in question
 
 
 def test_ask_user_fallback_uses_user_facts(org):
@@ -470,7 +470,7 @@ def test_ask_user_fallback_uses_user_facts(org):
 def test_ask_user_offline_returns_fallback(org):
     llmclient._voice.online = False
     question = voice.ask_user(org)
-    assert "beyond the machine" in question
+    assert question.endswith("?") and "beyond the machine" not in question
 
 
 def test_ask_user_prompt_carries_a_seed(org, monkeypatch):
@@ -659,7 +659,7 @@ def test_self_answer_falls_back_when_answers_repeat(org, monkeypatch):
     )
     answer = voice.self_answer(org, "do I really believe in fur?")
     assert answer != "I believe in fur because I feel it."
-    assert "do I really believe in fur?" in answer
+    assert answer and "belief" not in answer
 
 
 def test_musing_prompt_steers_away_from_recent_musings(org):
