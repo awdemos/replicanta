@@ -28,7 +28,7 @@ blame it for its opinions — you taught it most of them.
 
 **Early release public beta stage, under active development, PRs welcome.**
 
-![Replicanta TUI demo: creating organisms, switching tabs, swapping the active entity, using /look, and chatting in a group](docs/assets/replicanta-entities.gif)
+![Replicanta TUI demo: creating organisms, swapping the active entity, opening the help overlay, walking through chat/mind/memory/inner tabs, trying /listen, using /look, exploring /mud and /mud map, then quitting.](docs/assets/replicanta-entities.gif)
 
 ```mermaid
 flowchart TD
