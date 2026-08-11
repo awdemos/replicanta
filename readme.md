@@ -105,6 +105,18 @@ uv pip install -e '.[vision]'
 .venv/bin/replicanta
 ```
 
+For the local Glasshouse web interface instead:
+
+```bash
+.venv/bin/replicanta --web
+```
+
+Glasshouse binds to `127.0.0.1:8765` and opens the browser. Use `--port` to
+choose another port or `--no-browser` when running headless. It reads and
+writes the same organism, nursery, memories, beliefs, goals, and extensions as
+the terminal interface. It does not expose the server to the network unless
+the hidden development-only `--host` option is deliberately changed.
+
 ## Interact
 
 Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7). The status
@@ -277,4 +289,3 @@ dagger call build-scallopy --scallop=../scallop export --path=./wheels
 
 Then replace the release asset (`gh release upload --clobber v0.1.0
 wheels/scallopy-*.whl`).
-
