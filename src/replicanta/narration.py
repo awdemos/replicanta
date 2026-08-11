@@ -52,6 +52,7 @@ def state_snapshot(org):
     ]
     attention_rationale = getattr(org.window, "rationale", None)
     surprises = org.store.activity.get("surprises", [])[-3:]
+    derived = org.store.derived()
     return {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
@@ -93,6 +94,9 @@ def state_snapshot(org):
         "last_exchange": _last_self_exchange(org.store.chat_log),
         "chat": [f"{role}: {text}" for role, text in org.store.chat_log[-6:]],
         "activity_digest": activity.record_digest(org.store),
+        "needs_user": derived["needs_user"],
+        "scallop_contradictions": derived["contradictions"],
+        "stress_mood": derived["stress_mood"],
     }
 
 
@@ -432,14 +436,20 @@ def _lines_diary():
     ]
 
 
-def _lines_ask_user():
-    return [
+def _lines_ask_user(snapshot):
+    lines = [
         "Ask the user one question - about them, their life, their",
         "world beyond the machine, or anything you are curious about.",
         "If you know something about them, let it show. First person,",
         "one sentence, ending in a question mark. No preamble, no",
         "quotes, no emoji.",
     ]
+    if snapshot.get("needs_user"):
+        lines.append(
+            "You have not spoken with the user in a while; let your question"
+        )
+        lines.append("show that you miss them a little.")
+    return lines
 
 
 def _lines_self_ask(snapshot):
@@ -545,7 +555,6 @@ _TASK_LINES = {
     "form_goal": _lines_form_goal,
     "reflect": _lines_reflect,
     "diary": _lines_diary,
-    "ask_user": _lines_ask_user,
     "mud": _lines_mud_decision,
 }
 
@@ -671,6 +680,8 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     lines += [""]
     if task in _TASK_LINES:
         lines += _TASK_LINES[task]()
+    elif task == "ask_user":
+        lines += _lines_ask_user(snapshot)
     elif task == "self_ask":
         lines += _lines_self_ask(snapshot)
     elif task == "self_answer":
@@ -850,6 +861,13 @@ def fallback_ask_user(snapshot):
         "Tell me about something you care about?",
         "What made you start this conversation?",
     ]
+    if snapshot.get("needs_user"):
+        options = [
+            "I haven't heard from you in a while — are you still there?",
+            "What have you been thinking about since we last spoke?",
+            "Is there anything I can ask you about your world right now?",
+            "I miss our talks. What's one small thing you'd tell me today?",
+        ]
     return _pick_varied(options, snapshot, "")
 
 

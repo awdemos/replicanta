@@ -93,6 +93,62 @@ class BeliefStore:
             surprises.pop(0)
         self.surprise_this_tick = True
 
+    def _derive_from_beliefs(self, rule, head_relation):
+        """Run a transient Scallop rule against the live in-memory belief map.
+        Does not require a committed genome, so derived() reflects the
+        current organism state even before flush()."""
+        ctx = scallopy.ScallopContext(provenance=PROVENANCE)
+        ctx.add_relation(BEL, (str, str, str))
+        ctx.add_facts(
+            BEL,
+            [
+                (conf, (obj, attr, val))
+                for (obj, attr, val), conf in self.beliefs_map.items()
+            ],
+        )
+        ctx.add_rule(rule)
+        ctx.run()
+        return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
+
+    def derived(self):
+        """Scallop-derived conditions visible to prompts and behavior code.
+        Returns dict with 'needs_user', 'contradictions', and 'stress_mood'."""
+        contradicts_rule = (
+            "contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2"
+        )
+        needs_user_rule = (
+            'needs_user(o) = bel(o, "is_a", "organism") and not bel("user", _, _)'
+        )
+        contradictions = [
+            {"obj": obj, "attr": attr, "tag": float(tag)}
+            for tag, (obj, attr) in self._derive_from_beliefs(
+                contradicts_rule, "contradicts"
+            )
+            if tag >= CONTRADICTION_THRESHOLD
+        ]
+        needs_user = any(
+            tag >= CONTRADICTION_THRESHOLD
+            for tag, _ in self._derive_from_beliefs(needs_user_rule, "needs_user")
+        )
+        mood = self.belief_value("self", "mood", "calm")
+        return {
+            "needs_user": needs_user,
+            "contradictions": contradictions,
+            "stress_mood": mood in {"tired", "scared", "angry"},
+        }
+
+    def _note_scallop_contradictions(self):
+        """Log reasoner-detected contradictions as activity and memory."""
+        for c in self.derived()["contradictions"]:
+            tag = c["tag"]
+            obj = c["obj"]
+            attr = c["attr"]
+            if tag >= CONTRADICTION_THRESHOLD:
+                self.note_activity("scallop_contradiction")
+                memory_text = f"Scallop saw tension: {obj}:{attr} holds two values"
+                if memory_text not in [m.get("text") for m in self.memory[-20:]]:
+                    self.remember("surprise", memory_text)
+
     def add(self, belief, conf):
         obj, attr, val = belief
         if (
@@ -103,6 +159,7 @@ class BeliefStore:
             raise ValueError(f"invalid belief value in {belief}")
         conf = float(conf)
         key = (obj, attr, val)
+        contradiction_seen = False
         for (o, a, v), c in list(self.beliefs_map.items()):
             if (
                 (o, a) == (obj, attr)
@@ -110,6 +167,7 @@ class BeliefStore:
                 and c >= CONTRADICTION_THRESHOLD
                 and conf >= CONTRADICTION_THRESHOLD
             ):
+                contradiction_seen = True
                 if self.on_adverse is not None:
                     self.on_adverse(0.03)
                 if conf > c:
@@ -124,6 +182,8 @@ class BeliefStore:
                 self.dirty = True
                 self.genome_dirty = True
                 return
+        if not contradiction_seen:
+            self._note_scallop_contradictions()
         if key in self.beliefs_map:
             if conf > self.beliefs_map[key]:
                 self.beliefs_map[key] = conf
@@ -354,6 +414,15 @@ class Mind:
     def query_rule(self, rule, head_relation):
         """Run a candidate rule against a fork of the current program without
         committing. Returns list of (tag, tuple)."""
+        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self.ctx)
+        ctx.add_rule(rule)
+        ctx.run()
+        return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
+
+    def derive(self, head_relation, rule):
+        """Run a transient derived rule against a fresh fork and return the
+        derived tuples with their minmaxprob tags. Safe for read-only
+        inference queries."""
         ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self.ctx)
         ctx.add_rule(rule)
         ctx.run()
@@ -801,6 +870,7 @@ class Organism:
         self.dir_path = dir_path
         self.store = BeliefStore(dir_path)
         self.mind = Mind(dir_path / "organism.scl")
+        self.store.mind = self.mind
         self.window = AttentionWindow(self.store.beliefs())
         self.meter = StressMeter(self.store)
         self.questioner = SelfQuestioner(

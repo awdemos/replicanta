@@ -7,3 +7,9 @@ rel 0.9::bel("self", "is_a", "organism")
 rel 0.9::bel("self", "home", "terminal")
 rel 0.9::bel("self", "mind", "scallop")
 rel 0.9::bel("self", "voice", "ollama")
+
+// Derived conditions the reasoner surfaces from the belief base.
+// Provenance flows through min-max-prob, so confidence is the minimum
+// confidence among the body facts.
+rel 0.0::contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2
+rel 0.0::needs_user(o) = bel(o, "is_a", "organism") and not bel("user", _, _)

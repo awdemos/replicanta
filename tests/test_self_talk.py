@@ -61,14 +61,26 @@ def test_build_prompt_self_answer_includes_question(org):
 
 
 def test_fallback_self_ask_ends_in_question(org):
-    q = fallback_self_ask(state_snapshot(org))
+    snap = state_snapshot(org)
+    q = fallback_self_ask(snap)
     assert q.endswith("?")
-    assert "believe" in q
+    obj = snap["beliefs"][0].split(" ")[1].split("=")[0]
+    assert q in {
+        f"what do I really believe about {obj}?",
+        f"does {obj} still matter to me?",
+        f"where did {obj} come from?",
+    }
 
 
 def test_fallback_self_ask_empty_beliefs(org):
     org.store.beliefs_map.clear()
-    assert fallback_self_ask(state_snapshot(org)) == "what do I really believe?"
+    q = fallback_self_ask(state_snapshot(org))
+    assert q.endswith("?")
+    assert q in {
+        "what do I really believe?",
+        "what should I believe next?",
+        "do I believe anything strongly enough to act on it?",
+    }
 
 
 def test_fallback_self_answer_is_non_meta(org):
@@ -81,9 +93,15 @@ def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
         raise urllib.error.URLError("down")
 
     patch_generate(monkeypatch, boom)
+    snap = state_snapshot(org)
     q = self_ask(org)
     assert q.endswith("?")
-    assert "believe" in q
+    obj = snap["beliefs"][0].split(" ")[1].split("=")[0]
+    assert q in {
+        f"what do I really believe about {obj}?",
+        f"does {obj} still matter to me?",
+        f"where did {obj} come from?",
+    }
 
 
 def test_self_answer_falls_back_when_ollama_down(org, monkeypatch):

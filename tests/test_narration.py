@@ -455,9 +455,31 @@ def test_build_prompt_ask_user_branch(org):
     assert "ending in a question mark" in prompt
 
 
+def test_build_prompt_ask_user_shows_urgency_when_needs_user(org):
+    snap = state_snapshot(org)
+    snap["needs_user"] = True
+    prompt = build_prompt(snap, task="ask_user")
+    assert "have not spoken with the user" in prompt
+
+
+def test_state_snapshot_includes_scallop_derived_flags(org):
+    snap = state_snapshot(org)
+    assert "needs_user" in snap
+    assert "scallop_contradictions" in snap
+    assert "stress_mood" in snap
+
+
 def test_ask_user_fallback_without_user_facts(org):
     question = narration.fallback_ask_user(state_snapshot(org))
     assert question.endswith("?") and "beyond the machine" not in question
+
+
+def test_ask_user_fallback_biased_when_needs_user(org):
+    snap = state_snapshot(org)
+    snap["needs_user"] = True
+    question = narration.fallback_ask_user(snap)
+    assert question.endswith("?")
+    assert any(phrase in question for phrase in ["still there", "since we last spoke", "your world", "miss our talks"])
 
 
 def test_ask_user_fallback_uses_user_facts(org):

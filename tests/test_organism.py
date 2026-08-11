@@ -86,6 +86,47 @@ def test_scl_with_committed_rules_reimports(tmp_path):
     assert mind.beliefs()[("apple", "color", "red")] == 0.9
 
 
+def test_mind_derive_runs_transient_rule(tmp_path):
+    # Seed the genome directly so two conflicting values survive in bel.
+    (tmp_path / "organism.scl").write_text(
+        'rel 0.9::bel("apple", "color", "red")\n'
+        'rel 0.9::bel("apple", "color", "green")\n'
+    )
+    mind = Mind(tmp_path / "organism.scl")
+    mind.rebuild()
+    results = mind.derive(
+        "contradicts",
+        "contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2",
+    )
+    assert any(tup == ("apple", "color") for _tag, tup in results)
+
+
+def test_belief_store_derived_flags(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.add(("self", "is_a", "organism"), 0.9)
+    store.add(("self", "mood", "calm"), 0.9)
+    store.save()
+    mind = Mind(tmp_path / "organism.scl")
+    mind.rebuild()
+    store.mind = mind
+    assert store.derived()["needs_user"] is True
+    assert store.derived()["contradictions"] == []
+    store.add(("user", "name", "sam"), 0.9)
+    assert store.derived()["needs_user"] is False
+
+
+def test_belief_store_derived_contradictions(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.add(("self", "is_a", "organism"), 0.9)
+    # Seed contradictory facts at equal confidence so neither is auto-archived
+    store.beliefs_map[("apple", "color", "red")] = 0.9
+    store.beliefs_map[("apple", "color", "green")] = 0.9
+    derived = store.derived()
+    assert len(derived["contradictions"]) == 1
+    assert derived["contradictions"][0]["obj"] == "apple"
+    assert derived["contradictions"][0]["attr"] == "color"
+
+
 def test_record_chat_strips_and_skips_empty(store):
     store.record_chat("user", "  hi there  ")
     store.record_chat("org", "   ")
