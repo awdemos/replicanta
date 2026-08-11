@@ -30,23 +30,7 @@ blame it for its opinions — you taught it most of them.
 
 ![Replicanta TUI demo: creating organisms, swapping the active entity, opening the help overlay, walking through chat/mind/memory/inner tabs, trying /listen, using /look, exploring /mud and /mud map, then quitting.](docs/assets/replicanta-entities.gif)
 
-```mermaid
-flowchart TD
-    A["User input or idle tick"] --> B["hear() / sense()"]
-    B --> C["Update beliefs, mood, stress"]
-    C --> D["state_snapshot()"]
-    D --> E["Prompt: beliefs, memory, goals, skills, self-model"]
-    E --> F["ThoughtArena: proposers, critic, voters"]
-    F --> G{"ollama reachable?"}
-    G -->|yes| H["Deliver utterance"]
-    G -->|no| I["Deterministic fallback"]
-    H --> J["Meter activity + skill outcomes"]
-    I --> J
-    J --> K["Persist state"]
-    K --> L["Reflect / goals / dream"]
-    L --> M["Validate candidate rules, promote or discard"]
-    M --> N["Return to Awake state"]
-```
+<img src="docs/assets/pipeline.svg" alt="Replicanta cognitive pipeline: user input or idle tick -> hear/sense -> update beliefs -> snapshot -> prompt -> ThoughtArena -> ollama reachable? -> deliver utterance or deterministic fallback -> meter outcomes -> persist -> reflect -> validate rules -> return to awake state" width="100%" />
 
 The pipeline is the same for every reply, musing, question, goal, diary entry,
 or reflection: absorb input, snapshot the mind, hold an inner debate, deliver
