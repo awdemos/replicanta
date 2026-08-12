@@ -1,3 +1,5 @@
+import pytest
+
 from replicanta.tui_commands import (
     COMMAND_NAMES,
     complete_command,
@@ -146,3 +148,53 @@ def test_history_browse_down_from_fresh_is_noop():
     history = ["one"]
     index, draft, value = history_browse(history, -1, "", "draft", 1)
     assert (index, draft, value) == (-1, "", None)
+
+
+def test_web_flag_is_documented_by_cli_help(monkeypatch, capsys):
+    import sys
+
+    from replicanta import tui
+
+    monkeypatch.setattr(sys, "argv", ["replicanta", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        tui.main()
+    assert exc.value.code == 0
+    assert "--web" in capsys.readouterr().out
+
+
+def test_web_flag_dispatches_to_glasshouse(monkeypatch, tmp_path):
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from replicanta import tui, web
+
+    seed = Path(__file__).parent.parent / "organism.scl"
+    shutil.copy(seed, tmp_path / "organism.scl")
+    called = {}
+
+    def fake_run(root, org, spawn, **options):
+        called.update(root=root, org=org, spawn=spawn, options=options)
+
+    monkeypatch.setattr(web, "run", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "replicanta",
+            "--dir",
+            str(tmp_path),
+            "-web",
+            "--no-browser",
+            "--port",
+            "9876",
+        ],
+    )
+    tui.main()
+    assert called["root"] == tmp_path
+    assert called["org"].dir_path.name == "default"
+    assert called["options"] == {
+        "host": "127.0.0.1",
+        "port": 9876,
+        "open_browser": False,
+    }

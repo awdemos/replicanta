@@ -2180,6 +2180,17 @@ def main():
     parser.add_argument("--wake", type=int, default=180)
     parser.add_argument("--sleep", type=int, default=60)
     parser.add_argument("--chaos", type=float, default=0.5)
+    parser.add_argument(
+        "-web",
+        "--web",
+        action="store_true",
+        help="launch the local Glasshouse web UI",
+    )
+    parser.add_argument("--host", default="127.0.0.1", help=argparse.SUPPRESS)
+    parser.add_argument("--port", type=int, default=8765, help="Glasshouse port")
+    parser.add_argument(
+        "--no-browser", action="store_true", help="do not open a browser with --web"
+    )
     args = parser.parse_args()
     root = Path(args.dir)
     nursery.migrate(root)
@@ -2196,6 +2207,18 @@ def main():
     }
     org = Organism(org_dir, **spawn)
     org.load()
+    if args.web:
+        from replicanta import web
+
+        web.run(
+            root,
+            org,
+            spawn,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+        return
     OrganismApp(org, root, spawn).run()
 
 
