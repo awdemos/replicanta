@@ -721,7 +721,9 @@ def _pick_varied(options, snapshot, user_message):
     deterministic for tests."""
     if not options:
         return ""
-    seed = hash((user_message or "", snapshot.get("cycle", 0), snapshot.get("state", "wake")))
+    seed = hash(
+        (user_message or "", snapshot.get("cycle", 0), snapshot.get("state", "wake"))
+    )
     return options[seed % len(options)]
 
 

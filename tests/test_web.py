@@ -188,6 +188,102 @@ def test_nursery_create_and_swap(live):
     assert state["organism"]["name"] == "default"
 
 
+def test_rename_current_organism(live):
+    status, _headers, state = request(live, "/api/rename", {"name": "moss"})
+    assert status == 200
+    assert state["organism"]["name"] == "moss"
+    assert state["nursery"]["current"] == "moss"
+    assert "moss" in state["nursery"]["organisms"]
+
+
+def test_cycle_advances_state(live):
+    status, _headers, result = request(live, "/api/cycle", {})
+    assert status == 200
+    assert result["state"]["organism"]["cycle"] >= 0
+
+
+def test_remember_records_episode(live):
+    status, _headers, result = request(
+        live, "/api/remember", {"text": "met in the garden"}
+    )
+    assert status == 200
+    assert any(
+        e["kind"] == "user" and "garden" in e["text"]
+        for e in result["state"]["memory"]
+    )
+
+
+def test_forget_removes_matching_entries(live):
+    request(live, "/api/remember", {"text": "met in the garden"})
+    status, _headers, result = request(live, "/api/forget", {"text": "garden"})
+    assert status == 200
+    assert not any(
+        "garden" in e.get("text", "") for e in result["state"]["memory"]
+    )
+
+
+def test_goal_and_priority(live):
+    status, _headers, result = request(live, "/api/goal", {"text": "learn names"})
+    assert status == 200
+    assert any(
+        "learn names" in str(g.get("text", "")) for g in result["state"]["goals"]
+    )
+    status, _headers, result = request(live, "/api/priority", {"goal": "names"})
+    assert status == 200
+    assert "names" in result["state"]["goals"][0].get("text", "")
+
+
+def test_attention_focuses_window(live):
+    request(live, "/api/chat", {"text": "my name is sam"})
+    status, _headers, result = request(live, "/api/attention", {"topic": "sam"})
+    assert status == 200
+    assert result["state"]["attention"]
+
+
+def test_mode_lifecycle(live):
+    status, _headers, result = request(live, "/api/mode", {"mode": "sleep"})
+    assert status == 200
+    assert result["state"]["organism"]["state"] == "sleep"
+    status, _headers, result = request(live, "/api/mode", {"mode": "wake"})
+    assert status == 200
+    assert result["state"]["organism"]["state"] == "wake"
+
+
+def test_save_load_and_reset(live):
+    request(live, "/api/remember", {"text": "token to persist"})
+    status, _headers, result = request(live, "/api/save", {})
+    assert status == 200
+    assert result["state"]["organism"]["name"] == "default"
+    status, _headers, state = request(live, "/api/reset", {})
+    assert status == 200
+    assert not any(
+        "token to persist" in e.get("text", "")
+        for e in state["memory"]
+    )
+    status, _headers, result = request(live, "/api/load", {})
+    assert status == 200
+    assert result["state"]["organism"]["name"] == "default"
+
+
+def test_mutate_stages_seed(live):
+    status, _headers, result = request(
+        live, "/api/mutate", {"text": "consider kindness"}
+    )
+    assert status == 200
+    assert result["state"]["extensions"]["pending"]["kind"] == "seed"
+    status, _headers, result = request(live, "/api/mutation", {"action": "approve"})
+    assert result["state"]["extensions"]["pending"] is None
+
+
+def test_help_lists_slash_commands(live):
+    status, _headers, result = request(live, "/api/help", {})
+    assert status == 200
+    names = {c["name"] for c in result["commands"]}
+    assert "/help" in names
+    assert "/mutate" in names
+    assert result["state"]["organism"]["name"] == "default"
+
+
 def test_bad_routes_and_malformed_json_are_safe(live):
     status, _headers, result = request(live, "/api/missing")
     assert status == 404

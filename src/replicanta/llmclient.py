@@ -268,8 +268,11 @@ _META_TAIL_RE = re.compile(
     r"revised)|evaluation:|critique:|assessment:|weakness).*$",
 )
 _INSTRUCTION_ECHO_RE = re.compile(
-    r"(?im)^\s*(?:draft(?:ing)?\b.*|then,?\s+(?:evaluate|revise)"
-    r".*|attack both candidates.*|which candidate is better\??.*)$"
+    r"(?im)^\s*(?:draft(?:ing)?\b.*|then,?\s+(?:evaluate|revise|do\s+a\s+self-check)"
+    r".*|attack both candidates.*|which candidate is better\??.*|"
+    r"output\s+(?:only\s+|the\s+)?final\s+(?:polished\s+)?(?:text|answer).*"
+    r"|[-*]\s*no\s+banned\s+words?.*|[-*]\s*(?:banned\s+words?|forbidden\s+content).*"
+    r"|self-check\s+for\s+banned\s+words.*)$"
 )
 # fragments of the utterance prompts that chatty models echo back verbatim
 # (build_prompt instructions, group-chat context); a line containing any of
@@ -294,6 +297,8 @@ _INSTRUCTION_MARKERS = (
     "you are in a group chat",
     "recent group conversation",
     "reply to the group",
+    "answer the substance",
+    "output the final",
 )
 
 

@@ -492,7 +492,9 @@ class OrganismApp(App):
         if pyperclip is not None:
             try:
                 pyperclip.copy(body)
-                self._append_log("— chat log copied to clipboard —", STYLE_DIM, stamp=True)
+                self._append_log(
+                    "— chat log copied to clipboard —", STYLE_DIM, stamp=True
+                )
                 return
             except Exception:  # noqa: BLE001,S110 — clipboard may fail in ssh/tmux; fall through to file
                 pass
@@ -507,7 +509,9 @@ class OrganismApp(App):
         enabled = not self.mouse_captured
         self.capture_mouse(enabled)
         status = "enabled" if enabled else "disabled"
-        self._append_log(f"— mouse capture {status} (ctrl+m to toggle) —", STYLE_DIM, stamp=True)
+        self._append_log(
+            f"— mouse capture {status} (ctrl+m to toggle) —", STYLE_DIM, stamp=True
+        )
 
     def _arm_hard_exit(self, delay=0.75):
         """Force os._exit(0) after a grace period if the interpreter is

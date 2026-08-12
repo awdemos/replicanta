@@ -92,3 +92,17 @@ def test_generate_with_stats_sends_expected_payload(monkeypatch):
     assert captured["body"]["stream"] is False
     assert captured["body"]["options"]["temperature"] == 0.3
     assert captured["timeout"] == 9
+
+
+def test_clean_candidate_strips_leaked_self_check_and_banned_word_lists():
+    raw = """First, answer the substance of what was said.
+Then, do a self-check for banned words and forbidden content. Then, output only the final polished text.
+I am listening to the cuteness in your greeting.
+- No banned words: "astonished", "tender", "wonder"
+Output the final answer only."""
+    cleaned = llmclient.clean_candidate(raw)
+    assert "self-check" not in cleaned.lower()
+    assert "banned words" not in cleaned.lower()
+    assert "final polished" not in cleaned.lower()
+    assert "astonished" not in cleaned.lower()
+    assert cleaned.strip() == "I am listening to the cuteness in your greeting."

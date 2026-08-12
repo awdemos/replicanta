@@ -6,6 +6,7 @@ change to the same public organism/nursery APIs used by the TUI.
 """
 
 import json
+import shutil
 import threading
 import webbrowser
 from http import HTTPStatus
@@ -178,13 +179,243 @@ class Glasshouse:
                 raise WebError(f"no organism named {name!r}")
             return self._swap(name)
 
-    def _swap(self, name):
-        self.org.flush(force=True)
+    def _swap(self, name, flush_old=True):
+        if flush_old:
+            self.org.flush(force=True)
         nursery.set_current(self.root, name)
         org = Organism(nursery.organism_dir(self.root, name), **self.spawn)
         org.load()
         self.org = org
         return self.snapshot()
+
+    def rename(self, name):
+        with self.lock:
+            name = str(name).strip()
+            if not name:
+                raise WebError("rename needs a name")
+            if name == self.name:
+                return self.snapshot()
+            self.org.flush(force=True)
+            nursery.rename(self.root, self.name, name)
+            return self._swap(name)
+
+    def cycle(self):
+        with self.lock:
+            self.org.cycle()
+            self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def remember(self, text):
+        with self.lock:
+            text = str(text).strip()
+            if not text:
+                raise WebError("remember needs text")
+            self.org.store.remember("user", text)
+            self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def forget(self, text):
+        with self.lock:
+            text = str(text).strip()
+            if not text:
+                raise WebError("forget needs text")
+            lowered = text.lower()
+            store = self.org.store
+            before = (
+                len(store.goals)
+                + len(store.memory)
+                + len(store.attention)
+                + len(store.beliefs_map)
+            )
+            store.goals = [
+                g for g in store.goals if lowered not in g.get("text", "").lower()
+            ]
+            store.memory = [
+                m
+                for m in store.memory
+                if lowered not in m.get("text", "").lower()
+                and lowered not in m.get("kind", "").lower()
+            ]
+            store.attention = {
+                (a, v)
+                for (a, v) in store.attention
+                if lowered not in a.lower() and lowered not in v.lower()
+            }
+            store.beliefs_map = {
+                k: c
+                for k, c in store.beliefs_map.items()
+                if lowered not in " ".join(k).lower()
+            }
+            store.archived_map = {
+                k: c
+                for k, c in store.archived_map.items()
+                if lowered not in " ".join(k).lower()
+            }
+            store.rules = [r for r in store.rules if lowered not in r[0].lower()]
+            store.chat_log = [c for c in store.chat_log if lowered not in c[1].lower()]
+            after = (
+                len(store.goals)
+                + len(store.memory)
+                + len(store.attention)
+                + len(store.beliefs_map)
+            )
+            if after < before:
+                store.dirty = True
+                self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def goal(self, text):
+        with self.lock:
+            text = str(text).strip()
+            if not text:
+                raise WebError("goal needs text")
+            self.org.add_goal(text)
+            self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def priority(self, text):
+        with self.lock:
+            text = str(text).strip()
+            if not text:
+                raise WebError("priority needs a goal")
+            store = self.org.store
+            goals = store.goals
+            matches = [
+                i
+                for i, g in enumerate(goals)
+                if text.lower() in g.get("text", "").lower()
+            ]
+            if not matches:
+                raise WebError(f"goal {text!r} not found")
+            idx = matches[0]
+            g = goals.pop(idx)
+            goals.insert(0, g)
+            store.dirty = True
+            self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def attention(self, topic):
+        with self.lock:
+            topic = str(topic).strip()
+            if topic:
+                self.org.window.focus(topic)
+                # Retain an explicit steering topic even when no belief matches it.
+                if not self.org.window.pairs:
+                    self.org.window.pairs.add(("attention", topic))
+            else:
+                self.org.window.focus(None)
+            self.org.store.attention = self.org.window.pairs
+            self.org.store.dirty = True
+            self.org.flush(force=True)
+        return {"state": self.snapshot()}
+
+    def mode(self, mode):
+        with self.lock:
+            mode = str(mode).strip().lower()
+            if mode not in ("wake", "sleep", "revive"):
+                raise WebError("mode must be wake, sleep, or revive")
+            if mode == "revive":
+                events = [{"kind": "revive", "changed": self.org.revive()}]
+            else:
+                events = self.org.force_state(mode)
+            self.org.flush(force=True)
+            return {"events": events, "state": self.snapshot()}
+
+    def save(self):
+        with self.lock:
+            self.org.flush(force=True)
+            return {"state": self.snapshot()}
+
+    def load(self):
+        with self.lock:
+            self.org.load()
+            return {"state": self.snapshot()}
+
+    def reset(self):
+        with self.lock:
+            name = self.name
+            seed = self.root / "organism.scl"
+            self.org.flush(force=True)
+            target = nursery.organism_dir(self.root, name)
+            if target.is_dir():
+                shutil.rmtree(target)
+            if not seed.exists():
+                raise WebError("no organism seed found")
+            nursery.create(self.root, name, seed)
+            return self._swap(name, flush_old=False)
+
+    def mutate(self, text):
+        with self.lock:
+            text = str(text).strip()
+            if not text:
+                text = "adapt"
+            entry = {"kind": "seed", "text": text[:60]}
+            ok, reason = extensions.validate(entry)
+            if not ok:
+                raise WebError(f"invalid mutation: {reason}")
+            extensions.propose(self.extension_path, entry)
+            return {"entry": entry, "state": self.snapshot()}
+
+    def help(self):
+        return {
+            "commands": [
+                {"name": "/help", "args": "", "desc": "toggle this help panel"},
+                {
+                    "name": "/mutate",
+                    "args": " [text]",
+                    "desc": "propose a mutation seed",
+                },
+                {
+                    "name": "/cycle",
+                    "args": "",
+                    "desc": "advance one full wake-sleep cycle",
+                },
+                {
+                    "name": "/rename",
+                    "args": " <name>",
+                    "desc": "rename the current organism",
+                },
+                {
+                    "name": "/remember",
+                    "args": " <text>",
+                    "desc": "remember this text as an episode",
+                },
+                {
+                    "name": "/forget",
+                    "args": " <text>",
+                    "desc": "forget entries containing text",
+                },
+                {"name": "/goal", "args": " <text>", "desc": "set a new goal"},
+                {
+                    "name": "/priority",
+                    "args": " <goal>",
+                    "desc": "move matching goal to front",
+                },
+                {
+                    "name": "/attention",
+                    "args": " <topic>",
+                    "desc": "focus attention on a topic",
+                },
+                {
+                    "name": "/mode",
+                    "args": " <wake|sleep|revive>",
+                    "desc": "set lifecycle mode",
+                },
+                {"name": "/save", "args": "", "desc": "persist organism state now"},
+                {"name": "/load", "args": "", "desc": "reload organism from disk"},
+                {
+                    "name": "/reset",
+                    "args": "",
+                    "desc": "reset the current organism",
+                },
+                {
+                    "name": "/chat",
+                    "args": " <message>",
+                    "desc": "send a normal chat message",
+                },
+            ],
+            "state": self.snapshot(),
+        }
 
 
 class GlasshouseHandler(BaseHTTPRequestHandler):
@@ -217,8 +448,23 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
                 "/api/lifecycle": lambda: self.app.lifecycle(data.get("action")),
                 "/api/settings": lambda: self.app.settings(data),
                 "/api/mutation": lambda: self.app.mutation(data.get("action")),
-                "/api/organisms": lambda: self.app.create_organism(data.get("name", "")),
+                "/api/organisms": lambda: self.app.create_organism(
+                    data.get("name", "")
+                ),
                 "/api/swap": lambda: self.app.swap(data.get("name", "")),
+                "/api/rename": lambda: self.app.rename(data.get("name", "")),
+                "/api/cycle": lambda: self.app.cycle(),
+                "/api/remember": lambda: self.app.remember(data.get("text", "")),
+                "/api/forget": lambda: self.app.forget(data.get("text", "")),
+                "/api/goal": lambda: self.app.goal(data.get("text", "")),
+                "/api/priority": lambda: self.app.priority(data.get("goal", "")),
+                "/api/attention": lambda: self.app.attention(data.get("topic", "")),
+                "/api/mode": lambda: self.app.mode(data.get("mode", "")),
+                "/api/save": lambda: self.app.save(),
+                "/api/load": lambda: self.app.load(),
+                "/api/reset": lambda: self.app.reset(),
+                "/api/mutate": lambda: self.app.mutate(data.get("text", "")),
+                "/api/help": lambda: self.app.help(),
             }
             if path not in routes:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -226,7 +472,9 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         except (WebError, ValueError, TypeError) as exc:
             return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except (OSError, RuntimeError):  # never expose local paths or prompts
-            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"})
+            return self._json(
+                HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"}
+            )
 
     def _body(self):
         try:
@@ -249,7 +497,10 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'",
+        )
         self.end_headers()
         self.wfile.write(body)
 
