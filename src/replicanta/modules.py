@@ -54,6 +54,9 @@ class ModuleLoader:
             if not isinstance(manifest, dict):
                 self.warnings.append(f"{path.name}: manifest is not a table")
                 continue
+            if not manifest.get("name"):
+                self.warnings.append(f"{path.name}: manifest missing name; skipping")
+                continue
             manifest["_dir"] = path
             manifest["_init_path"] = init_path
             found.append(manifest)
@@ -62,7 +65,14 @@ class ModuleLoader:
     def _resolve_load_order(self, modules):
         """Topological sort by depends. Returns ordered list; logs warnings
         and returns [] on missing deps or cycles."""
-        by_name = {m["name"]: m for m in modules if m.get("name")}
+        by_name = {}
+        for m in modules:
+            name = m.get("name")
+            if not name:
+                continue
+            if name in by_name:
+                self.warnings.append(f"duplicate module name '{name}'; keeping last")
+            by_name[name] = m
         ordered = []
         visited = set()
         temp = set()
@@ -76,10 +86,14 @@ class ModuleLoader:
             if name in visited:
                 return True
             if name not in by_name:
-                self.warnings.append(f"dependency '{name}' not found; skipping dependents")
+                self.warnings.append(f"dependency '{name}' not found; aborting load")
                 return False
             temp.add(name)
-            for dep in by_name[name].get("depends", []):
+            depends = by_name[name].get("depends", [])
+            if not isinstance(depends, list):
+                self.warnings.append(f"{name}: depends must be a list; skipping")
+                depends = []
+            for dep in depends:
                 if not visit(dep, path + [name]):
                     return False
             temp.remove(name)
@@ -88,7 +102,6 @@ class ModuleLoader:
             return True
 
         for name in sorted(by_name):
-            if name not in visited:
-                if not visit(name, []):
-                    return []
-        return ordered
+            if name not in visited and not visit(name, []):
+                return []
+        return [m["name"] for m in ordered]

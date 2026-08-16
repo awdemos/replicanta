@@ -37,7 +37,7 @@ def test_resolve_load_order_linear(tmp_path):
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
     ordered = loader._resolve_load_order(modules)
-    assert [m["name"] for m in ordered] == ["base", "derived"]
+    assert ordered == ["base", "derived"]
 
 
 def test_resolve_load_order_missing_dependency(tmp_path):
@@ -65,3 +65,16 @@ def test_resolve_load_order_circular(tmp_path):
     ordered = loader._resolve_load_order(modules)
     assert ordered == []
     assert any("circular" in w.lower() for w in loader.warnings)
+
+
+def test_resolve_load_order_invalid_depends_type(tmp_path):
+    d = tmp_path / "bad"
+    d.mkdir()
+    (d / "manifest.toml").write_text(
+        'name = "bad"\nversion = "1.0.0"\ndepends = "base"\n'
+    )
+    loader = ModuleLoader(tmp_path, organism=None, config={})
+    modules = loader._discover()
+    ordered = loader._resolve_load_order(modules)
+    assert ordered == ["bad"]
+    assert any("depends must be a list" in w for w in loader.warnings)
