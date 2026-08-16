@@ -25,7 +25,7 @@ class ServiceRegistry:
 
 
 class ModuleLoader:
-    """Discovers and initializes Lua modules from a directory."""
+    """Discovers Lua modules from a directory."""
 
     def __init__(self, modules_dir, organism=None, config=None, emit=None):
         self.modules_dir = Path(modules_dir)
@@ -58,3 +58,37 @@ class ModuleLoader:
             manifest["_init_path"] = init_path
             found.append(manifest)
         return found
+
+    def _resolve_load_order(self, modules):
+        """Topological sort by depends. Returns ordered list; logs warnings
+        and returns [] on missing deps or cycles."""
+        by_name = {m["name"]: m for m in modules if m.get("name")}
+        ordered = []
+        visited = set()
+        temp = set()
+
+        def visit(name, path):
+            if name in temp:
+                self.warnings.append(
+                    f"circular dependency detected: {' -> '.join(path + [name])}"
+                )
+                return False
+            if name in visited:
+                return True
+            if name not in by_name:
+                self.warnings.append(f"dependency '{name}' not found; skipping dependents")
+                return False
+            temp.add(name)
+            for dep in by_name[name].get("depends", []):
+                if not visit(dep, path + [name]):
+                    return False
+            temp.remove(name)
+            visited.add(name)
+            ordered.append(by_name[name])
+            return True
+
+        for name in sorted(by_name):
+            if name not in visited:
+                if not visit(name, []):
+                    return []
+        return ordered
