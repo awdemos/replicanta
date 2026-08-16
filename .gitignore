@@ -35,3 +35,4 @@ wheels/
 groups.json
 kimi-export-*.md
 session-ses_*.md
+.worktrees/
