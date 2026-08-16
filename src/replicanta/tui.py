@@ -236,6 +236,98 @@ class CellDetailScreen(ModalScreen):
         self.dismiss()
 
 
+class ModulesScreen(ModalScreen):
+    """Enable or disable discovered Lua modules and reload the organism's
+    module set. Space/enter toggles, s saves & reloads, esc closes."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close"),
+        Binding("s", "save", "save & reload"),
+    ]
+
+    def __init__(self, loader):
+        super().__init__()
+        self._loader = loader
+        self._enabled = set()
+        enabled = loader.config.get("modules", {}).get("enabled")
+        if enabled is not None:
+            self._enabled = set(enabled)
+        elif loader.modules:
+            # No config yet; treat currently loaded modules as the baseline.
+            self._enabled = set(loader.modules)
+
+    def compose(self) -> ComposeResult:
+        yield Label(
+            "Modules — space/enter toggles · s saves & reloads · esc closes",
+            id="modules-title",
+        )
+        yield ListView(id="module-list")
+        yield Label("", id="module-detail")
+
+    def on_mount(self):
+        self._refresh_list()
+
+    def _discovered(self):
+        """Return discovered manifests sorted by name."""
+        return sorted(self._loader._discover(), key=lambda m: m.get("name", ""))
+
+    def _refresh_list(self):
+        list_view = self.query_one("#module-list", ListView)
+        list_view.clear()
+        for manifest in self._discovered():
+            name = manifest.get("name", "")
+            marker = "[x]" if name in self._enabled else "[ ]"
+            desc = manifest.get("description", "")
+            text = f"{marker} {name}" + (f" — {desc}" if desc else "")
+            list_view.append(ListItem(Label(text), id=f"mod-{name}"))
+        if list_view.children:
+            list_view.focus()
+
+    def on_list_view_selected(self, event):
+        item = event.item
+        if item.id is None:
+            return
+        name = item.id.split("-", 1)[1]
+        if name in self._enabled:
+            self._enabled.discard(name)
+        else:
+            self._enabled.add(name)
+        label = item.query_one(Label)
+        manifest = next(
+            (m for m in self._discovered() if m.get("name") == name), {}
+        )
+        marker = "[x]" if name in self._enabled else "[ ]"
+        desc = manifest.get("description", "")
+        text = f"{marker} {name}" + (f" — {desc}" if desc else "")
+        label.update(text)
+        self._show_detail(name)
+
+    def _show_detail(self, name):
+        manifest = next(
+            (m for m in self._discovered() if m.get("name") == name), {}
+        )
+        lines = [f"{name} v{manifest.get('version', '?')}"]
+        deps = manifest.get("depends")
+        if deps:
+            lines.append(f"depends: {', '.join(deps)}")
+        provides = manifest.get("provides")
+        if provides:
+            lines.append(f"provides: {', '.join(provides)}")
+        description = manifest.get("description")
+        if description:
+            lines.append(description)
+        self.query_one("#module-detail", Label).update("\n".join(lines))
+
+    def action_save(self):
+        cfg = self._loader.config
+        cfg.setdefault("modules", {})["enabled"] = sorted(self._enabled)
+        from replicanta import config as project_config
+
+        project_config.save_config(self._loader.root, cfg)
+        self._loader.load_all()
+        self.dismiss(True)
+
+
 # role -> log style (Rich markup); engine events get their own styles
 STYLE_DREAM = "magenta"
 STYLE_LEARNED = "yellow"
@@ -271,6 +363,7 @@ class OrganismApp(App):
         Binding("f6", "look", "look through the camera"),
         Binding("f7", "show_tab('inner-pane')", "inner"),
         Binding("f8", "show_tab('cells-pane')", "cells"),
+        Binding("f9", "modules", "modules"),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
@@ -393,7 +486,7 @@ class OrganismApp(App):
                     yield Static("", id="cells", markup=False)
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
-            "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells)",
+            "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells · F9 modules)",
             id="chat",
         )
         yield self.chat_input
@@ -463,6 +556,13 @@ class OrganismApp(App):
 
     def action_help(self):
         self.push_screen(HelpScreen())
+
+    def action_modules(self):
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
+            return
+        self.push_screen(ModulesScreen(loader))
 
     def action_save_now(self):
         self.org.flush(force=True)
@@ -1991,7 +2091,7 @@ class OrganismApp(App):
         elif name == "/persona":
             self._persona_command(parts[1:])
         elif name == "/modules":
-            self._modules_command()
+            self._modules_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
 
@@ -2026,19 +2126,11 @@ class OrganismApp(App):
             svc.activate(args[0])
             self._append_log(f"persona: {args[0]}", STYLE_DIM)
 
-    def _modules_command(self):
-        loader = getattr(self.org, "module_loader", None)
-        if loader is None:
-            self._append_log("module loader unavailable", STYLE_WARN)
+    def _modules_command(self, args):
+        if args and args[0] != "manage":
+            self._append_log("/modules [manage]", STYLE_DIM)
             return
-        names = sorted(loader.modules)
-        self._append_log(f"loaded modules ({len(names)}): {', '.join(names)}", STYLE_DIM)
-        services = [
-            name
-            for name in sorted(loader.registry._services)
-            if not name.startswith("_")
-        ]
-        self._append_log(f"services: {', '.join(services)}", STYLE_DIM)
+        self.action_modules()
 
     def handle_chat(self, text):
         self._log_chat("user", text)

@@ -41,7 +41,7 @@ rules, then return to the awake state.
 
 Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and a local LLM
 backend. Ollama is the default; set `OLLAMA_MODEL` and `OLLAMA_URL` as needed.
-The default inner voice is `qwen3.5:latest`.
+The default inner voice is `qwen3.8:latest`.
 
 ### 1. Base install
 
@@ -68,7 +68,7 @@ steps (~15 minutes).
 ### 3. LLM backend
 
 ```bash
-ollama pull qwen3.5:latest
+ollama pull qwen3.8:latest
 ```
 
 ### 4. Optional extras
