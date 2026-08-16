@@ -3,6 +3,7 @@ BeliefStore that persists beliefs/state.json/genome per organism directory.
 The TUI (tui.py) renders this; the arena (arena.py) debates it."""
 
 import json
+import logging
 import random
 import re
 import time
@@ -18,8 +19,11 @@ from replicanta.fileutil import atomic_write_text
 from replicanta.gitstate import CONDITION_TEXT as GIT_CONDITION_TEXT
 from replicanta.gitstate import GitProbe
 from replicanta.hooks import HookEngine, scripts_dir_for
+from replicanta.modules import ModuleLoader
 from replicanta.probe import SystemProbe
 from replicanta.skills import SkillStore
+
+logger = logging.getLogger(__name__)
 
 BEL = "bel"
 PROVENANCE = "minmaxprob"
@@ -891,7 +895,10 @@ class Organism:
         self.probe = probe if probe is not None else SystemProbe()
         self.git_probe = git_probe
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
+        # Hooks engine is created here so code can attach to it before load();
+        # the module-driven hooks service is wired in load().
         self.hooks = HookEngine(scripts_dir_for(dir_path))
+        self._default_hook_emit = self.hooks.emit
         self.store.on_utterance = lambda role, text: self.hooks.fire(
             "utterance", self, text=text
         )
@@ -935,12 +942,25 @@ class Organism:
         if fresh and self.mind.scl_path.exists():
             for belief, conf in self.mind.beliefs().items():
                 self.store.add(belief, conf)
+        cfg = project_config.load_config(self._root_dir())
+        self.module_loader = ModuleLoader(
+            modules_dir=self._modules_dir(),
+            organism=self,
+            config=cfg,
+            emit=self._emit_log,
+            root=self._root_dir(),
+        )
+        self.module_loader.load_all()
+        self.persona_service = self.module_loader.registry.get("persona")
+        hooks_service = self.module_loader.registry.get("hooks")
+        self.hooks.hooks_service = hooks_service
+        if self.hooks.emit is self._default_hook_emit:
+            self.hooks.emit = lambda msg: self.store.record_chat("system", msg)
         if fresh:
             self.store.remember("born", "woke into existence")
             self.hooks.fire("birth", self)
         self.window = AttentionWindow(self.store.beliefs())
         self.window.refresh(cycle=self.store.cycle)
-        cfg = project_config.load_config(self._root_dir())
         if cfg.get("git", {}).get("enabled"):
             self._attach_git_probe(cfg.get("git", {}))
 
@@ -974,6 +994,20 @@ class Organism:
         if self.dir_path.parent.name == "organisms":
             return self.dir_path.parent.parent
         return self.dir_path
+
+    def _modules_dir(self):
+        """Modules directory: nursery root's modules/ when the organism is in a
+        nursery (organisms/<name>/), otherwise beside the organism."""
+        if self.dir_path.parent.name == "organisms":
+            return self.dir_path.parent.parent / "modules"
+        return self.dir_path / "modules"
+
+    def _emit_log(self, msg):
+        # Append to chat log if possible; otherwise ignore.
+        try:
+            self.store.record_chat("system", str(msg))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("module log failed: %s", exc)
 
     def _attach_git_probe(self, git_cfg):
         """Attach a GitProbe using the given config. Never raises."""

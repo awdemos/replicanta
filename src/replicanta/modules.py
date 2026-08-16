@@ -12,7 +12,7 @@ from lupa import LuaRuntime
 
 from replicanta import config as project_config
 
-_BLOCKED_GLOBALS = ("os", "io", "load", "loadstring", "require", "dofile")
+_BLOCKED_GLOBALS = ("os", "io", "load", "loadfile", "loadstring", "require", "dofile", "package", "debug")
 
 logger = logging.getLogger(__name__)
 

@@ -1373,3 +1373,21 @@ def test_organism_git_status_when_disabled(tmp_path):
     org = Organism(tmp_path, probe=_dummy_probe())
     org.load()
     assert org.git_status() == "git sensing is off"
+
+
+def test_organism_loads_modules(tmp_path, monkeypatch):
+    _seed_organism(tmp_path)
+    modules_dir = tmp_path / "modules" / "testmod"
+    modules_dir.mkdir(parents=True)
+    (modules_dir / "manifest.toml").write_text(
+        'name = "testmod"\nversion = "1.0.0"\n'
+    )
+    (modules_dir / "init.lua").write_text(
+        'function init(ctx)\n'
+        '  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\n'
+        'end\n'
+    )
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    result = org.module_loader.registry.get("commands").dispatch("/test", [])
+    assert result == "ok"
