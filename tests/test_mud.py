@@ -575,7 +575,7 @@ def test_scenario_json_roundtrip():
     scenario = mud.default_scenario()
     data = mud.scenario_to_json(scenario)
     blob = json.dumps(data)  # must be JSON-safe
-    recovered = mud.scenario_from_json(json.loads(blob))
+    recovered = mud.validate_scenario(json.loads(blob))
     assert recovered.title == scenario.title
     assert recovered.premise == scenario.premise
     assert recovered.start_room == scenario.start_room
@@ -593,7 +593,7 @@ def test_loaded_scenario_is_playable(tmp_path):
 
     path = tmp_path / "scenario.json"
     path.write_text(json.dumps(mud.scenario_to_json(mud.default_scenario())))
-    scenario = mud.scenario_from_json(json.loads(path.read_text()))
+    scenario = mud.validate_scenario(json.loads(path.read_text()))
     game = MudGame(scenario)
     plan = [
         "go north",

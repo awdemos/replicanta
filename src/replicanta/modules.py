@@ -171,7 +171,7 @@ class ModuleLoader:
         if enabled is None:
             enabled = ["base", "software-engineer", "creative-writer", "socratic-philosopher"]
         enabled = set(enabled)
-        if enabled:
+        if enabled is not None:
             discovered = [m for m in discovered if m.get("name") in enabled]
         ordered = self._resolve_load_order(discovered)
         for manifest in ordered:

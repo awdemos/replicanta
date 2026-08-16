@@ -1151,7 +1151,7 @@ class OrganismApp(App):
         path = self._mud_artifacts_dir() / "mud" / "scenarios" / f"{slug}.json"
         try:
             if path.exists():
-                return mud.scenario_from_json(json.loads(path.read_text()))
+                return mud.validate_scenario(json.loads(path.read_text()))
         except (OSError, ValueError) as exc:
             self._append_log(f"mud: couldn't load scenario {slug} ({exc})", STYLE_WARN)
         default = mud.default_scenario()

@@ -18,7 +18,8 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from typing import TypedDict
+from collections.abc import Callable
+from typing import Any, TypedDict
 
 from replicanta import fileutil, llmclient, voice
 
@@ -68,6 +69,41 @@ class WinCondition(TypedDict, total=False):
     win_text: str
 
 
+class RoomDict(TypedDict, total=False):
+    """JSON shape for a single room in a scenario."""
+
+    desc: str
+    exits: dict[str, str]
+    items: list[str]
+    locked: dict[str, list[str]]
+    plot_trigger: str
+    is_goal: bool
+
+
+class ScenarioDict(TypedDict):
+    """JSON shape produced by scenario_to_json and accepted by validate_scenario."""
+
+    title: str
+    premise: str
+    start_room: str
+    win_condition: WinCondition
+    rooms: dict[str, RoomDict]
+
+
+class MudSessionDict(TypedDict, total=False):
+    """JSON shape produced by MudSession.to_json and accepted by MudSession.from_json."""
+
+    scenario_id: str
+    scenario_title: str
+    premise: str
+    visited: list[str]
+    known_exits: dict[str, list[str]]
+    plot_beats: list[str]
+    inventory_log: list[list[str | int]]
+    command_log: list[list[str | int]]
+    outcome: str | None
+
+
 @dataclass
 class Scenario:
     title: str
@@ -99,7 +135,7 @@ class MudSession:
     command_log: list[tuple[str, str, int]] = field(default_factory=list)
     outcome: str | None = None
 
-    def to_json(self) -> dict:
+    def to_json(self) -> MudSessionDict:
         return {
             "scenario_id": self.scenario_id,
             "scenario_title": self.scenario_title,
@@ -113,7 +149,7 @@ class MudSession:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> "MudSession":
+    def from_json(cls, data: MudSessionDict) -> "MudSession":
         return cls(
             scenario_id=data["scenario_id"],
             scenario_title=data["scenario_title"],
@@ -624,7 +660,7 @@ def _scenario_generation_prompt(description, org):
     )
 
 
-def validate_scenario(data) -> Scenario:
+def validate_scenario(data: dict[str, Any]) -> Scenario:
     """Validate and normalize scenario JSON.
 
     Raises ValueError with a descriptive message when required fields are
@@ -694,7 +730,7 @@ def validate_scenario(data) -> Scenario:
     )
 
 
-def scenario_or_default(data) -> Scenario:
+def scenario_or_default(data: dict[str, Any]) -> Scenario:
     """Validate scenario JSON, falling back to the default on any error."""
     try:
         return validate_scenario(data)
@@ -706,7 +742,7 @@ def scenario_or_default(data) -> Scenario:
 # -- scenario serialization ----------------------------------------------------
 
 
-def scenario_to_json(scenario) -> dict:
+def scenario_to_json(scenario: Scenario) -> ScenarioDict:
     """Scenario -> plain JSON-safe dict (for saving generated scenarios)."""
     return {
         "title": scenario.title,
@@ -727,12 +763,7 @@ def scenario_to_json(scenario) -> dict:
     }
 
 
-def scenario_from_json(data) -> Scenario:
-    """JSON dict -> Scenario, raising ValueError on bad input."""
-    return validate_scenario(data)
-
-
-def generate_scenario(description, org, generate=None) -> Scenario:
+def generate_scenario(description: str, org: Any, generate: Callable[[str], str] | None = None) -> Scenario:
     """Ask the voice for a scenario, validate it, and fall back on failure."""
     if generate is None:
 
