@@ -440,7 +440,7 @@ class OrganismApp(App):
         self._voice_announced = None
         self._self_talk_on = False
         self._self_talking = False
-        self._rng = random.Random()
+        self._rng = random.Random()  # nosec B311 - UI variety RNG, not cryptography
         self._last_was_question = False
         self._pending_text = ""
         self._pending_visible = False
@@ -595,7 +595,7 @@ class OrganismApp(App):
                 pyperclip.copy(body)
                 self._append_log("— chat log copied to clipboard —", STYLE_DIM, stamp=True)
                 return
-            except Exception:  # noqa: BLE001,S110 — clipboard may fail in ssh/tmux; fall through to file
+            except Exception:  # noqa: BLE001,S110 # nosec — clipboard may fail in ssh/tmux; fall through to file
                 pass
         path = Path(tempfile.gettempdir()) / f"replicanta-chat-{int(time.time())}.txt"
         path.write_text(body, encoding="utf-8")

@@ -646,7 +646,7 @@ def _cell_color(kind, conf):
 
 
 def _stable_index(key, capacity):
-    digest = hashlib.md5(key.encode()).digest()
+    digest = hashlib.md5(key.encode(), usedforsecurity=False).digest()
     return int.from_bytes(digest[:8], "big") % capacity
 
 

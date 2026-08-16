@@ -62,7 +62,7 @@ class ThoughtArena:
     a single instance is safe to share."""
 
     def __init__(self, rng=None, model=None, timeout=None):
-        self._rng = rng if rng is not None else random.Random()
+        self._rng = rng if rng is not None else random.Random()  # nosec B311 - simulation RNG, not cryptography
         self._model = model
         self._timeout = timeout
 

@@ -5,7 +5,7 @@ SystemProbe turns CPU/memory into beliefs and distress.
 """
 
 import logging
-import subprocess
+import subprocess  # nosec B404 - required for git CLI integration
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ CONDITION_TEXT = {
 
 def _git_spawn(worktree, args):
     """Run a git command in worktree. Returns a CompletedProcess."""
-    return subprocess.run(
+    return subprocess.run(  # nosec
         ["git", *args],
         cwd=str(worktree),
         capture_output=True,
