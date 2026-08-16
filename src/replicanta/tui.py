@@ -20,7 +20,7 @@ from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Input,
     Label,
@@ -89,13 +89,13 @@ class SlashCommands(Provider):
 
     async def discover(self):
         """Yield every slash command as an unfiltered command-palette hit."""
-        for name, usage, description in tui_commands.COMMANDS:
+        for name, usage, description, _category in tui_commands.COMMANDS:
             yield self._hit(name, usage, description)
 
     async def search(self, query):
         """Yield slash commands whose name/description match the palette query."""
         matcher = Matcher(query)
-        for name, usage, description in tui_commands.COMMANDS:
+        for name, usage, description, _category in tui_commands.COMMANDS:
             match = matcher.match(f"{name} {description}")
             if match is not None:
                 yield self._hit(
@@ -111,6 +111,57 @@ class HelpScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         """Build the help overlay from the generated slash-command text."""
         yield Static(tui_commands.help_text(), id="help")
+
+
+class CommandPalette(Screen):
+    """Searchable slash-command palette."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="Type a command…", id="palette-input")
+        yield ListView(id="palette-results")
+
+    def on_show(self):
+        self.query_one("#palette-input", Input).focus()
+        self._render("")
+
+    def on_input_changed(self, event):
+        self._render(event.value)
+
+    def _render(self, query):
+        results = self.query_one("#palette-results", ListView)
+        results.clear()
+        items = tui_commands.filter_commands(query)
+        if not items:
+            results.append(ListItem(Static("No matches")))
+            return
+        categories = {}
+        for name, usage, desc, category in items:
+            categories.setdefault(category, []).append((name, usage, desc))
+        for category in ("State", "Voice", "Senses", "MUD", "Organisms", "System", "Help"):
+            if category not in categories:
+                continue
+            header = ListItem(Static(f"[dim]{category}[/dim]"))
+            header.disabled = True
+            results.append(header)
+            for name, usage, desc in categories[category]:
+                item = ListItem(
+                    Vertical(
+                        Static(f"[bold]{usage}[/bold]", classes="palette-usage"),
+                        Static(f"{desc}", classes="palette-desc"),
+                    )
+                )
+                item.data = name
+                results.append(item)
+
+    def on_list_view_selected(self, event):
+        item = event.item
+        command = getattr(item, "data", None)
+        if command:
+            self.dismiss(command)
+        else:
+            self.dismiss(None)
 
 
 class OrganismMenuScreen(ModalScreen):
@@ -440,6 +491,15 @@ class OrganismApp(App):
                   height: auto; background: $surface; }
     #bottombar { height: 1; padding: 0 1; background: $surface;
                   color: $text-muted; }
+    CommandPalette { align: center middle; }
+    #palette { width: 60; height: auto; max-height: 24; border: round $primary;
+               background: $surface; padding: 1 2; }
+    #palette-results { height: auto; max-height: 18; border: none;
+                       background: $surface; }
+    #palette-results > ListItem { padding: 0 1; }
+    #palette-results > ListItem.--highlight { background: $primary; color: $text; }
+    .palette-usage { text-style: bold; }
+    .palette-desc { color: $text-muted; }
     """
 
     def __init__(self, organism, root=None, spawn=None):
@@ -601,6 +661,16 @@ class OrganismApp(App):
 
     def action_help(self):
         self.push_screen(HelpScreen())
+
+    def action_command_palette(self):
+        """Open the searchable slash-command palette and fill the chat line."""
+
+        def _fill(command):
+            if command:
+                self.chat_input.value = f"{command} "
+                self.chat_input.focus()
+
+        self.push_screen(CommandPalette(), callback=_fill)
 
     def action_modules(self):
         loader = getattr(self.org, "module_loader", None)

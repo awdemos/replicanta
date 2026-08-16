@@ -9,7 +9,7 @@ from rich.console import Console
 from textual.widgets import Static, TabbedContent
 
 from replicanta.organism import Organism
-from replicanta.tui import OrganismApp
+from replicanta.tui import CommandPalette, OrganismApp
 
 
 def _renderable_text(widget):
@@ -178,3 +178,20 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
     )
     with pytest.raises(SystemExit):
         tui.main()
+
+
+def test_command_palette_fills_input(monkeypatch, tmp_path):
+    """ctrl+p must open the command palette; selecting a command fills the
+    chat input with the command name and a trailing space."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app.action_command_palette()
+            assert isinstance(pilot.app.screen, CommandPalette)
+            pilot.app.screen.dismiss("/chaos")
+            await asyncio.sleep(0.05)
+            assert app.chat_input.value == "/chaos "
+            assert app.chat_input.has_focus
+
+    asyncio.run(check())
