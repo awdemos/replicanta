@@ -6,10 +6,10 @@ import asyncio
 import io
 
 from rich.console import Console
-from textual.widgets import Static, TabbedContent
+from textual.widgets import Button, Static, TabbedContent
 
 from replicanta.organism import Organism
-from replicanta.tui import CommandHints, CommandPalette, OrganismApp
+from replicanta.tui import CommandHints, CommandPalette, OrganismApp, TabBar
 
 
 def _renderable_text(widget):
@@ -210,5 +210,20 @@ def test_command_palette_fills_input(monkeypatch, tmp_path):
             await asyncio.sleep(0.05)
             assert app.chat_input.value == "/chaos "
             assert app.chat_input.has_focus
+
+    asyncio.run(check())
+
+
+def test_tab_bar_labels_visible(monkeypatch, tmp_path):
+    """The custom tab bar must expose the main view labels."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            bar = app.query_one(TabBar)
+            labels = [str(b.label) for b in bar.query(Button)]
+            assert "Chat" in labels
+            assert "Mind" in labels
+            assert "Memory" in labels
 
     asyncio.run(check())

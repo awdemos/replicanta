@@ -22,6 +22,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
+    Button,
     Input,
     Label,
     ListItem,
@@ -124,6 +125,27 @@ class CommandHints(Static):
         lines = [f"{usage:<16} {desc}" for _name, usage, desc, _category in items[:8]]
         self.update("\n".join(lines))
         self.styles.display = "block" if lines else "none"
+
+
+class TabBar(Horizontal):
+    """Clickable tab bar that mirrors the TabbedContent panes."""
+
+    TABS: ClassVar[list[tuple[str, str]]] = [
+        ("Chat", "chat-pane"),
+        ("Mind", "mind-pane"),
+        ("Memory", "memory-pane"),
+        ("Inner", "inner-pane"),
+        ("Cells", "cells-pane"),
+        ("MUD", "mud-pane"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        for label, pane in self.TABS:
+            yield Button(label, id=f"tab-{pane}")
+
+    def set_active(self, pane):
+        for button in self.query(Button):
+            button.variant = "primary" if button.id == f"tab-{pane}" else "default"
 
 
 class HelpScreen(ModalScreen):
@@ -497,7 +519,10 @@ class OrganismApp(App):
     #sidebar.-dragging #sidebar-list > ListItem.group-header {
         background: $boost; color: $text; text-style: bold underline; }
     #content { width: 1fr; height: 1fr; }
+    #tab-bar { height: 3; padding: 0 1; }
+    #tab-bar > Button { min-width: 8; margin: 0 1; }
     TabbedContent { height: 1fr; }
+    TabbedContent > ContentTabs { display: none; }
     #dreams { height: 1fr; padding: 0 1; }
     #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
     #mind, #memory, #inner { padding: 1 2; }
@@ -593,26 +618,34 @@ class OrganismApp(App):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
                 yield ListView(id="sidebar-list")
-            with Vertical(id="content"), TabbedContent(initial="chat-pane"):
-                with TabPane("chat", id="chat-pane"):
-                    dreams = RichLog(
-                        id="dreams",
-                        max_lines=1000,
-                        wrap=True,
-                        markup=True,
-                        highlight=False,
-                    )
-                    dreams.can_focus = False
-                    yield dreams
-                    yield Static("", id="pending", markup=False)
-                with TabPane("mind", id="mind-pane"), VerticalScroll():
-                    yield Static("", id="mind", markup=False)
-                with TabPane("memory", id="memory-pane"), VerticalScroll():
-                    yield Static("", id="memory", markup=False)
-                with TabPane("inner", id="inner-pane"), VerticalScroll():
-                    yield Static("", id="inner", markup=False)
-                with TabPane("cells", id="cells-pane"), VerticalScroll():
-                    yield Static("", id="cells", markup=False)
+            with Vertical(id="content"):
+                yield TabBar(id="tab-bar")
+                with TabbedContent(initial="chat-pane"):
+                    with TabPane("chat", id="chat-pane"):
+                        dreams = RichLog(
+                            id="dreams",
+                            max_lines=1000,
+                            wrap=True,
+                            markup=True,
+                            highlight=False,
+                        )
+                        dreams.can_focus = False
+                        yield dreams
+                        yield Static("", id="pending", markup=False)
+                    with TabPane("mind", id="mind-pane"), VerticalScroll():
+                        yield Static("", id="mind", markup=False)
+                    with TabPane("memory", id="memory-pane"), VerticalScroll():
+                        yield Static("", id="memory", markup=False)
+                    with TabPane("inner", id="inner-pane"), VerticalScroll():
+                        yield Static("", id="inner", markup=False)
+                    with TabPane("cells", id="cells-pane"), VerticalScroll():
+                        yield Static("", id="cells", markup=False)
+                    with TabPane("mud", id="mud-pane"), VerticalScroll():
+                        yield Static(
+                            "MUD output appears here. Type moves in the chat bar.",
+                            id="mud",
+                            markup=False,
+                        )
         yield CommandHints("", id="command-hints")
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
@@ -625,6 +658,9 @@ class OrganismApp(App):
     def on_mount(self):
         """Render the initial organism state and start background timers."""
         self._show_org()
+        tab_bar = self._safe_query("#tab-bar", TabBar)
+        if tab_bar is not None:
+            tab_bar.set_active("chat-pane")
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
@@ -681,9 +717,18 @@ class OrganismApp(App):
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
         self.query_one(TabbedContent).active = pane
+        tab_bar = self._safe_query("#tab-bar", TabBar)
+        if tab_bar is not None:
+            tab_bar.set_active(pane)
         # keep typing in the chat line, never stranded by a pane switch
         if self.chat_input is not None:
             self.chat_input.focus()
+
+    def on_button_pressed(self, event):
+        """Route tab-bar (and later quick-action) button presses."""
+        button_id = event.button.id
+        if button_id and button_id.startswith("tab-"):
+            self.action_show_tab(button_id[4:])
 
     def action_help(self):
         self.push_screen(HelpScreen())
