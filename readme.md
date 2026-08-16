@@ -159,12 +159,19 @@ bar shows state, mood, belief/rule counts, and voice status.
   broadcast to every member and each answers in turn (quick arena: one LLM
   call per reply). Address one member with `fern: …` or `@fern …`;
   `/group stop` ends it — members keep what they learned and heard.
+- `/git on|off` — let the organism sense the git worktree (dirty files,
+  unpushed commits, commits behind upstream). `/git status` shows the
+  current repo summary. Enable it by default in `replicanta.toml`:
+  `enabled = true` under `[git]`.
 - `/help` (F1, ctrl+p) — full command list.
 
 ## Mind
 
 - **Senses**: host metrics (CPU, memory, disk, temperature, battery, clock,
-  uname) become symbolic beliefs.
+  uname) become symbolic beliefs. When git sensing is enabled (`/git on` or
+  `replicanta.toml` `[git].enabled = true`), the organism also perceives the
+  worktree: dirty files, unpushed commits, and commits behind upstream become
+  beliefs, raise stress, and may surface in mood and memory.
 - **Mood**: derived from stress and tone (calm, hurt, anxious, grateful,
   curious, insane), fed back to the voice prompt.
 - **Mental state**: persisted arousal, rationality, and irrationality are
