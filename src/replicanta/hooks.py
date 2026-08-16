@@ -146,12 +146,15 @@ class HookEngine:
                 self.emit(f"ctx: {exc}")
                 return
             handlers = []
+            prev_hook = self._lua.globals()[f"on_{event}"]
+            same_hook = self._lua.eval("function(a, b) return a == b end")
             for script in self.scripts:
                 try:
                     self._lua.execute(script.read_text())
                     hook = self._lua.globals()[f"on_{event}"]
-                    if hook is not None:
+                    if hook is not None and not same_hook(hook, prev_hook):
                         handlers.append((script.name, hook))
+                        prev_hook = hook
                 except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
                     self.emit(f"{script.name}: {exc}")
             for name, hook in handlers:

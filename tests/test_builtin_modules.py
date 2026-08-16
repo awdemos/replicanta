@@ -1,11 +1,9 @@
 from pathlib import Path
 
-import pytest
-
 from replicanta.modules import ModuleLoader
 
 
-def test_builtin_persona_modules_load(tmp_path, monkeypatch):
+def test_builtin_persona_modules_load(tmp_path):
     # Copy built-in modules into temp dir
     import shutil
     src = Path(__file__).parent.parent / "modules"

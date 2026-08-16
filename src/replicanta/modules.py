@@ -241,16 +241,27 @@ class _StoreService:
         self.store.observe(belief, conf)
 
 
-def _lua_to_py(obj):
+def _lua_to_py(obj, seen=None):
     """Recursively convert lupa Lua tables to plain Python dicts/lists."""
-    if hasattr(obj, "items"):
-        items = list(obj.items())
-        if items and all(isinstance(k, int) for k, _ in items):
-            keys = [k for k, _ in items]
-            if min(keys) == 1 and max(keys) == len(keys):
-                return [_lua_to_py(v) for _, v in sorted(items)]
-        return {k: _lua_to_py(v) for k, v in items}
-    return obj
+    if seen is None:
+        seen = set()
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    obj_id = id(obj)
+    if obj_id in seen:
+        return None
+    seen.add(obj_id)
+    try:
+        if hasattr(obj, "items"):
+            items = list(obj.items())
+            if items and all(isinstance(k, int) for k, _ in items):
+                keys = [k for k, _ in items]
+                if min(keys) == 1 and max(keys) == len(keys):
+                    return [_lua_to_py(v, seen) for _, v in sorted(items)]
+            return {k: _lua_to_py(v, seen) for k, v in items}
+        return obj
+    finally:
+        seen.discard(obj_id)
 
 
 class PersonaService:
@@ -291,10 +302,11 @@ class PersonaService:
             logger.warning("unknown persona: %s", name)
             return
         self.config.setdefault("persona", {})["active"] = name
-        for belief in spec.get("beliefs", []):
-            if len(belief) == 3:
-                self.store.observe(tuple(belief), 0.9)
-        self.store.remember("persona", f"adopted the {name} persona")
+        if self.store is not None:
+            for belief in spec.get("beliefs", []):
+                if len(belief) == 3:
+                    self.store.observe(tuple(belief), 0.9)
+            self.store.remember("persona", f"adopted the {name} persona")
         self._save()
 
     def deactivate(self):

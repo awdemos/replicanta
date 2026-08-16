@@ -237,3 +237,18 @@ def test_hook_engine_legacy_scripts(tmp_path):
     engine = HookEngine(tmp_path)
     engine.fire("birth", None)
     assert engine._lua.globals()["LOG"] == "b"
+
+
+def test_hook_engine_no_multi_fire(tmp_path):
+    (tmp_path / "a.lua").write_text(
+        'function on_cycle(ctx)\n  LOG = (LOG or "") .. "A"\nend\n'
+    )
+    (tmp_path / "b.lua").write_text(
+        'function on_cycle(ctx)\n  LOG = (LOG or "") .. "B"\nend\n'
+    )
+    (tmp_path / "c.lua").write_text(
+        '-- c defines no cycle hook\n'
+    )
+    engine = HookEngine(tmp_path)
+    engine.fire("cycle", None)
+    assert engine._lua.globals()["LOG"] == "AB"

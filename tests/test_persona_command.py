@@ -1,14 +1,10 @@
-from pathlib import Path
-
-import pytest
-
 from replicanta.modules import PersonaService
 
 
-def test_persona_service_activate_and_list():
+def test_persona_service_activate_and_list(tmp_path):
     from replicanta.organism import BeliefStore
 
-    store = BeliefStore(Path("/tmp"))
+    store = BeliefStore(tmp_path)
     svc = PersonaService(store)
     svc.register({
         "name": "se",

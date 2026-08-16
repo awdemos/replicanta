@@ -2033,6 +2033,12 @@ class OrganismApp(App):
             return
         names = sorted(loader.modules)
         self._append_log(f"loaded modules ({len(names)}): {', '.join(names)}", STYLE_DIM)
+        services = [
+            name
+            for name in sorted(loader.registry._services)
+            if not name.startswith("_")
+        ]
+        self._append_log(f"services: {', '.join(services)}", STYLE_DIM)
 
     def handle_chat(self, text):
         self._log_chat("user", text)
