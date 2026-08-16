@@ -1,0 +1,5 @@
+name = "creative-writer"
+version = "1.0.0"
+description = "A vivid, metaphorical, exploratory persona"
+depends = ["base"]
+provides = ["persona"]

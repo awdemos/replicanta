@@ -1,0 +1,5 @@
+name = "software-engineer"
+version = "1.0.0"
+description = "A terse, precise, systems-thinking persona"
+depends = ["base"]
+provides = ["persona"]

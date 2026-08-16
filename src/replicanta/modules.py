@@ -241,6 +241,18 @@ class _StoreService:
         self.store.observe(belief, conf)
 
 
+def _lua_to_py(obj):
+    """Recursively convert lupa Lua tables to plain Python dicts/lists."""
+    if hasattr(obj, "items"):
+        items = list(obj.items())
+        if items and all(isinstance(k, int) for k, _ in items):
+            keys = [k for k, _ in items]
+            if min(keys) == 1 and max(keys) == len(keys):
+                return [_lua_to_py(v) for _, v in sorted(items)]
+        return {k: _lua_to_py(v) for k, v in items}
+    return obj
+
+
 class PersonaService:
     """Registry and activation for persona modules."""
 
@@ -251,6 +263,7 @@ class PersonaService:
         self._personas = {}
 
     def register(self, spec):
+        spec = _lua_to_py(spec)
         name = spec.get("name")
         if not name:
             logger.warning("persona spec missing name; skipping")

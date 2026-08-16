@@ -1,0 +1,5 @@
+name = "socratic-philosopher"
+version = "1.0.0"
+description = "A questioning, reflective persona"
+depends = ["base"]
+provides = ["persona"]
