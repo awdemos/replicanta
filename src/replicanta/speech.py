@@ -43,7 +43,13 @@ def _voices_dir():
 
 VOICES_DIR = _voices_dir()
 _DEFAULT_MODEL = VOICES_DIR / "en_US-lessac-medium.onnx"
-_model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
+_model_path = _DEFAULT_MODEL
+
+
+def _env_model_path():
+    """Return the REPLICANTA_VOICE_MODEL override, or None."""
+    env = os.environ.get("REPLICANTA_VOICE_MODEL")
+    return Path(env) if env else None
 
 HF_VOICE_URL = (
     "https://huggingface.co/rhasspy/piper-voices/resolve/"
@@ -66,17 +72,17 @@ _voice_lock = threading.Lock()
 def available():
     """True when a piper model file is present (packages may still be
     missing — failures are contained at speak time)."""
-    return _model_path.exists()
+    return model_path().exists()
 
 
 def model_path():
-    """Path of the active piper model (mutated by set_voice/reset)."""
-    return _model_path
+    """Path of the active piper model (env override > set_voice > default)."""
+    return _env_model_path() or _model_path
 
 
 def voice_name():
     """Name of the active voice, e.g. 'en_US-lessac-medium'."""
-    return _model_path.stem
+    return model_path().stem
 
 
 def list_voices():
@@ -231,7 +237,7 @@ def reset():
     global enabled, _voice, _model_path
     enabled = False
     _voice = None
-    _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
+    _model_path = _env_model_path() or _DEFAULT_MODEL
     while True:
         try:
             _queue.get_nowait()
