@@ -624,67 +624,77 @@ def _scenario_generation_prompt(description, org):
     )
 
 
-def scenario_or_default(data) -> Scenario:
-    """Validate and normalize scenario JSON; any error substitutes the
-    default scenario (with a logged warning) rather than failing."""
-    try:
-        title = data["title"]
-        premise = data["premise"]
-        start_room = data["start_room"]
-        win_condition = dict(data["win_condition"])
-        rooms_data = data["rooms"]
+def validate_scenario(data) -> Scenario:
+    """Validate and normalize scenario JSON.
 
-        if start_room not in rooms_data:
-            raise ValueError(f"start_room {start_room!r} not in rooms")
+    Raises ValueError with a descriptive message when required fields are
+    missing, exits reference unknown rooms, or the win condition is
+    unsatisfiable. Callers that want a fallback should use
+    ``scenario_or_default``.
+    """
+    title = data["title"]
+    premise = data["premise"]
+    start_room = data["start_room"]
+    win_condition = dict(data["win_condition"])
+    rooms_data = data["rooms"]
 
-        rooms = {}
-        for room_id, room_data in rooms_data.items():
-            desc = room_data["desc"]
-            exits = dict(room_data.get("exits", {}))
-            items = list(room_data.get("items", []))
-            locked_raw = room_data.get("locked", {})
-            locked = {}
-            for direction, lock_info in locked_raw.items():
-                if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
-                    raise ValueError(
-                        f"invalid locked format for {direction} in {room_id}"
-                    )
-                locked[direction] = (lock_info[0], lock_info[1])
-            plot_trigger = room_data.get("plot_trigger")
-            is_goal = room_data.get("is_goal", False)
-            rooms[room_id] = Room(
-                desc=desc,
-                exits=exits,
-                items=items,
-                locked=locked,
-                plot_trigger=plot_trigger,
-                is_goal=is_goal,
-            )
+    if start_room not in rooms_data:
+        raise ValueError(f"start_room {start_room!r} not in rooms")
 
-        for room_id, room in rooms.items():
-            for direction, target in room.exits.items():
-                if target not in rooms:
-                    raise ValueError(
-                        f"exit {direction} from {room_id} to unknown {target}"
-                    )
-
-        if "item" in win_condition:
-            item = win_condition["item"]
-            if not any(item in room.items for room in rooms.values()):
-                raise ValueError(f"win item {item!r} not found in any room")
-        elif "room" in win_condition:
-            if win_condition["room"] not in rooms:
-                raise ValueError(f"win room {win_condition['room']!r} not found")
-        else:
-            raise ValueError("win_condition must contain 'item' or 'room'")
-
-        return Scenario(
-            title=title,
-            premise=premise,
-            start_room=start_room,
-            rooms=rooms,
-            win_condition=win_condition,
+    rooms = {}
+    for room_id, room_data in rooms_data.items():
+        desc = room_data["desc"]
+        exits = dict(room_data.get("exits", {}))
+        items = list(room_data.get("items", []))
+        locked_raw = room_data.get("locked", {})
+        locked = {}
+        for direction, lock_info in locked_raw.items():
+            if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
+                raise ValueError(
+                    f"invalid locked format for {direction} in {room_id}"
+                )
+            locked[direction] = (lock_info[0], lock_info[1])
+        plot_trigger = room_data.get("plot_trigger")
+        is_goal = room_data.get("is_goal", False)
+        rooms[room_id] = Room(
+            desc=desc,
+            exits=exits,
+            items=items,
+            locked=locked,
+            plot_trigger=plot_trigger,
+            is_goal=is_goal,
         )
+
+    for room_id, room in rooms.items():
+        for direction, target in room.exits.items():
+            if target not in rooms:
+                raise ValueError(
+                    f"exit {direction} from {room_id} to unknown {target}"
+                )
+
+    if "item" in win_condition:
+        item = win_condition["item"]
+        if not any(item in room.items for room in rooms.values()):
+            raise ValueError(f"win item {item!r} not found in any room")
+    elif "room" in win_condition:
+        if win_condition["room"] not in rooms:
+            raise ValueError(f"win room {win_condition['room']!r} not found")
+    else:
+        raise ValueError("win_condition must contain 'item' or 'room'")
+
+    return Scenario(
+        title=title,
+        premise=premise,
+        start_room=start_room,
+        rooms=rooms,
+        win_condition=win_condition,
+    )
+
+
+def scenario_or_default(data) -> Scenario:
+    """Validate scenario JSON, falling back to the default on any error."""
+    try:
+        return validate_scenario(data)
     except Exception as exc:  # noqa: BLE001
         logger.warning("MUD scenario validation failed: %s; using default", exc)
         return default_scenario()
@@ -715,9 +725,8 @@ def scenario_to_json(scenario) -> dict:
 
 
 def scenario_from_json(data) -> Scenario:
-    """JSON dict -> Scenario, substituting the default on bad input
-    (same contract as scenario_or_default)."""
-    return scenario_or_default(data)
+    """JSON dict -> Scenario, raising ValueError on bad input."""
+    return validate_scenario(data)
 
 
 def generate_scenario(description, org, generate=None) -> Scenario:
