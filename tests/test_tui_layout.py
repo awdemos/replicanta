@@ -303,31 +303,41 @@ def test_group_command_rejects_unknown_and_solo(monkeypatch, tmp_path):
 
 def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
     """In group mode a chat line goes to the group broadcast worker, not
-    the solo reply path."""
+    the solo reply path, and it does not pollute individual chat logs."""
+    import time
+
+    from conftest import patch_generate
+
     from replicanta import groupchat
 
     app = _headless_app(monkeypatch, tmp_path)
     _make_fern(app)
+    patch_generate(monkeypatch, lambda *a, **k: "hi from fern")
 
     async def check():
         async with app.run_test():
             app.handle_command("/group start fern")
             assert isinstance(app._group, groupchat.GroupChat)
-            calls = {"group": 0, "solo": 0}
-            monkeypatch.setattr(
-                app,
-                "_maybe_group_respond",
-                lambda text: calls.__setitem__("group", calls["group"] + 1),
-            )
+            solo_calls = []
             monkeypatch.setattr(
                 app,
                 "_maybe_respond",
-                lambda text: calls.__setitem__("solo", calls["solo"] + 1),
+                lambda text: solo_calls.append(text),
             )
             app.handle_chat("hello everyone")
-            assert calls == {"group": 1, "solo": 0}
-            # every member heard the line
+            # wait for the background group respond worker
+            deadline = time.time() + 2.0
+            while time.time() < deadline and app._group_responding:
+                await asyncio.sleep(0.05)
+            assert solo_calls == []
+            # every member remembers the line as a group episode, but it is
+            # not recorded in their one-on-one chat_log.
             assert any(
+                "hello everyone" in e["text"]
+                for e in app._group.members["fern"].store.memory
+                if e["kind"] == "group"
+            )
+            assert not any(
                 "hello everyone" in t
                 for _r, t in app._group.members["fern"].store.chat_log
             )
@@ -346,10 +356,15 @@ def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
                 [("fern", "hi from fern"), ("default", "hi from default")]
             )
             await asyncio.sleep(0.05)
-            # replies recorded into each speaker's own chat log
-            assert any(
+            # group replies are rendered as member cards, but they must not
+            # pollute each speaker's individual one-on-one chat log.
+            assert not any(
                 "hi from fern" in t
                 for _r, t in app._group.members["fern"].store.chat_log
+            )
+            assert not any(
+                "hi from default" in t
+                for _r, t in app.org.store.chat_log
             )
 
     asyncio.run(check())

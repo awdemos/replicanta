@@ -2146,13 +2146,10 @@ class OrganismApp(App):
             self._mud_turn_gen += 1  # hints invalidate in-flight moves too
             self._mud_hint = text  # shout a nudge into the next move
         if self._group is not None:
-            # everyone in the group heard the line; beliefs form per
-            # member, but only the current organism's events render
-            for org in self._group.members.values():
-                events = org.hear(text)
-                if org is self.org:
-                    for event in events:
-                        self._render_event(event)
+            # Group chat lines go into the shared transcript and member
+            # memory (GroupChat.broadcast records them as "group" episodes).
+            # They must not be written to each organism's individual
+            # one-on-one chat_log.
             self._maybe_group_respond(text)
             return
         for event in self.org.hear(text):
@@ -2300,9 +2297,10 @@ class OrganismApp(App):
     def _deliver_group(self, utterances):
         self._pending_hide()
         for name, reply in utterances:
-            org = self._group.members[name] if self._group else None
-            if org is not None:
-                org.store.record_chat("org", reply)
+            # Group replies are shared transcript state, not part of an
+            # individual organism's one-on-one chat history. Memory is
+            # already recorded by GroupChat.broadcast; don't pollute the
+            # per-organism chat_log.
             self._write_card(name, reply, self._group_style(name))
         self.refresh_status()
 
