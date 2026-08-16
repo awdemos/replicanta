@@ -160,6 +160,16 @@ class ActivityLabel(Static):
         self.styles.display = "none"
 
 
+class MutationBanner(Horizontal):
+    """Sticky banner for pending extension patches with approve/reject/why."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="mutation-summary")
+        yield Button("Approve", id="mutation-approve", variant="success")
+        yield Button("Reject", id="mutation-reject", variant="error")
+        yield Button("Why?", id="mutation-why")
+
+
 class HelpScreen(ModalScreen):
     """Overlay with every slash command and key binding."""
 
@@ -541,6 +551,10 @@ class OrganismApp(App):
     #inner { overflow-y: auto; }
     #command-hints { height: auto; max-height: 4; padding: 0 1;
                       color: $text-muted; }
+    #mutation-banner { height: auto; display: none; padding: 0 1;
+                       background: $warning-darken-2; color: $text; }
+    #mutation-banner > Static { width: 1fr; content-align: left middle; }
+    #mutation-banner > Button { min-width: 8; margin: 0 1; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
@@ -661,6 +675,7 @@ class OrganismApp(App):
                             markup=False,
                         )
         yield CommandHints("", id="command-hints")
+        yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
             "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells · F9 modules)",
@@ -741,10 +756,34 @@ class OrganismApp(App):
             self.chat_input.focus()
 
     def on_button_pressed(self, event):
-        """Route tab-bar (and later quick-action) button presses."""
+        """Route tab-bar, mutation, and quick-action button presses."""
         button_id = event.button.id
         if button_id and button_id.startswith("tab-"):
             self.action_show_tab(button_id[4:])
+            return
+        if button_id == "mutation-approve":
+            entry = extensions.approve(self.org.extension_path)
+            if entry:
+                self.org.store.remember("skill", f"patch applied ({entry['kind']})")
+                self._append_log(
+                    f"patch applied ({entry['kind']}) — live now, no restart needed",
+                    STYLE_LEARNED,
+                    stamp=True,
+                )
+            self._update_mutation_banner()
+            return
+        if button_id == "mutation-reject":
+            entry = extensions.reject(self.org.extension_path)
+            if entry:
+                self.org.store.remember("skill", f"patch rejected ({entry['kind']})")
+                self._append_log(
+                    f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True
+                )
+            self._update_mutation_banner()
+            return
+        if button_id == "mutation-why":
+            self._show_mutation_why()
+            return
 
     def action_help(self):
         self.push_screen(HelpScreen())
@@ -1681,6 +1720,26 @@ class OrganismApp(App):
         self.query_one("#inner", Static).update(tui_views.inner_renderable(self.org))
         text, self._cells_grid = tui_views.cells_layout(self.org)
         self.query_one("#cells", Static).update(text)
+        self._update_mutation_banner()
+
+    def _update_mutation_banner(self):
+        pending = extensions.registry().get("pending")
+        banner = self._safe_query("#mutation-banner", MutationBanner)
+        if banner is None:
+            return
+        if pending:
+            summary = tui_views._pending_proposal(self.org) or f"pending {pending.get('kind', 'patch')}"
+            banner.query_one("#mutation-summary", Static).update(f"Pending patch: {summary}")
+            banner.styles.display = "block"
+        else:
+            banner.styles.display = "none"
+
+    def _show_mutation_why(self):
+        pending = extensions.registry().get("pending")
+        if not pending:
+            return
+        why = pending.get("why", "no explanation provided")
+        self.notify(f"patch reason: {why}", timeout=5)
 
     def _render_event(self, event):
         """Render one engine event into the log."""

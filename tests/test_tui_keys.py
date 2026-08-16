@@ -9,7 +9,13 @@ from rich.console import Console
 from textual.widgets import Button, Static, TabbedContent
 
 from replicanta.organism import Organism
-from replicanta.tui import CommandHints, CommandPalette, OrganismApp, TabBar
+from replicanta.tui import (
+    CommandHints,
+    CommandPalette,
+    MutationBanner,
+    OrganismApp,
+    TabBar,
+)
 
 
 def _renderable_text(widget):
@@ -225,6 +231,25 @@ def test_tab_bar_labels_visible(monkeypatch, tmp_path):
             assert "Chat" in labels
             assert "Mind" in labels
             assert "Memory" in labels
+
+    asyncio.run(check())
+
+
+def test_mutation_banner_shows_when_pending(monkeypatch, tmp_path):
+    """A pending patch must surface the mutation approval banner."""
+    app = _headless_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "replicanta.extensions.registry",
+        lambda: {"pending": {"kind": "rule", "why": "test"}},
+    )
+
+    async def check():
+        async with app.run_test():
+            app._update_mutation_banner()
+            banner = app.query_one(MutationBanner)
+            assert banner.styles.display != "none"
+            summary = app.query_one("#mutation-summary", Static)
+            assert "rule" in str(summary._Static__content).lower()
 
     asyncio.run(check())
 
