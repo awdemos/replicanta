@@ -171,6 +171,20 @@ def test_set_voice_drops_cached_model(tmp_path, monkeypatch):
     assert speech._voice is None  # reloads on next speak
 
 
+def test_set_voice_rejects_path_traversal(tmp_path, monkeypatch):
+    """Voice paths must resolve inside voices_dir; arbitrary filesystem paths
+    are ignored even when they exist."""
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    outside = tmp_path / "evil.onnx"
+    outside.write_text("fake")
+    before = speech.model_path()
+    assert speech.set_voice(str(outside)) is None
+    assert speech.set_voice("../evil.onnx") is None
+    assert speech.model_path() == before
+    # relative names inside voices_dir still work
+    assert speech.set_voice("en_GB-alan-low") == vdir / "en_GB-alan-low.onnx"
+
+
 def test_voice_urls_parses_hf_layout():
     model, config = speech.voice_urls("en_US-lessac-medium")
     assert model == (

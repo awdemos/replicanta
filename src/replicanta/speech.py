@@ -112,16 +112,19 @@ def list_voices():
 def set_voice(spec):
     """Switch the active voice. Accepts a bare voice name
     ('en_US-lessac-medium'), a filename ('en_US-lessac-medium.onnx') or
-    an .onnx path. Returns the resolved path, or None if not found —
-    in which case the current voice is kept."""
+    an .onnx path inside voices/. Returns the resolved path, or None if
+    not found — in which case the current voice is kept."""
     global _model_path, _voice
     vdir = voices_dir()
     candidates = [Path(spec)]
     if not Path(spec).suffix:
         candidates.append(vdir / f"{spec}.onnx")
     candidates.append(vdir / spec)
+    vdir_resolved = vdir.resolve()
     for cand in candidates:
         if cand.suffix == ".onnx" and cand.exists():
+            if not cand.resolve().is_relative_to(vdir_resolved):
+                return None
             _model_path = cand
             _voice = None  # next speak loads the new model
             return cand
@@ -156,6 +159,10 @@ def download_voice(spec):
     vdir = voices_dir()
     vdir.mkdir(exist_ok=True)
     model = vdir / f"{spec}.onnx"
+    vdir_resolved = vdir.resolve()
+    for dest in (model, vdir / f"{spec}.onnx.json"):
+        if not dest.resolve().is_relative_to(vdir_resolved):
+            return None
     for url, dest in zip(urls, (model, vdir / f"{spec}.onnx.json")):
         try:
             subprocess.run(  # nosec
