@@ -102,7 +102,10 @@ def pending():
 
 
 def propose(path, entry, auto_apply=False):
-    """Stage an entry as pending, or apply it immediately if auto_apply is True."""
+    """Stage an entry as pending, or apply it immediately if auto_apply is True.
+
+    Returns the applied entry when auto_apply=True, otherwise None.
+    """
     reg = _read(path)
     reg["pending"] = entry
     _write(path, reg)

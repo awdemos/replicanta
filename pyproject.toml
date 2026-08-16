@@ -13,15 +13,15 @@ license = { text = "MIT" }
 # wheel from wheels/ alongside this package (see readme.md).
 dependencies = [
     "textual>=1.0",
-    "rich",        # direct: tui_views.py imports it (textual pulls it too)
-    "numpy",      # core: listen.py/speech.py arrays; imported by tests
-    "lupa>=2.0",  # core: hooks.py Lua runtime; exercised by the test suite
+    "rich",          # direct: tui_views.py imports it (textual pulls it too)
+    "pyperclip>=1.8", # direct: tui.py clipboard integration
+    "lupa>=2.0",     # core: hooks.py Lua runtime; exercised by the test suite
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8"]
-voice = ["piper-tts>=1.2", "soundcard>=0.4"]
-listen = ["faster-whisper>=1.0", "soundcard>=0.4"]
+dev = ["pytest>=8", "ruff>=0.8", "numpy"]  # dev tests import numpy directly (test_listen.py)
+voice = ["piper-tts>=1.2", "soundcard>=0.4", "numpy"]   # speech.py arrays
+listen = ["faster-whisper>=1.0", "soundcard>=0.4", "numpy"]  # listen.py arrays
 vision = ["opencv-python-headless>=4.8"]
 
 [project.scripts]

@@ -98,6 +98,16 @@ def test_load_all_initializes_modules(tmp_path):
     assert result == "hi"
 
 
+def test_load_all_empty_whitelist_loads_none(tmp_path):
+    d = tmp_path / "cmdmod"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "cmdmod"\nversion = "1.0.0"\n')
+    (d / "init.lua").write_text('function init(ctx) end\n')
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": []}})
+    loader.load_all()
+    assert loader.modules == {}
+
+
 def test_lua_sandbox_blocks_dangerous_globals(tmp_path):
     d = tmp_path / "sandbox"
     d.mkdir()

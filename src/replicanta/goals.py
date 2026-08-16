@@ -39,7 +39,10 @@ def _is_learn_goal(text):
 
 
 def update_progress(goal, cycle, current):
-    """Stamp progress on a goal so stalled detection can compare."""
+    """Stamp progress on a goal so stalled detection can compare.
+
+    Mutates `goal` in place. Returns None.
+    """
     if current != goal.get("last_progress_current", -1):
         goal["last_progress_current"] = current
         goal["last_progress_cycle"] = cycle

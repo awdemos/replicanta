@@ -18,7 +18,8 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from typing import TypedDict
+from collections.abc import Callable
+from typing import Any, TypedDict
 
 from replicanta import fileutil, llmclient, voice
 
@@ -68,6 +69,41 @@ class WinCondition(TypedDict, total=False):
     win_text: str
 
 
+class RoomDict(TypedDict, total=False):
+    """JSON shape for a single room in a scenario."""
+
+    desc: str
+    exits: dict[str, str]
+    items: list[str]
+    locked: dict[str, list[str]]
+    plot_trigger: str
+    is_goal: bool
+
+
+class ScenarioDict(TypedDict):
+    """JSON shape produced by scenario_to_json and accepted by validate_scenario."""
+
+    title: str
+    premise: str
+    start_room: str
+    win_condition: WinCondition
+    rooms: dict[str, RoomDict]
+
+
+class MudSessionDict(TypedDict, total=False):
+    """JSON shape produced by MudSession.to_json and accepted by MudSession.from_json."""
+
+    scenario_id: str
+    scenario_title: str
+    premise: str
+    visited: list[str]
+    known_exits: dict[str, list[str]]
+    plot_beats: list[str]
+    inventory_log: list[list[str | int]]
+    command_log: list[list[str | int]]
+    outcome: str | None
+
+
 @dataclass
 class Scenario:
     title: str
@@ -99,7 +135,7 @@ class MudSession:
     command_log: list[tuple[str, str, int]] = field(default_factory=list)
     outcome: str | None = None
 
-    def to_json(self) -> dict:
+    def to_json(self) -> MudSessionDict:
         return {
             "scenario_id": self.scenario_id,
             "scenario_title": self.scenario_title,
@@ -113,7 +149,7 @@ class MudSession:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> "MudSession":
+    def from_json(cls, data: MudSessionDict) -> "MudSession":
         return cls(
             scenario_id=data["scenario_id"],
             scenario_title=data["scenario_title"],
@@ -624,67 +660,80 @@ def _scenario_generation_prompt(description, org):
     )
 
 
-def scenario_or_default(data) -> Scenario:
-    """Validate and normalize scenario JSON; any error substitutes the
-    default scenario (with a logged warning) rather than failing."""
+def validate_scenario(data: dict[str, Any]) -> Scenario:
+    """Validate and normalize scenario JSON.
+
+    Raises ValueError with a descriptive message when required fields are
+    missing, exits reference unknown rooms, or the win condition is
+    unsatisfiable. Callers that want a fallback should use
+    ``scenario_or_default``.
+    """
     try:
         title = data["title"]
         premise = data["premise"]
         start_room = data["start_room"]
         win_condition = dict(data["win_condition"])
         rooms_data = data["rooms"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"invalid scenario data: {exc}") from exc
 
-        if start_room not in rooms_data:
-            raise ValueError(f"start_room {start_room!r} not in rooms")
+    if start_room not in rooms_data:
+        raise ValueError(f"start_room {start_room!r} not in rooms")
 
-        rooms = {}
-        for room_id, room_data in rooms_data.items():
-            desc = room_data["desc"]
-            exits = dict(room_data.get("exits", {}))
-            items = list(room_data.get("items", []))
-            locked_raw = room_data.get("locked", {})
-            locked = {}
-            for direction, lock_info in locked_raw.items():
-                if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
-                    raise ValueError(
-                        f"invalid locked format for {direction} in {room_id}"
-                    )
-                locked[direction] = (lock_info[0], lock_info[1])
-            plot_trigger = room_data.get("plot_trigger")
-            is_goal = room_data.get("is_goal", False)
-            rooms[room_id] = Room(
-                desc=desc,
-                exits=exits,
-                items=items,
-                locked=locked,
-                plot_trigger=plot_trigger,
-                is_goal=is_goal,
-            )
-
-        for room_id, room in rooms.items():
-            for direction, target in room.exits.items():
-                if target not in rooms:
-                    raise ValueError(
-                        f"exit {direction} from {room_id} to unknown {target}"
-                    )
-
-        if "item" in win_condition:
-            item = win_condition["item"]
-            if not any(item in room.items for room in rooms.values()):
-                raise ValueError(f"win item {item!r} not found in any room")
-        elif "room" in win_condition:
-            if win_condition["room"] not in rooms:
-                raise ValueError(f"win room {win_condition['room']!r} not found")
-        else:
-            raise ValueError("win_condition must contain 'item' or 'room'")
-
-        return Scenario(
-            title=title,
-            premise=premise,
-            start_room=start_room,
-            rooms=rooms,
-            win_condition=win_condition,
+    rooms = {}
+    for room_id, room_data in rooms_data.items():
+        desc = room_data["desc"]
+        exits = dict(room_data.get("exits", {}))
+        items = list(room_data.get("items", []))
+        locked_raw = room_data.get("locked", {})
+        locked = {}
+        for direction, lock_info in locked_raw.items():
+            if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
+                raise ValueError(
+                    f"invalid locked format for {direction} in {room_id}"
+                )
+            locked[direction] = (lock_info[0], lock_info[1])
+        plot_trigger = room_data.get("plot_trigger")
+        is_goal = room_data.get("is_goal", False)
+        rooms[room_id] = Room(
+            desc=desc,
+            exits=exits,
+            items=items,
+            locked=locked,
+            plot_trigger=plot_trigger,
+            is_goal=is_goal,
         )
+
+    for room_id, room in rooms.items():
+        for direction, target in room.exits.items():
+            if target not in rooms:
+                raise ValueError(
+                    f"exit {direction} from {room_id} to unknown {target}"
+                )
+
+    if win_condition.get("item") is not None:
+        item = win_condition["item"]
+        if not any(item in room.items for room in rooms.values()):
+            raise ValueError(f"win item {item!r} not found in any room")
+    elif win_condition.get("room") is not None:
+        if win_condition["room"] not in rooms:
+            raise ValueError(f"win room {win_condition['room']!r} not found")
+    else:
+        raise ValueError("win_condition must contain 'item' or 'room'")
+
+    return Scenario(
+        title=title,
+        premise=premise,
+        start_room=start_room,
+        rooms=rooms,
+        win_condition=win_condition,
+    )
+
+
+def scenario_or_default(data: dict[str, Any]) -> Scenario:
+    """Validate scenario JSON, falling back to the default on any error."""
+    try:
+        return validate_scenario(data)
     except Exception as exc:  # noqa: BLE001
         logger.warning("MUD scenario validation failed: %s; using default", exc)
         return default_scenario()
@@ -693,7 +742,7 @@ def scenario_or_default(data) -> Scenario:
 # -- scenario serialization ----------------------------------------------------
 
 
-def scenario_to_json(scenario) -> dict:
+def scenario_to_json(scenario: Scenario) -> ScenarioDict:
     """Scenario -> plain JSON-safe dict (for saving generated scenarios)."""
     return {
         "title": scenario.title,
@@ -714,13 +763,7 @@ def scenario_to_json(scenario) -> dict:
     }
 
 
-def scenario_from_json(data) -> Scenario:
-    """JSON dict -> Scenario, substituting the default on bad input
-    (same contract as scenario_or_default)."""
-    return scenario_or_default(data)
-
-
-def generate_scenario(description, org, generate=None) -> Scenario:
+def generate_scenario(description: str, org: Any, generate: Callable[[str], str] | None = None) -> Scenario:
     """Ask the voice for a scenario, validate it, and fall back on failure."""
     if generate is None:
 

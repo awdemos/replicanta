@@ -132,8 +132,7 @@ def test_failed_question_bumps_stress(tmp_path):
     mind = Mind(scl)
     mind.rebuild()
     meter = _meter(store)
-    q = SelfQuestioner(store, mind, tmp_path)
-    q.stress = meter
+    q = SelfQuestioner(store, mind, tmp_path, stress=meter)
     before = meter.value
     q.ask(("color", "red"), ("drinkable", "true"))
     assert meter.value == pytest.approx(before + 0.01)
@@ -148,8 +147,7 @@ def test_discarded_dream_bumps_stress(tmp_path):
     mind = Mind(scl)
     mind.rebuild()
     meter = _meter(store)
-    engine = DreamEngine(store, mind)
-    engine.stress = meter
+    engine = DreamEngine(store, mind, stress=meter)
     before = meter.value
     unsupported = [
         {
@@ -181,8 +179,7 @@ def test_promoted_dream_no_stress(tmp_path):
     mind = Mind(scl)
     mind.rebuild()
     meter = _meter(store)
-    engine = DreamEngine(store, mind)
-    engine.stress = meter
+    engine = DreamEngine(store, mind, stress=meter)
     engine.rng = __import__("random").Random(42)
     before = meter.value
     dreams = engine.dream(count=5)

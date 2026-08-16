@@ -156,7 +156,7 @@ bar shows state, mood, belief/rule counts, and voice status.
   `/organisms` — list. Click an organism in the sidebar for its menu
   (swap / rename / move to group). Each organism lives in
   `organisms/<name>/` with its own
-  state and artifacts. Launch with `python tui.py --org fern`.
+  state and artifacts. Launch with `.venv/bin/replicanta --org fern`.
 - Nursery groups organize the sidebar: right-click empty sidebar space to
   create one (custom names, spaces allowed), **drag organisms onto a group**
   (or use their menu's `move to group…`; drag to empty space to ungroup),

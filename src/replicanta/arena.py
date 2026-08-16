@@ -12,6 +12,7 @@ whose output contract a rogue candidate would break). Any ollama failure
 at any stage falls back to the local deterministic answers, so the
 organism always has a voice."""
 
+import json
 import os
 import random
 import re
@@ -75,9 +76,6 @@ class ThoughtArena:
         fallback=None,
         structured=False,
         on_token=None,
-        model=None,
-        timeout=None,
-        quick=False,
     ):
         """Run a full debate and return the winning candidate.
 
@@ -90,17 +88,16 @@ class ThoughtArena:
         rogue-thought injection so the output contract (e.g. the
         reflection format) survives. The debate itself cannot stream, so
         a winner is replayed through on_token in word chunks to keep the
-        incremental display alive. quick=True replaces the five-call
-        debate with a single cleaned generation — for many-speaker
-        contexts (group chat) where a full debate per utterance would
-        cost minutes.
+        incremental display alive.
+
+        Swallowed exceptions: urllib.error.URLError, OSError, and
+        RuntimeError are treated as transport failures that mark the voice
+        offline and trigger the fallback. json.JSONDecodeError and
+        NoUsableCandidateError are treated as content failures; they
+        trigger the fallback without marking the voice offline.
         """
-        model = (
-            model
-            or self._model
-            or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL)
-        )
-        timeout = timeout or self._timeout or llmclient.default_timeout()
+        model = self._model or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL)
+        timeout = self._timeout or llmclient.default_timeout()
         snapshot = narration.state_snapshot(org)
         # every debate circles a different concrete thing — this rotation is
         # what keeps the idle voice from repeating itself; the last few
@@ -128,19 +125,78 @@ class ThoughtArena:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"task": task, "user_message": user_message, "question": question}
         try:
-            if quick:
-                result = self._quick_take(
-                    org, snapshot, build, model, timeout, temperature
-                )
-            else:
-                result = self._debate(
-                    org, snapshot, build, model, timeout, surprise, temperature
-                )
+            result = self._debate(
+                org, snapshot, build, model, timeout, surprise, temperature
+            )
         except NoUsableCandidateError:
             # content failure (model answered, nothing usable) — the
             # voice itself is fine, so don't mark it offline
             return self._fallback(org.store, snapshot, user_message, fallback)
-        except (urllib.error.URLError, OSError, ValueError, RuntimeError):
+        except json.JSONDecodeError:
+            # content failure (bad response payload) — do not mark offline
+            return self._fallback(org.store, snapshot, user_message, fallback)
+        except (urllib.error.URLError, OSError, RuntimeError):
+            llmclient.note_voice_failure()
+            return self._fallback(org.store, snapshot, user_message, fallback)
+        llmclient.note_voice_success()
+        activity.note(org.store, "utterances")
+        grounded = activity.grounded(snapshot["seed"], result)
+        if grounded:
+            activity.note(org.store, "grounded_utterances")
+        skill_store = getattr(org, "skills", None)
+        if skill_store is not None:
+            outcome = {
+                "grounded": grounded,
+                "user_replied": bool(user_message),
+                "new_belief": False,
+            }
+            for skill in snapshot.get("relevant_skills", []):
+                skill_store.record_use(
+                    skill.name, cycle=org.store.cycle, outcome=outcome
+                )
+        if on_token is not None:
+            for piece in re.findall(r"\S+\s*", result):
+                on_token(piece)
+        return result
+
+    def quick_take(
+        self,
+        org,
+        user_message=None,
+        task="idle",
+        question=None,
+        fallback=None,
+        structured=False,
+        on_token=None,
+    ):
+        """Single-generation shortcut for many-speaker contexts.
+
+        Runs one cleaned generation instead of the full debate. Exceptions
+        and fallback behavior match :meth:`emerge`.
+        """
+        model = self._model or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL)
+        timeout = self._timeout or llmclient.default_timeout()
+        snapshot = narration.state_snapshot(org)
+        recent_seeds = getattr(org, "_recent_seeds", None)
+        if recent_seeds is None:
+            from collections import deque
+
+            recent_seeds = org._recent_seeds = deque(maxlen=6)
+        snapshot["seed"] = llmclient.seed_for(snapshot, self._rng, exclude=recent_seeds)
+        recent_seeds.append(snapshot["seed"])
+        temperature = 0.0 if snapshot.get("temperature") == 0 else None
+        if llmclient.voice_online() is False:
+            return self._fallback(org.store, snapshot, user_message, fallback)
+        build = {"task": task, "user_message": user_message, "question": question}
+        try:
+            result = self._quick_take(
+                org, snapshot, build, model, timeout, temperature
+            )
+        except NoUsableCandidateError:
+            return self._fallback(org.store, snapshot, user_message, fallback)
+        except json.JSONDecodeError:
+            return self._fallback(org.store, snapshot, user_message, fallback)
+        except (urllib.error.URLError, OSError, RuntimeError):
             llmclient.note_voice_failure()
             return self._fallback(org.store, snapshot, user_message, fallback)
         llmclient.note_voice_success()

@@ -28,7 +28,7 @@ import wave
 from pathlib import Path
 
 
-def _voices_dir():
+def _find_voices_dir():
     """Locate the voices directory: prefer the project root (development
     src-layout), fall back to the package directory (installed wheel)."""
     candidates = [
@@ -41,9 +41,25 @@ def _voices_dir():
     return candidates[0]
 
 
-VOICES_DIR = _voices_dir()
-_DEFAULT_MODEL = VOICES_DIR / "en_US-lessac-medium.onnx"
-_model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
+VOICES_DIR = None
+_VOICES_DIR_CACHE = None
+
+
+def voices_dir():
+    """Return the voices directory, resolving it lazily on first call."""
+    global _VOICES_DIR_CACHE
+    if _VOICES_DIR_CACHE is None:
+        _VOICES_DIR_CACHE = _find_voices_dir()
+    return _VOICES_DIR_CACHE
+
+
+_model_path = None
+
+
+def _env_model_path():
+    """Return the REPLICANTA_VOICE_MODEL override, or None."""
+    env = os.environ.get("REPLICANTA_VOICE_MODEL")
+    return Path(env) if env else None
 
 HF_VOICE_URL = (
     "https://huggingface.co/rhasspy/piper-voices/resolve/"
@@ -66,24 +82,31 @@ _voice_lock = threading.Lock()
 def available():
     """True when a piper model file is present (packages may still be
     missing — failures are contained at speak time)."""
-    return _model_path.exists()
+    return model_path().exists()
 
 
 def model_path():
-    """Path of the active piper model (mutated by set_voice/reset)."""
+    """Path of the active piper model (env override > set_voice > default)."""
+    env = _env_model_path()
+    if env is not None:
+        return env
+    global _model_path
+    if _model_path is None:
+        _model_path = voices_dir() / "en_US-lessac-medium.onnx"
     return _model_path
 
 
 def voice_name():
     """Name of the active voice, e.g. 'en_US-lessac-medium'."""
-    return _model_path.stem
+    return model_path().stem
 
 
 def list_voices():
     """Names of all voices downloaded into voices/."""
-    if not VOICES_DIR.exists():
+    vdir = voices_dir()
+    if not vdir.exists():
         return []
-    return sorted(p.stem for p in VOICES_DIR.glob("*.onnx"))
+    return sorted(p.stem for p in vdir.glob("*.onnx"))
 
 
 def set_voice(spec):
@@ -92,10 +115,11 @@ def set_voice(spec):
     an .onnx path. Returns the resolved path, or None if not found —
     in which case the current voice is kept."""
     global _model_path, _voice
+    vdir = voices_dir()
     candidates = [Path(spec)]
     if not Path(spec).suffix:
-        candidates.append(VOICES_DIR / f"{spec}.onnx")
-    candidates.append(VOICES_DIR / spec)
+        candidates.append(vdir / f"{spec}.onnx")
+    candidates.append(vdir / spec)
     for cand in candidates:
         if cand.suffix == ".onnx" and cand.exists():
             _model_path = cand
@@ -129,9 +153,10 @@ def download_voice(spec):
     urls = voice_urls(spec)
     if urls is None:
         return None
-    VOICES_DIR.mkdir(exist_ok=True)
-    model = VOICES_DIR / f"{spec}.onnx"
-    for url, dest in zip(urls, (model, VOICES_DIR / f"{spec}.onnx.json")):
+    vdir = voices_dir()
+    vdir.mkdir(exist_ok=True)
+    model = vdir / f"{spec}.onnx"
+    for url, dest in zip(urls, (model, vdir / f"{spec}.onnx.json")):
         try:
             subprocess.run(
                 ["curl", "-sfSL", "-o", str(dest), url], check=True, timeout=300
@@ -205,7 +230,7 @@ def _load_voice():
         if _voice is None:
             from piper import PiperVoice
 
-            _voice = PiperVoice.load(str(_model_path))
+            _voice = PiperVoice.load(str(model_path()))
     return _voice
 
 
@@ -231,7 +256,7 @@ def reset():
     global enabled, _voice, _model_path
     enabled = False
     _voice = None
-    _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
+    _model_path = _env_model_path()
     while True:
         try:
             _queue.get_nowait()

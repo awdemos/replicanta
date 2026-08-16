@@ -946,7 +946,8 @@ class Organism:
         self.module_loader = ModuleLoader(
             modules_dir=self._modules_dir(),
             organism=self,
-            config=cfg,
+            modules_config=cfg.get("modules", {}),
+            persona_config=cfg.get("persona", {}),
             emit=self._emit_log,
             root=self._root_dir(),
         )
@@ -1060,7 +1061,7 @@ class Organism:
             self.store.cycle, limit=self.SKILL_STALE_CYCLES
         ):
             self.store.remember("skill", f"archived: {name}")
-        for name in self.skills.flush():
+        for name in self.skills.archive_ineffective():
             self.store.remember("skill", f"deprecated low-effectiveness: {name}")
         genome = self.store.genome_dirty
         self.store.save()

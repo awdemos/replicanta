@@ -74,12 +74,14 @@ class SkillStore:
             if ": " in line:
                 key, value = line.split(": ", 1)
                 fields[key.strip()] = value.strip()
+        when = fields.get("when", "")
+        how = fields.get("how", "")
         meta = dict(p.split("=", 1) for p in fields.get("meta", "").split() if "=" in p)
         try:
             return Skill(
                 name=lines[0][2:].strip(),
-                when=fields.get("when", ""),
-                how=fields.get("how", ""),
+                when=when,
+                how=how,
                 uses=int(meta.get("uses", 0)),
                 created_cycle=int(meta.get("created", 0)),
                 updated_cycle=int(meta.get("updated", 0)),
@@ -156,7 +158,7 @@ class SkillStore:
                 archived.append(self._archive(skill))
         return archived
 
-    def flush(self):
+    def archive_ineffective(self):
         """Archive skills that stayed below the effectiveness floor after
         enough uses. Returns the names archived."""
         archived = []

@@ -814,13 +814,15 @@ def parse_reflect(text):
         if ":" in line:
             key, value = line.split(":", 1)
             fields[key.strip().lower()] = value.strip()
-    if not name or not fields.get("when") or not fields.get("how"):
+    when = fields.get("when")
+    how = fields.get("how")
+    if not name or not when or not how:
         return None
     return {
         "action": action,
         "name": name,
-        "when": fields["when"],
-        "how": fields["how"],
+        "when": when,
+        "how": how,
     }
 
 

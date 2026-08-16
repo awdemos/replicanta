@@ -6,6 +6,8 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from replicanta import mud
 from replicanta.mud import MudGame, Room
 
@@ -510,6 +512,22 @@ def test_validate_scenario_falls_back_on_bad_exits():
     assert scenario.title == "The Amulet of Vatox"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"title": "x"},
+        {"title": "x", "premise": "y"},
+        {"title": "x", "premise": "y", "start_room": "z"},
+        {"title": "x", "premise": "y", "start_room": "z", "win_condition": {}},
+        {"title": "x", "premise": "y", "start_room": "z", "win_condition": {"item": "a"}},
+    ],
+)
+def test_validate_scenario_raises_valueerror_on_bad_input(payload):
+    with pytest.raises(ValueError):
+        mud.validate_scenario(payload)
+
+
 def test_generate_scenario_uses_default_on_bad_json():
     scenario = mud.generate_scenario(
         "haunted space station", _org(), generate=lambda p: "not json"
@@ -557,7 +575,7 @@ def test_scenario_json_roundtrip():
     scenario = mud.default_scenario()
     data = mud.scenario_to_json(scenario)
     blob = json.dumps(data)  # must be JSON-safe
-    recovered = mud.scenario_from_json(json.loads(blob))
+    recovered = mud.validate_scenario(json.loads(blob))
     assert recovered.title == scenario.title
     assert recovered.premise == scenario.premise
     assert recovered.start_room == scenario.start_room
@@ -575,7 +593,7 @@ def test_loaded_scenario_is_playable(tmp_path):
 
     path = tmp_path / "scenario.json"
     path.write_text(json.dumps(mud.scenario_to_json(mud.default_scenario())))
-    scenario = mud.scenario_from_json(json.loads(path.read_text()))
+    scenario = mud.validate_scenario(json.loads(path.read_text()))
     game = MudGame(scenario)
     plan = [
         "go north",
