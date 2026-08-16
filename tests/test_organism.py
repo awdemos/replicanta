@@ -415,9 +415,6 @@ def test_metrics_score_monotonic_under_prune_archive(tmp_path):
     assert m2 >= m1
 
 
-from replicanta.organism import Organism
-
-
 def _seeded_organism(tmp_path):
     scl = tmp_path / "organism.scl"
     scl.write_text(
