@@ -187,3 +187,49 @@ def test_download_voice_curl_failure_cleans_up(tmp_path, monkeypatch):
     monkeypatch.setattr(speech.subprocess, "run", failing)
     assert speech.download_voice("en_GB-alan-low") is None
     assert list(vdir.glob("*.onnx")) == []  # no half-downloaded voice
+
+
+# -- voices directory resolution ---------------------------------------------
+
+
+def test_voices_dir_prefers_project_root(tmp_path, monkeypatch):
+    """After the src-layout migration, voices/ lives at the project root,
+    not under src/replicanta/. The module must find the root directory."""
+    root = tmp_path / "project"
+    src_replicanta = root / "src" / "replicanta"
+    src_replicanta.mkdir(parents=True)
+    package_voices = src_replicanta / "voices"
+    package_voices.mkdir()
+    root_voices = root / "voices"
+    root_voices.mkdir()
+
+    fake_speech = root / "src" / "replicanta" / "speech.py"
+    fake_speech.write_text(Path(speech.__file__).read_text())
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fake_speech", fake_speech)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.VOICES_DIR == root_voices
+
+
+def test_voices_dir_falls_back_to_package_dir(tmp_path, monkeypatch):
+    """When no project-root voices/ exists, use the package directory."""
+    root = tmp_path / "project"
+    src_replicanta = root / "src" / "replicanta"
+    src_replicanta.mkdir(parents=True)
+    package_voices = src_replicanta / "voices"
+    package_voices.mkdir()
+
+    fake_speech = root / "src" / "replicanta" / "speech.py"
+    fake_speech.write_text(Path(speech.__file__).read_text())
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("fake_speech2", fake_speech)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.VOICES_DIR == package_voices

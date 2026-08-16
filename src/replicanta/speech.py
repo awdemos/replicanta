@@ -27,7 +27,21 @@ import threading
 import wave
 from pathlib import Path
 
-VOICES_DIR = Path(__file__).parent / "voices"
+
+def _voices_dir():
+    """Locate the voices directory: prefer the project root (development
+    src-layout), fall back to the package directory (installed wheel)."""
+    candidates = [
+        Path(__file__).parent.parent.parent / "voices",
+        Path(__file__).parent / "voices",
+    ]
+    for cand in candidates:
+        if cand.is_dir():
+            return cand
+    return candidates[0]
+
+
+VOICES_DIR = _voices_dir()
 _DEFAULT_MODEL = VOICES_DIR / "en_US-lessac-medium.onnx"
 _model_path = Path(os.environ.get("REPLICANTA_VOICE_MODEL") or _DEFAULT_MODEL)
 
