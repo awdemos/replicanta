@@ -11,7 +11,7 @@ This spec covers the first implementation chunk: the module system infrastructur
 **In scope for this iteration:**
 - `modules/<name>/manifest.toml` + `init.lua` format.
 - `ModuleLoader`: discovery, manifest parsing, dependency resolution, ordered initialization.
-- Service registry with built-in services: `organism`, `store`, `hooks`, `commands`, `persona`, `config`.
+- Service registry with built-in services: `organism`, `store`, `hooks`, `commands`, `persona`.
 - Refactor the existing `HookEngine` to consume the `hooks` service.
 - TUI command dispatch consumes the `commands` service.
 - Built-in persona service: register persona spec, activate, inject prompt fragment, seed beliefs.
@@ -42,7 +42,7 @@ This spec covers the first implementation chunk: the module system infrastructur
       init(ctx) | ctx.services.get/register
                 |
         +----------------+
-        |  ServiceRegistry | organism, store, hooks, commands, persona, config
+        |  ServiceRegistry | organism, store, hooks, commands, persona
         +----------------+
                 |
       +---------+---------+--------+
@@ -65,7 +65,7 @@ This spec covers the first implementation chunk: the module system infrastructur
 New module containing:
 
 - `ModuleLoader` class
-  - `__init__(modules_dir, organism, config, emit=None)`
+  - `__init__(modules_dir, organism, config, emit=None, root=None)`
   - `load_all()` — discover, resolve, init.
   - `_discover()` — list `modules/<name>/manifest.toml`.
   - `_resolve_load_order(modules)` — topological sort; raise on cycle or missing dep.
@@ -138,7 +138,6 @@ If `init` is missing, the module is skipped with a warning.
 | `hooks` | `on(event, handler)`, `emit(event, text)` | Events: `birth`, `cycle`, `learned`, `utterance`, `fade`, `mud_turn`, `mud_win`, `mud_end`. |
 | `commands` | `register(name, handler)` | `name` like `/mycommand`; `handler(args)` called by TUI, where `args` is a Lua table of whitespace-split strings after the command. |
 | `persona` | `register(spec)`, `activate(name)`, `list()`, `active()` | Spec has `name`, `description`, `prompt`, `beliefs`. |
-| `config` | `load()`, `save(config)` | Read/write `replicanta.toml`. |
 
 ### 4. Persona service
 
@@ -212,7 +211,8 @@ New commands in `tui_commands.py`:
        modules_dir=self._modules_dir(),
        organism=self,
        config=cfg,
-       emit=self._emit if hasattr(self, "_emit") else None,
+       emit=self._emit_log,
+       root=self._root_dir(),
    )
    self.module_loader.load_all()
    ```
