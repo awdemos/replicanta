@@ -172,7 +172,7 @@ class ModuleLoader:
         discovered = self._discover()
         enabled = self.config.get("modules", {}).get("enabled")
         if enabled is None:
-            enabled = [m.get("name") for m in discovered]
+            enabled = ["base", "software-engineer", "creative-writer", "socratic-philosopher"]
         enabled = set(enabled)
         if enabled:
             discovered = [m for m in discovered if m.get("name") in enabled]

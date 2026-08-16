@@ -5,6 +5,7 @@ activity counters + safe actuators), sandboxed and exception-proof."""
 import pytest
 
 from replicanta.hooks import HookEngine, scripts_dir_for
+from replicanta.modules import HookService
 from replicanta.organism import Organism
 from replicanta.probe import SystemProbe
 
@@ -215,3 +216,24 @@ def test_run_shares_the_sandbox(scripts, tmp_path):
     engine = HookEngine(scripts, emit=emitted.append)
     engine.run("evil.lua", _org(tmp_path))
     assert emitted == ["no os"]
+
+
+# -- hooks service wiring -----------------------------------------------------
+
+
+def test_hook_engine_with_service(tmp_path):
+    svc = HookService()
+    called = []
+    svc.on("birth", lambda text: called.append(text))
+    engine = HookEngine(tmp_path, hooks_service=svc)
+    engine.fire("birth", None, "born")
+    assert called == ["born"]
+
+
+def test_hook_engine_legacy_scripts(tmp_path):
+    (tmp_path / "a.lua").write_text(
+        'function on_birth(ctx)\n  LOG = (LOG or "") .. "b"\nend\n'
+    )
+    engine = HookEngine(tmp_path)
+    engine.fire("birth", None)
+    assert engine._lua.globals()["LOG"] == "b"

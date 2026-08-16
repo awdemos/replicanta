@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from replicanta.modules import PersonaService
 from replicanta.organism import BeliefStore
 

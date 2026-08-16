@@ -1387,6 +1387,7 @@ def test_organism_loads_modules(tmp_path, monkeypatch):
         '  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\n'
         'end\n'
     )
+    (tmp_path / "replicanta.toml").write_text('[modules]\nenabled = ["testmod"]\n')
     org = Organism(tmp_path, probe=_dummy_probe())
     org.load()
     result = org.module_loader.registry.get("commands").dispatch("/test", [])

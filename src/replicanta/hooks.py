@@ -41,16 +41,17 @@ EVENTS = (
     "mud_end",
 )
 
-_BLOCKED_GLOBALS = ("os", "io", "load", "loadstring", "require", "dofile")
+_BLOCKED_GLOBALS = ("os", "io", "load", "loadfile", "loadstring", "require", "dofile", "package", "debug")
 
 
 class HookEngine:
     """Discovers and fires Lua hooks. Pure apart from the `emit` callback
     (which the TUI points at the chat log); headless organisms work too."""
 
-    def __init__(self, scripts_dir, emit=None):
+    def __init__(self, scripts_dir, emit=None, hooks_service=None):
         self.scripts_dir = Path(scripts_dir)
         self.emit = emit if emit is not None else (lambda _msg: None)
+        self.hooks_service = hooks_service
         self._lock = threading.Lock()
         self._lua = None
         self._available = None  # None = untested, False = lupa missing
@@ -124,6 +125,8 @@ class HookEngine:
 
     def fire(self, event, org, text=None):
         """Call on_<event>(ctx) in every script. Never raises."""
+        if self.hooks_service is not None:
+            self.hooks_service.emit(event, text)
         if not self.scripts or event not in EVENTS:
             return
         with self._lock:
@@ -134,18 +137,28 @@ class HookEngine:
                     self.emit(disabled)
                 return
             try:
-                ctx = self._ctx(org, event, text)
+                ctx = (
+                    self._ctx(org, event, text)
+                    if org is not None
+                    else self._lua.table(event=event, text=text)
+                )
             except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
                 self.emit(f"ctx: {exc}")
                 return
+            handlers = []
             for script in self.scripts:
                 try:
                     self._lua.execute(script.read_text())
                     hook = self._lua.globals()[f"on_{event}"]
                     if hook is not None:
-                        hook(ctx)
+                        handlers.append((script.name, hook))
                 except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
                     self.emit(f"{script.name}: {exc}")
+            for name, hook in handlers:
+                try:
+                    hook(ctx)
+                except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
+                    self.emit(f"{name}: {exc}")
 
     def run(self, name, org):
         """Run one named script on demand (the /lua command): execute it in

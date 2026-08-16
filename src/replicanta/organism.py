@@ -897,7 +897,7 @@ class Organism:
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
         # Hooks engine is created here so code can attach to it before load();
         # the module-driven hooks service is wired in load().
-        self.hooks = HookEngine(scripts_dir_for(dir_path))
+        self.hooks = HookEngine(scripts_dir_for(dir_path), hooks_service=None)
         self._default_hook_emit = self.hooks.emit
         self.store.on_utterance = lambda role, text: self.hooks.fire(
             "utterance", self, text=text
@@ -953,7 +953,11 @@ class Organism:
         self.module_loader.load_all()
         self.persona_service = self.module_loader.registry.get("persona")
         hooks_service = self.module_loader.registry.get("hooks")
-        self.hooks.hooks_service = hooks_service
+        self.hooks = HookEngine(
+            scripts_dir_for(self.dir_path),
+            emit=self.hooks.emit,
+            hooks_service=hooks_service,
+        )
         if self.hooks.emit is self._default_hook_emit:
             self.hooks.emit = lambda msg: self.store.record_chat("system", msg)
         if fresh:

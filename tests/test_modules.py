@@ -1,8 +1,5 @@
 from replicanta.modules import (
-    CommandService,
-    HookService,
     ModuleLoader,
-    PersonaService,
     ServiceRegistry,
 )
 
@@ -95,7 +92,23 @@ def test_load_all_initializes_modules(tmp_path):
         '  ctx.services.get("commands"):register("/hello", function(args) return "hi" end)\n'
         'end\n'
     )
-    loader = ModuleLoader(tmp_path, organism=None, config={})
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["cmdmod"]}})
     loader.load_all()
     result = loader.registry.get("commands").dispatch("/hello", [])
     assert result == "hi"
+
+
+def test_lua_sandbox_blocks_dangerous_globals(tmp_path):
+    d = tmp_path / "sandbox"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "sandbox"\nversion = "1.0.0"\n')
+    blocked = ["os", "io", "load", "loadfile", "dofile", "require", "package", "debug"]
+    checks = []
+    for name in blocked:
+        checks.append(f'if {name} ~= nil then error("{name} not blocked") end')
+    lua_code = 'function init(ctx)\n' + '\n'.join('  ' + c for c in checks) + '\nend\n'
+    (d / "init.lua").write_text(lua_code)
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["sandbox"]}})
+    loader.load_all()
+    assert "sandbox" in loader.modules
+    assert not any("sandbox" in w for w in loader.warnings)
