@@ -3,10 +3,7 @@
 import logging
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+import tomllib
 
 from lupa import LuaRuntime
 
