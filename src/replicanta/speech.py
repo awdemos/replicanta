@@ -22,7 +22,7 @@ import io
 import os
 import queue
 import re
-import subprocess
+import subprocess  # nosec
 import threading
 import wave
 from pathlib import Path
@@ -158,7 +158,7 @@ def download_voice(spec):
     model = vdir / f"{spec}.onnx"
     for url, dest in zip(urls, (model, vdir / f"{spec}.onnx.json")):
         try:
-            subprocess.run(
+            subprocess.run(  # nosec
                 ["curl", "-sfSL", "-o", str(dest), url], check=True, timeout=300
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
@@ -215,7 +215,7 @@ def _speak_with_timeout(text, timeout=30):
     def target():
         try:
             _speak(text)
-        except Exception:  # noqa: BLE001, S110 — speech must never kill anything
+        except Exception:  # noqa: BLE001, S110 # nosec — speech must never kill anything
             pass
         done.append(True)
 

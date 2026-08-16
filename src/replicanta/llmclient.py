@@ -82,7 +82,7 @@ def probe_voice(model=None):
     model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
     try:
         req = urllib.request.Request(_tags_url())
-        with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:  # nosec B310 - local ollama endpoint
             data = json.loads(resp.read().decode())
         names = [m.get("name", "") for m in data.get("models", [])]
         bases = [n.split(":")[0] for n in names]
@@ -169,7 +169,7 @@ def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     req = urllib.request.Request(
         ollama_url(), data=payload, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
         raise RuntimeError(data["error"])
@@ -207,7 +207,7 @@ def describe_image(image_bytes, model=None, timeout=None):
     req = urllib.request.Request(
         ollama_url(), data=payload, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
         raise RuntimeError(data["error"])

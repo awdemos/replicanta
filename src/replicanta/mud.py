@@ -622,7 +622,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
         command, reason = parse_action_with_reason(llmclient.clean_candidate(raw or ""))
-    except Exception:  # noqa: BLE001, S110 — a silent voice means wandering
+    except Exception:  # noqa: BLE001, S110 # nosec — a silent voice means wandering
         pass
     if command is None:
         command = fallback_action(game, rng)

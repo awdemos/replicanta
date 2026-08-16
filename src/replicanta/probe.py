@@ -8,7 +8,7 @@ beliefs the reasoner can use (e.g. cpu:load=high, mem:usage=mid,
 temp:cpu=hot, time:hour=fourteen)."""
 
 import os
-import subprocess
+import subprocess  # nosec
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -75,7 +75,7 @@ def _host_uname():
     """`uname -snrm` — the host's identity as one line (e.g.
     'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable."""
     try:
-        out = subprocess.run(
+        out = subprocess.run(  # nosec
             ["uname", "-snrm"], capture_output=True, text=True, timeout=2, check=False
         )
     except (OSError, subprocess.SubprocessError):

@@ -595,7 +595,7 @@ class OrganismApp(App):
                 pyperclip.copy(body)
                 self._append_log("— chat log copied to clipboard —", STYLE_DIM, stamp=True)
                 return
-            except Exception:  # noqa: BLE001,S110 — clipboard may fail in ssh/tmux; fall through to file
+            except Exception:  # noqa: BLE001,S110 # nosec — clipboard may fail in ssh/tmux; fall through to file
                 pass
         path = Path(tempfile.gettempdir()) / f"replicanta-chat-{int(time.time())}.txt"
         path.write_text(body, encoding="utf-8")

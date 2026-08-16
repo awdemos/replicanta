@@ -55,7 +55,7 @@ def _ensure_resource_tracker():
         import multiprocessing
 
         multiprocessing.RLock()
-    except Exception:  # noqa: BLE001, S110 — priming must never break startup
+    except Exception:  # noqa: BLE001, S110 # nosec B110 — priming must never break startup
         pass
     _resource_tracker_primed = True
 
