@@ -12,8 +12,7 @@ from replicanta.skills import Skill
 
 
 def narrate(org, model=None, timeout=None, rng=None):
-    """First-person idle thought, or None when the only thoughts on
-    offer restate what was just said — silence beats an echo."""
+    """First-person idle thought; None when it would just repeat a recent line."""
     return dedup_emerge(
         org, lambda: ThoughtArena(rng=rng).emerge(org, model=model, timeout=timeout)
     )
@@ -22,9 +21,7 @@ def narrate(org, model=None, timeout=None, rng=None):
 def respond(
     org, user_text, model=None, timeout=None, rng=None, on_token=None, quick=False
 ):
-    """First-person reply to the user; quick=True uses one cleaned
-    generation for many-speaker contexts. The winner is replayed
-    through on_token in word chunks."""
+    """First-person reply to the user; quick=True skips the debate."""
     return ThoughtArena(rng=rng).emerge(
         org,
         user_message=user_text,
@@ -40,9 +37,7 @@ def respond(
 
 
 def reflect(org, model=None, timeout=None, rng=None):
-    """One reflection cycle: distill a skill, patch one, or 'nothing'.
-    Structured task, parsed and applied to the skill store; offline or
-    unparseable is a quiet no-op — never a fake skill."""
+    """One reflection cycle: distill, patch, or 'nothing'; structured."""
     text = ThoughtArena(rng=rng).emerge(
         org,
         task="reflect",
@@ -97,8 +92,7 @@ def reflect(org, model=None, timeout=None, rng=None):
 
 
 def form_goal(org, model=None, timeout=None, rng=None):
-    """One concrete intention grounded in what the organism knows;
-    deterministic goal offline."""
+    """One concrete intention grounded in the organism's beliefs."""
     return ThoughtArena(rng=rng).emerge(
         org,
         task="form_goal",
@@ -113,8 +107,7 @@ def form_goal(org, model=None, timeout=None, rng=None):
 
 
 def diary_entry(org, model=None, timeout=None, rng=None):
-    """One short diary entry about recent days; deterministic entry
-    offline."""
+    """One short diary entry about recent days."""
     return ThoughtArena(rng=rng).emerge(
         org,
         task="diary",
@@ -129,8 +122,7 @@ def diary_entry(org, model=None, timeout=None, rng=None):
 
 
 def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
-    """One curious question for the user, grounded in a seed;
-    deterministic question offline."""
+    """One curious question for the user, grounded in a seed."""
     return ThoughtArena(rng=rng).emerge(
         org,
         task="ask_user",
@@ -145,8 +137,7 @@ def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
 
 
 def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
-    """One self-question, steered away from its own recent questions;
-    deterministic template offline or on repeat."""
+    """One self-question, steered away from recent repeats."""
     question = dedup_emerge(
         org,
         lambda: ThoughtArena(rng=rng).emerge(
@@ -164,8 +155,7 @@ def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
 
 
 def self_answer(org, question, model=None, timeout=None, rng=None, on_token=None):
-    """First-person answer to the organism's own question;
-    deterministic reply offline or on repeat."""
+    """First-person answer to the organism's own question."""
     answer = dedup_emerge(
         org,
         lambda: ThoughtArena(rng=rng).emerge(
@@ -187,14 +177,7 @@ def self_answer(org, question, model=None, timeout=None, rng=None, on_token=None
 
 
 def mud_decide(org, user_message, model=None, timeout=None, rng=None, on_token=None):
-    """One MUD move chosen by the organism itself.
-
-    The game situation is passed as the user message; the thought arena
-    builds the full organism snapshot (beliefs, mood, goals, memory) and
-    asks the inner voice to reply with a because-line plus a single legal
-    command. Returns None when the voice is offline or gives nothing
-    usable, so the caller can fall back to the wanderer.
-    """
+    """One MUD move chosen by the organism itself; None on failure."""
     return ThoughtArena(rng=rng).emerge(
         org,
         task="mud",
