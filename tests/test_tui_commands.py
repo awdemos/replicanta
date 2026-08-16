@@ -208,3 +208,11 @@ def test_help_text_includes_git():
     text = help_text()
     assert "/git" in text
     assert "git sensing" in text
+
+
+def test_persona_command_registered():
+    assert "/persona" in COMMAND_NAMES
+
+
+def test_modules_command_registered():
+    assert "/modules" in COMMAND_NAMES

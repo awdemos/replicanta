@@ -1988,6 +1988,10 @@ class OrganismApp(App):
             self.action_help()
         elif name == "/git":
             self._git_command(parts[1:])
+        elif name == "/persona":
+            self._persona_command(parts[1:])
+        elif name == "/modules":
+            self._modules_command()
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
 
@@ -2002,6 +2006,33 @@ class OrganismApp(App):
             self._append_log("git sensing off", STYLE_DIM)
         else:
             self._append_log("/git [on|off|status]", STYLE_DIM)
+
+    def _persona_command(self, args):
+        svc = getattr(self.org, "persona_service", None)
+        if svc is None:
+            self._append_log("persona service unavailable", STYLE_WARN)
+            return
+        if not args or args[0] == "list":
+            active = svc.active()
+            names = svc.list()
+            line = "personas: " + ", ".join(
+                f"*{n}" if active and active["name"] == n else n for n in names
+            )
+            self._append_log(line, STYLE_DIM)
+        elif args[0] == "off":
+            svc.deactivate()
+            self._append_log("persona cleared", STYLE_DIM)
+        else:
+            svc.activate(args[0])
+            self._append_log(f"persona: {args[0]}", STYLE_DIM)
+
+    def _modules_command(self):
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
+            return
+        names = sorted(loader.modules)
+        self._append_log(f"loaded modules ({len(names)}): {', '.join(names)}", STYLE_DIM)
 
     def handle_chat(self, text):
         self._log_chat("user", text)

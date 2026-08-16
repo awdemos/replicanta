@@ -30,6 +30,8 @@ COMMANDS = [
         "/mud [map|story|quest|pause|resume|step|reset|scenario d…]",
         "toggle or control the dungeon crawl (text adventure)",
     ),
+    ("/persona", "/persona [name|off|list]", "activate, clear, or list personas"),
+    ("/modules", "/modules", "list loaded modules and provided services"),
     ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)"),
     ("/reject", "/reject", "discard the pending genome patch (manual mode)"),
     ("/revert", "/revert", "undo the last applied genome patch"),
