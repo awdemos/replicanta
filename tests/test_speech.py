@@ -88,6 +88,44 @@ def test_speech_ignores_empty_text(monkeypatch):
     assert speech._queue.empty()
 
 
+def test_trim_for_speech_keeps_short_text_intact():
+    text = "Hello, this is short."
+    assert speech._trim_for_speech(text) == text
+
+
+def test_trim_for_speech_ends_at_sentence_boundary():
+    text = "First sentence. Second sentence. Third sentence."
+    # force a cap by repeating until over the limit
+    long_text = " ".join([text] * 20)
+    trimmed = speech._trim_for_speech(long_text)
+    assert len(trimmed) <= speech._MAX_SPEECH_CHARS
+    # should end cleanly at a sentence boundary, not mid-word
+    assert trimmed.endswith((".", "!", "?"))
+
+
+def test_trim_for_speech_falls_back_to_ellipsis():
+    # no sentence boundary in the cap window -> hard truncate with "..."
+    text = "a" * speech._MAX_SPEECH_CHARS * 2
+    trimmed = speech._trim_for_speech(text)
+    assert len(trimmed) <= speech._MAX_SPEECH_CHARS + 3
+    assert trimmed.endswith("...")
+
+
+def test_speak_with_timeout_abandons_hung_utterance(monkeypatch):
+    started = threading.Event()
+
+    def hung_speak(_text):
+        started.set()
+        time.sleep(10)
+
+    monkeypatch.setattr(speech, "_speak", hung_speak)
+    before = time.time()
+    speech._speak_with_timeout("hello", timeout=0.1)
+    after = time.time()
+    assert started.is_set()
+    assert after - before < 1.0  # returned before the 10s sleep finished
+
+
 # -- voice management: list / switch / download ---------------------------
 
 

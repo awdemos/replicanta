@@ -50,6 +50,11 @@ HF_VOICE_URL = (
     "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}"
 )
 _VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-([a-z0-9_]+)-([a-z]+)$")
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
+
+# Long model replies can take ages to synthesize and occasionally hang the
+# audio backend; cap spoken output so voice stays responsive.
+_MAX_SPEECH_CHARS = 280
 
 enabled = False
 _queue = queue.Queue()
@@ -154,16 +159,44 @@ def say(text):
     _queue.put(text)
 
 
+def _trim_for_speech(text):
+    """Keep spoken replies concise: first sentence, capped at a max length.
+    Falls back to a hard truncation with ellipsis when no sentence boundary
+    fits."""
+    if len(text) <= _MAX_SPEECH_CHARS:
+        return text
+    window_start = _MAX_SPEECH_CHARS // 2
+    window_end = _MAX_SPEECH_CHARS
+    m = _SENTENCE_END_RE.search(text[window_start:window_end])
+    if m:
+        return text[: window_start + m.end()].strip()
+    return text[:_MAX_SPEECH_CHARS].rstrip() + "..."
+
+
 def _drain():
     while True:
         try:
             text = _queue.get(timeout=30)
         except queue.Empty:
             return
+        _speak_with_timeout(_trim_for_speech(text))
+
+
+def _speak_with_timeout(text, timeout=30):
+    """Run _speak in a daemon thread and abandon it if playback/synthesis hangs.
+    This keeps a single hung utterance from silencing every subsequent one."""
+    done = []
+
+    def target():
         try:
             _speak(text)
         except Exception:  # noqa: BLE001, S110 — speech must never kill anything
             pass
+        done.append(True)
+
+    t = threading.Thread(target=target, daemon=True, name="speech-utterance")
+    t.start()
+    t.join(timeout=timeout)
 
 
 def _load_voice():
