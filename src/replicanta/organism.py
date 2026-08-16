@@ -1279,25 +1279,54 @@ class Organism:
     # -- mood ----------------------------------------------------------------
     def hear(self, text):
         """The user said something: record it, learn the facts it carries,
-        let its tone touch the body (harsh words bruise, kind words soothe),
-        and re-evaluate mood. Returns events for the front-end."""
+        surface intents as goals, log commands, and let tone touch the body.
+        Returns events for the front-end."""
         events = []
         self.store.record_chat("user", text)
         harsh = sentiment.harshness(text)
         kind = sentiment.kindness(text)
-        learned = learning.extract(text)
-        for belief, replace in learned:
-            if replace:
-                self.store.observe(belief, learning.LEARN_CONF)
+        analysis = learning.analyze(text)
+
+        applied_facts = []
+        uncertain_summary = []
+        for item in analysis["facts"]:
+            belief = item["belief"]
+            replace = item["replace"]
+            confidence = item["confidence"]
+            if confidence >= learning.LEARN_CONF:
+                if replace:
+                    self.store.observe(belief, confidence)
+                else:
+                    self.store.add(belief, confidence)
+                self.store.note_activity("facts_learned")
+                self.store.remember("learned", learning.describe(belief))
+                events.append(
+                    {"kind": "learned", "belief": belief, "text": learning.describe(belief)}
+                )
+                applied_facts.append(belief)
             else:
-                self.store.add(belief, learning.LEARN_CONF)
-            self.store.note_activity("facts_learned")
-            self.store.remember("learned", learning.describe(belief))
-            events.append(
-                {"kind": "learned", "belief": belief, "text": learning.describe(belief)}
-            )
-        if learned:
+                uncertain_summary.append(learning.describe(belief))
+
+        if uncertain_summary:
+            summary = "; ".join(uncertain_summary)
+            self.store.remember("uncertain", f"maybe: {summary}")
+            events.append({"kind": "uncertain", "text": summary})
+
+        if applied_facts:
             self.hooks.fire("learned", self, text=text)
+
+        for goal in analysis["goals"]:
+            self.add_goal(goal)
+            events.append({"kind": "goal", "text": goal})
+
+        for command in analysis["commands"]:
+            self.store.remember("command", f"user asked: {command}")
+            events.append({"kind": "command", "text": command})
+
+        if analysis["question"]:
+            self.add_goal(f"answer: {text.rstrip('?')[:60]}")
+            events.append({"kind": "question", "text": text})
+
         if harsh > 0.0:
             self.meter.bump(harsh)
             self._sentiment = ("harsh", time.time())
@@ -1306,7 +1335,7 @@ class Organism:
             if kind > 0.0:
                 self.store.stress = max(StressMeter.BASELINE, self.store.stress - kind)
                 self.store.remember("kind", f"the user said: {text[:60]}")
-            if learned:
+            if applied_facts or analysis["goals"] or analysis["commands"]:
                 self._sentiment = ("learn", time.time())
             elif kind > 0.0:
                 self._sentiment = ("kind", time.time())

@@ -3,7 +3,7 @@ vocabulary sanitization, hear() assimilation into the belief store,
 and narration exposure of user facts."""
 
 from replicanta import learning
-from replicanta.learning import describe, extract
+from replicanta.learning import analyze, describe, extract
 from replicanta.narration import build_prompt, state_snapshot
 from replicanta.organism import Organism
 from replicanta.probe import SystemProbe
@@ -165,3 +165,69 @@ def test_prompt_includes_user_facts(tmp_path):
     prompt = build_prompt(state_snapshot(org))
     assert "what you know about the user:" in prompt
     assert "- your name is sam" in prompt
+
+
+
+# -- analyze() / new patterns -------------------------------------------------
+
+
+def test_analyze_classifies_speech_acts():
+    assert analyze("hello")["speech_act"] == "statement"
+    assert analyze("how are you?")["speech_act"] == "question"
+    assert analyze("please be quiet")["speech_act"] == "command"
+    assert analyze("i want to travel")["speech_act"] == "intent"
+    assert analyze("i don't like rain")["speech_act"] == "negation"
+
+
+def test_analyze_extracts_goals():
+    assert analyze("i want to learn python")["goals"] == ["learn python"]
+    assert analyze("remind me to call sam")["goals"] == ["remind: call sam"]
+    assert analyze("learn about scallop")["goals"] == ["learn about scallop"]
+
+
+def test_analyze_extracts_commands():
+    assert analyze("please be quiet")["commands"] == ["be quiet"]
+    assert analyze("can you set mood to calm")["commands"] == ["set mood to calm"]
+
+
+def test_extract_generic_my_trait():
+    assert _beliefs_only(extract("my job is engineer")) == [
+        ("user", "job", "engineer")
+    ]
+
+
+def test_extract_definitional_fact():
+    assert _beliefs_only(extract("scallop means logic")) == [
+        ("self", "knows", "scallop_is_logic")
+    ]
+
+
+def test_extract_negation():
+    assert _beliefs_only(extract("i don't like rain")) == [
+        ("user", "dislike_rain", "true")
+    ]
+    assert _beliefs_only(extract("you are not nice")) == [
+        ("self", "described_as", "not_nice")
+    ]
+
+
+def test_extract_feeling_synonyms():
+    assert _beliefs_only(extract("i am glad")) == [("user", "feeling", "happy")]
+    assert _beliefs_only(extract("i feel blue")) == [("user", "feeling", "sad")]
+
+
+def test_extract_preserves_literal_colors():
+    # "blue" must not be rewritten to "sad" outside of feeling context.
+    assert _beliefs_only(extract("your color is blue")) == [
+        ("self", "color", "blue")
+    ]
+
+
+def test_llm_fallback_extracts_facts(monkeypatch):
+    def fake_generate(prompt, model, temperature=0.95):
+        return '{"facts":[{"subject":"user","relation":"hobby","object":" hiking "}]}'
+
+    monkeypatch.setattr("replicanta.llmclient.generate", fake_generate)
+    result = analyze("i spend weekends hiking in the mountains", use_llm=True)
+    assert result["facts"][0]["belief"] == ("user", "hobby", "hiking")
+    assert result["facts"][0]["confidence"] == learning.LLM_CONF
