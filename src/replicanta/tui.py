@@ -440,7 +440,7 @@ class OrganismApp(App):
         self._voice_announced = None
         self._self_talk_on = False
         self._self_talking = False
-        self._rng = random.Random()
+        self._rng = random.Random()  # nosec B311 - UI variety RNG, not cryptography
         self._last_was_question = False
         self._pending_text = ""
         self._pending_visible = False

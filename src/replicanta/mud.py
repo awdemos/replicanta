@@ -601,7 +601,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
     the wanderer when the voice is silent or speaks nonsense. Returns
     (command, reason) — the reason is the organism's stated because-line,
     or the honest fallback excuse when the wanderer chose."""
-    rng = rng if rng is not None else random.Random()
+    rng = rng if rng is not None else random.Random()  # nosec B311 - scenario RNG, not cryptography
     command = reason = None
     try:
         if generate is not None:

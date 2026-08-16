@@ -592,7 +592,7 @@ class AttentionWindow:
             )
             return
         size = max(self.MIN_WINDOW, len(all_pairs) - cycle)
-        self.pairs = set(random.sample(sorted(all_pairs), min(size, len(all_pairs))))
+        self.pairs = set(random.sample(sorted(all_pairs), min(size, len(all_pairs))))  # nosec B311 - belief-window sampling, not cryptography
         labels = ", ".join(f"{a}={v}" for a, v in sorted(self.pairs))
         self.rationale = (
             f"your attention drifted across {len(self.pairs)} things: {labels}"
@@ -659,7 +659,7 @@ class SelfQuestioner:
             else:
                 self.store.add(belief, max(before, tag))
         # chaos-weighted generalization: commit the rule itself
-        if self.store.chaos > 0.0 and random.random() < self.store.chaos * 0.25:
+        if self.store.chaos > 0.0 and random.random() < self.store.chaos * 0.25:  # nosec B311 - chaos-weighted simulation, not cryptography
             depth = self._rule_depth(attr_a, attr_b)
             self.store.commit_rule(rule, depth)
             self.store.remember("rule", f"committed a rule: {rule[:80]}")
@@ -683,7 +683,7 @@ class DreamEngine:
     def __init__(self, store, mind, stress=None):
         self.store = store
         self.mind = mind
-        self.rng = random.Random()
+        self.rng = random.Random()  # nosec B311 - simulation RNG, not cryptography
         self.stress = stress
 
     def _attr_val_pairs(self):
@@ -1371,7 +1371,7 @@ class Organism:
     def _wake(self):
         self.window.refresh(cycle=self.store.cycle)
         pairs = sorted(self.window.pairs)
-        rng = random.Random()
+        rng = random.Random()  # nosec B311 - self-question RNG, not cryptography
         questions = 2 + (1 if self.chaos_effective() > 0.5 else 0)
         new_beliefs = []
         for _ in range(questions):
@@ -1383,7 +1383,7 @@ class Organism:
         return new_beliefs
 
     def _sleep(self):
-        self.dreamer.rng = random.Random()
+        self.dreamer.rng = random.Random()  # nosec B311 - dream RNG, not cryptography
         dreams = self.dreamer.dream(count=3)
         promoted = self.dreamer.promote(dreams)
         self.store.attention = self.window.pairs

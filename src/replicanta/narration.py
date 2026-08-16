@@ -838,7 +838,7 @@ _FALLBACK_GOALS = (
 
 def fallback_form_goal(snapshot, rng=None):
     """Deterministic intention when ollama is unavailable."""
-    rng = rng or random.Random()
+    rng = rng or random.Random()  # nosec B311 - fallback RNG, not cryptography
     return rng.choice(_FALLBACK_GOALS)
 
 
