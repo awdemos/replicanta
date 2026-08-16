@@ -44,6 +44,7 @@ COMMANDS = [
     ),
     ("/reload", "/reload", "re-read the lua hook scripts"),
     ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand"),
+    ("/git", "/git [on|off|status]", "toggle or show git sensing"),
     ("/help", "/help", "this help screen"),
     ("/quit", "/quit", "save and quit (same as F10)"),
 ]
@@ -157,5 +158,8 @@ def help_text():
         "they get on_birth/on_cycle/on_learned/on_utterance/on_fade(ctx)",
         "called at those moments — /reload re-reads them, /lua name.lua",
         "runs one's main(ctx) on demand.",
+        "",
+        "git sensing: /git on|off toggles whether the organism feels the",
+        "worktree state; /git status shows the current repo summary.",
     ]
     return "\n".join(lines)

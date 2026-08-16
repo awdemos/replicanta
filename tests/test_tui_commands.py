@@ -198,3 +198,13 @@ def test_web_flag_dispatches_to_glasshouse(monkeypatch, tmp_path):
         "port": 9876,
         "open_browser": False,
     }
+
+
+def test_git_command_registered():
+    assert "/git" in COMMAND_NAMES
+
+
+def test_help_text_includes_git():
+    text = help_text()
+    assert "/git" in text
+    assert "git sensing" in text

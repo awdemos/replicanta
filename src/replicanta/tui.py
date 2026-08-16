@@ -1986,8 +1986,22 @@ class OrganismApp(App):
             self.action_quit()
         elif name == "/help":
             self.action_help()
+        elif name == "/git":
+            self._git_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
+
+    def _git_command(self, args):
+        if not args or args[0] == "status":
+            self._append_log(self.org.git_status(), STYLE_DIM)
+        elif args[0] == "on":
+            self.org.git_enable()
+            self._append_log("git sensing on", STYLE_DIM)
+        elif args[0] == "off":
+            self.org.git_disable()
+            self._append_log("git sensing off", STYLE_DIM)
+        else:
+            self._append_log("/git [on|off|status]", STYLE_DIM)
 
     def handle_chat(self, text):
         self._log_chat("user", text)
