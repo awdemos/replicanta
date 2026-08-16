@@ -211,3 +211,101 @@ def test_server_binds_loopback_by_default(glasshouse):
         assert server.server_address[0] == "127.0.0.1"
     finally:
         server.server_close()
+
+
+
+def test_commands_endpoint_returns_metadata(live):
+    status, _headers, result = request(live, "/api/commands")
+    assert status == 200
+    assert isinstance(result, list)
+    assert any(cmd["name"] == "/sleep" for cmd in result)
+    assert all("name" in cmd and "usage" in cmd and "description" in cmd for cmd in result)
+
+
+def test_command_runs_stats_and_help(live):
+    status, _headers, result = request(live, "/api/command", {"command": "/stats"})
+    assert status == 200
+    assert result["state"]["organism"]["name"] == "default"
+    assert any(msg.startswith("stats:") for msg in result["messages"])
+
+    status, _headers, result = request(live, "/api/command", {"command": "/help"})
+    assert status == 200
+    assert "REPLICANTA" in result["messages"][0]
+
+
+def test_command_sleep_and_wake(live):
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/sleep"}
+    )
+    assert status == 200
+    assert result["state"]["organism"]["state"] == "sleep"
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/wake"}
+    )
+    assert status == 200
+    assert result["state"]["organism"]["state"] == "wake"
+
+
+def test_command_chaos_and_focus(live):
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/chaos 0.42"}
+    )
+    assert status == 200
+    assert result["state"]["organism"]["chaos"] == 0.42
+
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/focus mood"}
+    )
+    assert status == 200
+    assert any(pair[0] == "mood" for pair in result["state"]["attention"])
+
+    status, _headers, error = request(
+        live, "/api/command", {"command": "/chaos 2"}
+    )
+    assert status == 400
+    assert "between 0 and 1" in error["error"]
+
+
+def test_command_lists_organisms_and_rejects_unknown(live):
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/organisms"}
+    )
+    assert status == 200
+    assert "default" in result["messages"][0]
+
+    status, _headers, error = request(
+        live, "/api/command", {"command": "/unknown"}
+    )
+    assert status == 400
+    assert "unknown command" in error["error"]
+
+
+def test_settings_voice_and_git(live):
+    from replicanta import speech
+
+    try:
+        status, _headers, state = request(
+            live, "/api/settings", {"voice": "on"}
+        )
+        assert status == 200
+        assert state["speech"]["enabled"] is True
+
+        status, _headers, state = request(
+            live, "/api/settings", {"voice": "off"}
+        )
+        assert status == 200
+        assert state["speech"]["enabled"] is False
+
+        status, _headers, state = request(
+            live, "/api/settings", {"git": "on"}
+        )
+        assert status == 200
+        assert state["git_enabled"] is True
+
+        status, _headers, state = request(
+            live, "/api/settings", {"git": "off"}
+        )
+        assert status == 200
+        assert state["git_enabled"] is False
+    finally:
+        speech.set_enabled(False)

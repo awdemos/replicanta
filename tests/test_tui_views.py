@@ -22,6 +22,33 @@ def org(tmp_path):
     return FakeOrg(tmp_path)
 
 
+def _render_renderable(renderable):
+    import io
+
+    from rich.console import Console
+
+    console = Console(
+        width=80, force_terminal=False, color_system=None, record=True, file=io.StringIO()
+    )
+    console.print(renderable)
+    return console.export_text()
+
+
+def test_empty_mind_renders(org):
+    text = _render_renderable(tui_views.empty_mind())
+    assert "beliefs" in text.lower()
+
+
+def test_empty_memory_renders(org):
+    text = _render_renderable(tui_views.empty_memory())
+    assert "memories" in text.lower()
+
+
+def test_empty_inner_renders(org):
+    text = _render_renderable(tui_views.empty_inner())
+    assert "gauges" in text.lower()
+
+
 def test_conf_bar():
     assert tui_views.conf_bar(1.0) == "▮▮▮▮▮"
     assert tui_views.conf_bar(0.0) == "▯▯▯▯▯"

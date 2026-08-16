@@ -30,6 +30,40 @@ def conf_bar(conf, width=5):
     return "▮" * filled + "▯" * (width - filled)
 
 
+def empty_mind():
+    """Empty-state renderable for the Mind tab."""
+    return Panel(
+        Text(
+            "No beliefs yet. Tell the organism something about yourself.",
+            style="dim",
+        ),
+        title="mind",
+        border_style="cyan",
+    )
+
+
+def empty_memory():
+    """Empty-state renderable for the Memory tab."""
+    return Panel(
+        Text("No memories yet. Memories form as you talk.", style="dim"),
+        title="memory",
+        border_style="magenta",
+    )
+
+
+def empty_inner():
+    """Empty-state renderable for the Inner tab."""
+    return Panel(
+        Text(
+            "Mental-state gauges appear here: mood, stress, grounding, chaos, "
+            "and recent thought metabolism.",
+            style="dim",
+        ),
+        title="inner",
+        border_style="cyan",
+    )
+
+
 def chat_card(who, text, timestamp=None, border_style=None):
     """A consistent panel card for chat utterances."""
     border_style = border_style or (STYLE_USER if who == "you" else STYLE_ORG)
@@ -355,6 +389,10 @@ def mind_renderable(org):
         )
         panels.append(Panel(body, title="attention", border_style="yellow"))
 
+    activity_lines = activity.summary_lines(store)
+    if not panels and not activity_lines:
+        return empty_mind()
+
     m = org.metrics()
     genome_text = (
         f"{m.belief_count} beliefs · {m.rule_count} rules · "
@@ -365,7 +403,6 @@ def mind_renderable(org):
         ("genome: ", "bold"),
         (genome_text, ""),
     )
-    activity_lines = activity.summary_lines(store)
     if activity_lines:
         footer = Group(footer, Text(""), Text("\n".join(activity_lines)))
     panels.append(Panel(footer, title="activity", border_style="dim"))
@@ -396,18 +433,6 @@ def memory_renderable(org):
                 ep["text"],
             )
         panels.append(Panel(grid, title="episodes", border_style="magenta"))
-    else:
-        panels.append(
-            Panel(
-                Text(
-                    "nothing remembered yet — events appear here when the "
-                    "organism dreams, learns, or fades",
-                    style="dim",
-                ),
-                title="episodes",
-                border_style="magenta",
-            )
-        )
 
     beliefs = store.beliefs()
     user_facts = [describe(b) for b in beliefs if b[0] == "user"]
@@ -441,22 +466,26 @@ def memory_renderable(org):
         )
 
     artifacts = store.dir_path / "artifacts"
+    files = []
     if artifacts.is_dir():
         files = sorted(p for p in artifacts.iterdir() if p.is_file())
-        if files:
-            grid = Table.grid(padding=(0, 1))
-            grid.add_column(style="bold")
-            grid.add_column(justify="right", style="dim")
-            for p in files:
-                grid.add_row(p.name, _human_size(p.stat().st_size))
-            caption = Text("files the organism has written", style="dim")
-            panels.append(
-                Panel(
-                    Group(grid, Text(""), caption),
-                    title="artifacts",
-                    border_style="blue",
-                )
+    if files:
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="bold")
+        grid.add_column(justify="right", style="dim")
+        for p in files:
+            grid.add_row(p.name, _human_size(p.stat().st_size))
+        caption = Text("files the organism has written", style="dim")
+        panels.append(
+            Panel(
+                Group(grid, Text(""), caption),
+                title="artifacts",
+                border_style="blue",
             )
+        )
+
+    if not panels:
+        return empty_memory()
 
     return Group(*panels)
 
@@ -557,7 +586,7 @@ def inner_renderable(org):
         )
 
     if not panels:
-        return Text("(nothing to show yet)")
+        return empty_inner()
     return Group(*panels)
 
 

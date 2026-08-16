@@ -6,10 +6,17 @@ import asyncio
 import io
 
 from rich.console import Console
-from textual.widgets import Static, TabbedContent
+from textual.widgets import Button, Static, TabbedContent
 
 from replicanta.organism import Organism
-from replicanta.tui import OrganismApp
+from replicanta.tui import (
+    CommandHints,
+    CommandPalette,
+    MutationBanner,
+    OrganismApp,
+    TabBar,
+    Toast,
+)
 
 
 def _renderable_text(widget):
@@ -178,3 +185,111 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
     )
     with pytest.raises(SystemExit):
         tui.main()
+
+
+def test_command_hints_filter_on_slash(monkeypatch, tmp_path):
+    """Typing '/' must surface command hints, filtered by the command token."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            hints = app.query_one(CommandHints)
+            hints.update_for("/voi")
+            text = _renderable_text(hints)
+            assert "voice" in text.lower()
+            hints.update_for("/chaos ")
+            text = _renderable_text(hints)
+            assert "/chaos 0..1" in text
+
+    asyncio.run(check())
+
+
+def test_command_palette_fills_input(monkeypatch, tmp_path):
+    """ctrl+p must open the command palette; selecting a command fills the
+    chat input with the command name and a trailing space."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app.action_command_palette()
+            assert isinstance(pilot.app.screen, CommandPalette)
+            pilot.app.screen.dismiss("/chaos")
+            await asyncio.sleep(0.05)
+            assert app.chat_input.value == "/chaos "
+            assert app.chat_input.has_focus
+
+    asyncio.run(check())
+
+
+def test_tab_bar_labels_visible(monkeypatch, tmp_path):
+    """The custom tab bar must expose the main view labels."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            bar = app.query_one(TabBar)
+            labels = [str(b.label) for b in bar.query(Button)]
+            assert "Chat" in labels
+            assert "Mind" in labels
+            assert "Memory" in labels
+
+    asyncio.run(check())
+
+
+def test_toast_shows_message(monkeypatch, tmp_path):
+    """show_toast must populate the toast widget and make it visible."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app.show_toast("Camera not found")
+            await asyncio.sleep(0.05)
+            toast = app.query_one(Toast)
+            assert "Camera not found" in str(toast._Static__content)
+
+    asyncio.run(check())
+
+
+def test_mutation_banner_shows_when_pending(monkeypatch, tmp_path):
+    """A pending patch must surface the mutation approval banner."""
+    app = _headless_app(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "replicanta.extensions.registry",
+        lambda: {"pending": {"kind": "rule", "why": "test"}},
+    )
+
+    async def check():
+        async with app.run_test():
+            app._update_mutation_banner()
+            banner = app.query_one(MutationBanner)
+            assert banner.styles.display != "none"
+            summary = app.query_one("#mutation-summary", Static)
+            assert "rule" in str(summary._Static__content).lower()
+
+    asyncio.run(check())
+
+
+def test_activity_shows_during_response(monkeypatch, tmp_path):
+    """A response worker must surface an activity indicator in the status bar."""
+    import time
+
+    from replicanta import speech, tui
+
+    app = _headless_app(monkeypatch, tmp_path)
+
+    def slow_respond(*a, **k):
+        time.sleep(0.2)
+
+    monkeypatch.setattr("replicanta.voice.respond", slow_respond)
+    monkeypatch.setattr(speech, "say", lambda text: None)
+    monkeypatch.setattr(tui, "speech", speech)
+
+    async def check():
+        async with app.run_test():
+            app._maybe_respond("hi")
+            await asyncio.sleep(0.05)
+            assert "thinking" in app.activity_text.lower()
+            await asyncio.sleep(0.3)
+            assert app.activity_text == ""
+
+    asyncio.run(check())

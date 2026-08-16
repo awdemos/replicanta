@@ -18,10 +18,11 @@ from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
+    Button,
     Input,
     Label,
     ListItem,
@@ -89,18 +90,104 @@ class SlashCommands(Provider):
 
     async def discover(self):
         """Yield every slash command as an unfiltered command-palette hit."""
-        for name, usage, description in tui_commands.COMMANDS:
+        for name, usage, description, _category in tui_commands.COMMANDS:
             yield self._hit(name, usage, description)
 
     async def search(self, query):
         """Yield slash commands whose name/description match the palette query."""
         matcher = Matcher(query)
-        for name, usage, description in tui_commands.COMMANDS:
+        for name, usage, description, _category in tui_commands.COMMANDS:
             match = matcher.match(f"{name} {description}")
             if match is not None:
                 yield self._hit(
                     name, usage, description, score=match.score, display=match.highlight
                 )
+
+
+class CommandHints(Static):
+    """Renders filtered slash-command hints above the chat input."""
+
+    def update_for(self, value):
+        if not value.startswith("/"):
+            self.update("")
+            self.styles.display = "none"
+            return
+        parts = value.split(None, 1)
+        query = parts[0]
+        prefix = parts[1] if len(parts) > 1 else ""
+        items = tui_commands.filter_commands(query)
+        if prefix:
+            items = [c for c in items if c[0] == query]
+            if items:
+                self.update(f"Usage: {items[0][1]}")
+                self.styles.display = "block"
+                return
+        lines = [f"{usage:<16} {desc}" for _name, usage, desc, _category in items[:8]]
+        self.update("\n".join(lines))
+        self.styles.display = "block" if lines else "none"
+
+
+class TabBar(Horizontal):
+    """Clickable tab bar that mirrors the TabbedContent panes."""
+
+    TABS: ClassVar[list[tuple[str, str]]] = [
+        ("Chat", "chat-pane"),
+        ("Mind", "mind-pane"),
+        ("Memory", "memory-pane"),
+        ("Inner", "inner-pane"),
+        ("Cells", "cells-pane"),
+        ("MUD", "mud-pane"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        for label, pane in self.TABS:
+            yield Button(label, id=f"tab-{pane}")
+
+    def set_active(self, pane):
+        for button in self.query(Button):
+            button.variant = "primary" if button.id == f"tab-{pane}" else "default"
+
+
+class ActivityLabel(Static):
+    """Compact, transient activity indicator in the status bar."""
+
+    def show(self, text):
+        self.update(text)
+        self.styles.display = "block"
+
+    def clear(self):
+        self.update("")
+        self.styles.display = "none"
+
+
+class MutationBanner(Horizontal):
+    """Sticky banner for pending extension patches with approve/reject/why."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="mutation-summary")
+        yield Button("Approve", id="mutation-approve", variant="success")
+        yield Button("Reject", id="mutation-reject", variant="error")
+        yield Button("Why?", id="mutation-why")
+
+
+class QuickActions(Grid):
+    """One-click sidebar buttons for common state changes."""
+
+    def compose(self) -> ComposeResult:
+        yield Button("Sleep / Wake", id="qa-sleep")
+        yield Button("Voice", id="qa-voice")
+        yield Button("Listen", id="qa-listen")
+        yield Button("Look", id="qa-look")
+        yield Button("MUD", id="qa-mud")
+
+
+class Toast(Static):
+    """Transient bottom-of-screen feedback for errors and warnings."""
+
+    def show(self, message, duration=3.0):
+        self.update(message)
+        self.styles.display = "block"
+        self.set_timer(duration, lambda: setattr(self.styles, "display", "none"))
 
 
 class HelpScreen(ModalScreen):
@@ -111,6 +198,57 @@ class HelpScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         """Build the help overlay from the generated slash-command text."""
         yield Static(tui_commands.help_text(), id="help")
+
+
+class CommandPalette(Screen):
+    """Searchable slash-command palette."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+
+    def compose(self) -> ComposeResult:
+        yield Input(placeholder="Type a command…", id="palette-input")
+        yield ListView(id="palette-results")
+
+    def on_show(self):
+        self.query_one("#palette-input", Input).focus()
+        self._render("")
+
+    def on_input_changed(self, event):
+        self._render(event.value)
+
+    def _render(self, query):
+        results = self.query_one("#palette-results", ListView)
+        results.clear()
+        items = tui_commands.filter_commands(query)
+        if not items:
+            results.append(ListItem(Static("No matches")))
+            return
+        categories = {}
+        for name, usage, desc, category in items:
+            categories.setdefault(category, []).append((name, usage, desc))
+        for category in ("State", "Voice", "Senses", "MUD", "Organisms", "System", "Help"):
+            if category not in categories:
+                continue
+            header = ListItem(Static(f"[dim]{category}[/dim]"))
+            header.disabled = True
+            results.append(header)
+            for name, usage, desc in categories[category]:
+                item = ListItem(
+                    Vertical(
+                        Static(f"[bold]{usage}[/bold]", classes="palette-usage"),
+                        Static(f"{desc}", classes="palette-desc"),
+                    )
+                )
+                item.data = name
+                results.append(item)
+
+    def on_list_view_selected(self, event):
+        item = event.item
+        command = getattr(item, "data", None)
+        if command:
+            self.dismiss(command)
+        else:
+            self.dismiss(None)
 
 
 class OrganismMenuScreen(ModalScreen):
@@ -413,6 +551,8 @@ class OrganismApp(App):
                border-right: solid $primary; }
     #sidebar-header { height: 1; padding: 0 1; background: $surface;
                       color: $text-muted; text-style: bold; }
+    #quick-actions { height: auto; padding: 1 0; grid-size: 2; grid-gutter: 0 1; }
+    #quick-actions > Button { width: 1fr; margin: 0; }
     #sidebar-list { padding: 0; height: 1fr; border: none;
                      background: $surface; }
     #sidebar-list > ListItem { padding: 0 1; }
@@ -423,12 +563,23 @@ class OrganismApp(App):
     #sidebar.-dragging #sidebar-list > ListItem.group-header {
         background: $boost; color: $text; text-style: bold underline; }
     #content { width: 1fr; height: 1fr; }
+    #tab-bar { height: 3; padding: 0 1; }
+    #tab-bar > Button { min-width: 8; margin: 0 1; }
     TabbedContent { height: 1fr; }
+    TabbedContent > ContentTabs { display: none; }
     #dreams { height: 1fr; padding: 0 1; }
     #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
     #mind, #memory, #inner { padding: 1 2; }
     #inner { overflow-y: auto; }
+    #command-hints { height: auto; max-height: 4; padding: 0 1;
+                      color: $text-muted; }
+    #mutation-banner { height: auto; display: none; padding: 0 1;
+                       background: $warning-darken-2; color: $text; }
+    #mutation-banner > Static { width: 1fr; content-align: left middle; }
+    #mutation-banner > Button { min-width: 8; margin: 0 1; }
     #chat { height: 3; border: solid yellow; }
+    #toast { height: auto; display: none; padding: 0 1;
+             background: $error-darken-2; color: $text; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
     GroupPickScreen { align: center middle; }
@@ -440,6 +591,17 @@ class OrganismApp(App):
                   height: auto; background: $surface; }
     #bottombar { height: 1; padding: 0 1; background: $surface;
                   color: $text-muted; }
+    #activity { width: auto; }
+    #bottombar-text { width: 1fr; content-align: right middle; }
+    CommandPalette { align: center middle; }
+    #palette { width: 60; height: auto; max-height: 24; border: round $primary;
+               background: $surface; padding: 1 2; }
+    #palette-results { height: auto; max-height: 18; border: none;
+                       background: $surface; }
+    #palette-results > ListItem { padding: 0 1; }
+    #palette-results > ListItem.--highlight { background: $primary; color: $text; }
+    .palette-usage { text-style: bold; }
+    .palette-desc { color: $text-muted; }
     """
 
     def __init__(self, organism, root=None, spawn=None):
@@ -508,37 +670,54 @@ class OrganismApp(App):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
                 yield ListView(id="sidebar-list")
-            with Vertical(id="content"), TabbedContent(initial="chat-pane"):
-                with TabPane("chat", id="chat-pane"):
-                    dreams = RichLog(
-                        id="dreams",
-                        max_lines=1000,
-                        wrap=True,
-                        markup=True,
-                        highlight=False,
-                    )
-                    dreams.can_focus = False
-                    yield dreams
-                    yield Static("", id="pending", markup=False)
-                with TabPane("mind", id="mind-pane"), VerticalScroll():
-                    yield Static("", id="mind", markup=False)
-                with TabPane("memory", id="memory-pane"), VerticalScroll():
-                    yield Static("", id="memory", markup=False)
-                with TabPane("inner", id="inner-pane"), VerticalScroll():
-                    yield Static("", id="inner", markup=False)
-                with TabPane("cells", id="cells-pane"), VerticalScroll():
-                    yield Static("", id="cells", markup=False)
+                yield QuickActions(id="quick-actions")
+            with Vertical(id="content"):
+                yield TabBar(id="tab-bar")
+                with TabbedContent(initial="chat-pane"):
+                    with TabPane("chat", id="chat-pane"):
+                        dreams = RichLog(
+                            id="dreams",
+                            max_lines=1000,
+                            wrap=True,
+                            markup=True,
+                            highlight=False,
+                        )
+                        dreams.can_focus = False
+                        yield dreams
+                        yield Static("", id="pending", markup=False)
+                    with TabPane("mind", id="mind-pane"), VerticalScroll():
+                        yield Static("", id="mind", markup=False)
+                    with TabPane("memory", id="memory-pane"), VerticalScroll():
+                        yield Static("", id="memory", markup=False)
+                    with TabPane("inner", id="inner-pane"), VerticalScroll():
+                        yield Static("", id="inner", markup=False)
+                    with TabPane("cells", id="cells-pane"), VerticalScroll():
+                        yield Static("", id="cells", markup=False)
+                    with TabPane("mud", id="mud-pane"), VerticalScroll():
+                        yield Static(
+                            "MUD output appears here. Type moves in the chat bar.",
+                            id="mud",
+                            markup=False,
+                        )
+        yield CommandHints("", id="command-hints")
+        yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
             "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells · F9 modules)",
             id="chat",
         )
         yield self.chat_input
-        yield Static("", id="bottombar")
+        yield Toast("", id="toast")
+        with Horizontal(id="bottombar"):
+            yield ActivityLabel("", id="activity")
+            yield Static("", id="bottombar-text")
 
     def on_mount(self):
         """Render the initial organism state and start background timers."""
         self._show_org()
+        tab_bar = self._safe_query("#tab-bar", TabBar)
+        if tab_bar is not None:
+            tab_bar.set_active("chat-pane")
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
@@ -595,12 +774,65 @@ class OrganismApp(App):
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
         self.query_one(TabbedContent).active = pane
+        tab_bar = self._safe_query("#tab-bar", TabBar)
+        if tab_bar is not None:
+            tab_bar.set_active(pane)
         # keep typing in the chat line, never stranded by a pane switch
         if self.chat_input is not None:
             self.chat_input.focus()
 
+    def on_button_pressed(self, event):
+        """Route tab-bar, mutation, and quick-action button presses."""
+        button_id = event.button.id
+        if button_id and button_id.startswith("tab-"):
+            self.action_show_tab(button_id[4:])
+            return
+        if button_id == "mutation-approve":
+            entry = extensions.approve(self.org.extension_path)
+            if entry:
+                self.org.store.remember("skill", f"patch applied ({entry['kind']})")
+                self._append_log(
+                    f"patch applied ({entry['kind']}) — live now, no restart needed",
+                    STYLE_LEARNED,
+                    stamp=True,
+                )
+            self._update_mutation_banner()
+            return
+        if button_id == "mutation-reject":
+            entry = extensions.reject(self.org.extension_path)
+            if entry:
+                self.org.store.remember("skill", f"patch rejected ({entry['kind']})")
+                self._append_log(
+                    f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True
+                )
+            self._update_mutation_banner()
+            return
+        if button_id == "mutation-why":
+            self._show_mutation_why()
+            return
+        mapping = {
+            "qa-sleep": self.action_sleep_wake,
+            "qa-voice": self.action_voice,
+            "qa-listen": self.action_talk,
+            "qa-look": self.action_look,
+            "qa-mud": self.action_mud,
+        }
+        action = mapping.get(button_id)
+        if action:
+            action()
+
     def action_help(self):
         self.push_screen(HelpScreen())
+
+    def action_command_palette(self):
+        """Open the searchable slash-command palette and fill the chat line."""
+
+        def _fill(command):
+            if command:
+                self.chat_input.value = f"{command} "
+                self.chat_input.focus()
+
+        self.push_screen(CommandPalette(), callback=_fill)
 
     def action_modules(self):
         loader = getattr(self.org, "module_loader", None)
@@ -964,6 +1196,21 @@ class OrganismApp(App):
     def action_look(self):
         self._look_now()
 
+    def action_sleep_wake(self):
+        """Toggle between wake and sleep states."""
+        if self.org.lifecycle.state == "wake":
+            self.handle_command("/sleep")
+        else:
+            self.handle_command("/wake")
+
+    def action_voice(self):
+        """Toggle spoken voice output."""
+        self.handle_command("/voice")
+
+    def action_mud(self):
+        """Toggle the MUD mini-game."""
+        self._mud_command([])
+
     # -- sight (camera) ------------------------------------------------------
     def _look_now(self):
         """Grab one camera frame and have a local vision model put it into
@@ -981,6 +1228,7 @@ class OrganismApp(App):
                 "no camera frame (plugged in? opencv installed? see /camera list)",
                 STYLE_WARN,
             )
+            self.call_from_thread(self.show_toast, "Camera not found")
             return
         try:
             sight = llmclient.describe_image(frame)
@@ -1147,6 +1395,7 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _mud_scenario_worker(self, description):
+        self.call_from_thread(self.set_activity, "MUD dreaming")
         try:
             scenario = mud.generate_scenario(description, self.org)
         except Exception as exc:  # noqa: BLE001 — voice offline etc.
@@ -1154,6 +1403,8 @@ class OrganismApp(App):
                 self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN
             )
             return
+        finally:
+            self.call_from_thread(self.clear_activity)
         self.call_from_thread(self._mud_start_scenario, scenario)
 
     def _mud_start_scenario(self, scenario):
@@ -1226,12 +1477,18 @@ class OrganismApp(App):
         if game is None:
             self._mud_thinking = False
             return
+        self.call_from_thread(self.set_activity, "MUD thinking")
         hint, self._mud_hint = self._mud_hint, None
         gen = self._mud_turn_gen
-        command, reason = mud.choose_action(
-            game, hint=hint, rng=self._rng, org=self.org
-        )
-        self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
+        try:
+            command, reason = mud.choose_action(
+                game, hint=hint, rng=self._rng, org=self.org
+            )
+            self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
+        except Exception as exc:  # noqa: BLE001
+            self.call_from_thread(self._worker_error, "MUD turn", exc)
+        finally:
+            self.call_from_thread(self.clear_activity)
 
     def _mud_apply(self, game, command, actor="organism", gen=None, reason=None):
         if actor == "organism":
@@ -1307,6 +1564,7 @@ class OrganismApp(App):
             cams = camera.list_cameras()
             if not cams:
                 self._append_log("no cameras found (plug one in)", STYLE_WARN)
+                self.show_toast("No cameras found")
             for index, dev_name in cams:
                 self._append_log(f"  /dev/video{index}  {dev_name}", STYLE_DIM)
             return
@@ -1315,6 +1573,7 @@ class OrganismApp(App):
                 index, dev_name = self.camera.set_device(args[1])
             except LookupError as exc:
                 self._append_log(f"/camera: {exc}", STYLE_WARN)
+                self.show_toast(f"Camera error: {exc}")
                 return
             self._append_log(f"camera: using /dev/video{index} ({dev_name})", STYLE_DIM)
             return
@@ -1362,6 +1621,7 @@ class OrganismApp(App):
             mics = listen.list_microphones()
             if not mics:
                 self._append_log("no input devices found", STYLE_WARN)
+                self.show_toast("No microphone matched")
             for dev_id, dev_name in mics:
                 self._append_log(f"  {dev_name}  [{dev_id}]", STYLE_DIM)
             return
@@ -1370,6 +1630,7 @@ class OrganismApp(App):
                 matched = self.listener.set_mic(args[1])
             except (LookupError, OSError) as exc:
                 self._append_log(f"/microphone: {exc}", STYLE_WARN)
+                self.show_toast(f"Microphone error: {exc}")
                 return
             self._append_log(f"microphone: using {matched}", STYLE_DIM)
             return
@@ -1426,6 +1687,9 @@ class OrganismApp(App):
         if not self._suppress_changed:
             self._completion_index = 0
             self._history_index = -1
+        hints = self._safe_query("#command-hints", CommandHints)
+        if hints is not None:
+            hints.update_for(event.value)
         self._suppress_changed = False
 
     # -- voice health ------------------------------------------------------
@@ -1479,6 +1743,9 @@ class OrganismApp(App):
                 "huggingface.co/rhasspy/piper-voices",
                 STYLE_WARN,
             )
+            self.call_from_thread(
+                self.show_toast, f"Voice download failed: {name}"
+            )
             return
         speech.set_voice(name)
         self.call_from_thread(
@@ -1512,6 +1779,26 @@ class OrganismApp(App):
         self.query_one("#inner", Static).update(tui_views.inner_renderable(self.org))
         text, self._cells_grid = tui_views.cells_layout(self.org)
         self.query_one("#cells", Static).update(text)
+        self._update_mutation_banner()
+
+    def _update_mutation_banner(self):
+        pending = extensions.registry().get("pending")
+        banner = self._safe_query("#mutation-banner", MutationBanner)
+        if not isinstance(banner, MutationBanner):
+            return
+        if pending:
+            summary = tui_views._pending_proposal(self.org) or f"pending {pending.get('kind', 'patch')}"
+            banner.query_one("#mutation-summary", Static).update(f"Pending patch: {summary}")
+            banner.styles.display = "block"
+        else:
+            banner.styles.display = "none"
+
+    def _show_mutation_why(self):
+        pending = extensions.registry().get("pending")
+        if not pending:
+            return
+        why = pending.get("why", "no explanation provided")
+        self.notify(f"patch reason: {why}", timeout=5)
 
     def _render_event(self, event):
         """Render one engine event into the log."""
@@ -1582,12 +1869,9 @@ class OrganismApp(App):
             self._reflect()
 
     def refresh_status(self):
-        """Render the custom bottom bar: counts, inner voice/model status,
-        mode flags, thinking indicator, and keyboard shortcuts. Nothing here
-        duplicates the top bar (state, mood, mental scalars, voice/mic/speech,
-        clock)."""
+        """Render the custom bottom bar: activity on the left, compact
+        counters and keyboard shortcuts on the right."""
         m = self.org.metrics()
-        busy = f" · thinking{'.' * (self._busy_frame + 1)}" if self._busy() else ""
         if self._mud_game is not None:
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
         else:
@@ -1596,13 +1880,53 @@ class OrganismApp(App):
             playing += f" · 👥 group ({len(self._group.names())})"
         self._bottombar_text = (
             f"{m.belief_count} beliefs · {m.rule_count} rules · "
-            f"inner voice {llmclient.voice_status()}{playing}{busy}  │  "
+            f"inner voice {llmclient.voice_status()}{playing}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)"
         )
-        bottombar = self._safe_query("#bottombar", Static)
+        bottombar = self._safe_query("#bottombar-text", Static)
         if bottombar is not None:
             bottombar.update(self._bottombar_text)
+        self._update_quick_actions()
+
+    def _update_quick_actions(self):
+        qa = self._safe_query("#quick-actions", QuickActions)
+        if not isinstance(qa, QuickActions):
+            return
+        sleep_btn = qa.query_one("#qa-sleep", Button)
+        sleep_btn.label = (
+            "Wake" if self.org.lifecycle.state == "sleep" else "Sleep / Wake"
+        )
+        voice_btn = qa.query_one("#qa-voice", Button)
+        voice_btn.label = f"Voice: {'on' if speech.enabled else 'off'}"
+        mud_btn = qa.query_one("#qa-mud", Button)
+        mud_btn.label = "MUD: on" if self._mud_game is not None else "MUD: off"
+
+    def set_activity(self, text):
+        """Show a transient activity message in the status bar."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is not None:
+            label.show(text)
+
+    def clear_activity(self):
+        """Hide the transient activity message."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is not None:
+            label.clear()
+
+    @property
+    def activity_text(self):
+        """Current activity label text (for tests)."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is None:
+            return ""
+        return str(getattr(label, "_Static__content", "") or "")
+
+    def show_toast(self, message, duration=3.0):
+        """Show a transient toast at the bottom of the screen."""
+        toast = self._safe_query("#toast", Toast)
+        if toast is not None:
+            toast.show(message, duration=duration)
 
     # -- log ---------------------------------------------------------------
     def _safe_query(self, selector, cls):
@@ -1800,6 +2124,7 @@ class OrganismApp(App):
     def _ask_user(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         question = None
+        self.call_from_thread(self.set_activity, "org is wondering")
         try:
             self.call_from_thread(self._pending_show, "org is wondering")
             question = voice.ask_user(
@@ -1809,6 +2134,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "question", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._narrating = False
         if question is not None and org is self.org:
             self.call_from_thread(self._set_user_question, question)
@@ -1831,6 +2157,7 @@ class OrganismApp(App):
     def _self_talk(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         answer = None
+        self.call_from_thread(self.set_activity, "org is talking to itself")
         try:
             self.call_from_thread(self._pending_show, "org is asking itself")
             question = voice.self_ask(org)
@@ -1847,6 +2174,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "self-talk", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._self_talking = False
         if answer is not None and org is self.org:
             self.call_from_thread(self._set_self_answer, answer)
@@ -1868,12 +2196,14 @@ class OrganismApp(App):
     def _narrate(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         text = None
+        self.call_from_thread(self.set_activity, "org is musing")
         try:
             self.call_from_thread(self._pending_show, "org is musing")
             text = voice.narrate(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "narration", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._narrating = False
         if text is not None and org is self.org:
             self.call_from_thread(self._log_narration, text)
@@ -2139,6 +2469,7 @@ class OrganismApp(App):
             self._modules_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
+            self.show_toast(f"Invalid command: {name}")
 
     def _git_command(self, args):
         if not args or args[0] == "status":
@@ -2212,6 +2543,7 @@ class OrganismApp(App):
     def _respond(self, text):
         org = self.org  # capture: a swap mid-debate drops the delivery
         reply = None
+        self.call_from_thread(self.set_activity, "org is thinking")
         try:
             self.call_from_thread(self._pending_show, "org is thinking")
             reply = voice.respond(
@@ -2222,6 +2554,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._responding = False
         if reply is not None and org is self.org:
             self.call_from_thread(self._set_reply, reply)
@@ -2330,12 +2663,14 @@ class OrganismApp(App):
         if group is None:
             return
         utterances = None
+        self.call_from_thread(self.set_activity, "group is thinking")
         try:
             self.call_from_thread(self._pending_show, "group is thinking")
             utterances = group.broadcast(text)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "group reply", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._group_responding = False
         if utterances is not None and group is self._group:
             self.call_from_thread(self._deliver_group, utterances)
