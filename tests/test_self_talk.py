@@ -67,8 +67,8 @@ def test_fallback_self_ask_ends_in_question(org):
     obj = snap["beliefs"][0].split(" ")[1].split("=")[0]
     assert q in {
         f"what do I really believe about {obj}?",
-        f"does {obj} still matter to me?",
-        f"where did {obj} come from?",
+        f"do I still believe what I know about {obj}?",
+        f"why do I believe what I know about {obj}?",
     }
 
 
@@ -99,8 +99,8 @@ def test_self_ask_falls_back_when_ollama_down(org, monkeypatch):
     obj = snap["beliefs"][0].split(" ")[1].split("=")[0]
     assert q in {
         f"what do I really believe about {obj}?",
-        f"does {obj} still matter to me?",
-        f"where did {obj} come from?",
+        f"do I still believe what I know about {obj}?",
+        f"why do I believe what I know about {obj}?",
     }
 
 
