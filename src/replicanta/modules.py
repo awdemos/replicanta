@@ -24,6 +24,55 @@ class ServiceRegistry:
         return self._services.get(name)
 
 
+class HookService:
+    """Event bus used by modules and consumed by HookEngine."""
+
+    EVENTS = (
+        "birth",
+        "cycle",
+        "learned",
+        "utterance",
+        "fade",
+        "mud_turn",
+        "mud_win",
+        "mud_end",
+    )
+
+    def __init__(self):
+        self._handlers = {e: [] for e in self.EVENTS}
+
+    def on(self, event, handler):
+        if event not in self._handlers:
+            logger.warning("unknown hook event: %s", event)
+            return
+        self._handlers[event].append(handler)
+
+    def emit(self, event, text=None):
+        if event not in self._handlers:
+            return
+        for handler in self._handlers[event]:
+            try:
+                handler(text)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("hook handler for %s failed: %s", event, exc)
+
+
+class CommandService:
+    """Slash-command registry used by modules and consumed by the TUI."""
+
+    def __init__(self):
+        self._commands = {}
+
+    def register(self, name, handler):
+        self._commands[name] = handler
+
+    def dispatch(self, name, args):
+        handler = self._commands.get(name)
+        if handler is None:
+            return None
+        return handler(args)
+
+
 class ModuleLoader:
     """Discovers Lua modules from a directory."""
 
@@ -104,4 +153,4 @@ class ModuleLoader:
         for name in sorted(by_name):
             if name not in visited and not visit(name, []):
                 return []
-        return [m["name"] for m in ordered]
+        return ordered
