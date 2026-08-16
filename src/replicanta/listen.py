@@ -33,7 +33,10 @@ def _stt_config():
 MIN_SECONDS = 0.25  # shorter captures are treated as accidental taps
 
 
-def _prime_resource_tracker():
+_resource_tracker_primed = False
+
+
+def _ensure_resource_tracker():
     """Start multiprocessing's resource tracker on the main thread.
 
     faster-whisper's model load renders a tqdm progress bar (even for
@@ -41,19 +44,20 @@ def _prime_resource_tracker():
     spawns the resource tracker subprocess via fork_exec. Inside the TUI
     that first spawn happens on a worker thread, where it can fail with
     "ValueError: bad value(s) in fds_to_keep" and transcription silently
-    returns ''. Creating a throwaway RLock here, on the main thread at
-    import time, leaves the tracker running, so the later worker-thread
+    returns ''. Creating a throwaway RLock on the main thread at first
+    Listener use leaves the tracker running, so the later worker-thread
     lock is a plain pipe write instead of a spawn.
     """
+    global _resource_tracker_primed
+    if _resource_tracker_primed:
+        return
     try:
         import multiprocessing
 
         multiprocessing.RLock()
-    except Exception:  # noqa: BLE001, S110 — priming must never break import
+    except Exception:  # noqa: BLE001, S110 — priming must never break startup
         pass
-
-
-_prime_resource_tracker()
+    _resource_tracker_primed = True
 
 
 def match_microphone(mics, spec):
@@ -99,6 +103,7 @@ class Listener:
     thread (import-time GC can drop pyo3 objects on the wrong thread)."""
 
     def __init__(self, transcriber=None, mic_factory=None):
+        _ensure_resource_tracker()
         self._transcriber = transcriber
         self._mic_factory = mic_factory
         self.mic_spec = None  # chosen input device (id or name substring)

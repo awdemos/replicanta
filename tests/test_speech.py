@@ -135,7 +135,7 @@ def _fake_voices_dir(tmp_path, monkeypatch, names=("en_US-lessac-medium",)):
     for n in names:
         (vdir / f"{n}.onnx").write_text("fake")
         (vdir / f"{n}.onnx.json").write_text("{}")
-    monkeypatch.setattr(speech, "VOICES_DIR", vdir)
+    monkeypatch.setattr(speech, "voices_dir", lambda: vdir)
     return vdir
 
 
@@ -145,7 +145,7 @@ def test_list_voices_scans_voices_dir(tmp_path, monkeypatch):
 
 
 def test_list_voices_empty_without_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(speech, "VOICES_DIR", tmp_path / "nope")
+    monkeypatch.setattr(speech, "voices_dir", lambda: tmp_path / "nope")
     assert speech.list_voices() == []
 
 
@@ -250,7 +250,7 @@ def test_voices_dir_prefers_project_root(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module.VOICES_DIR == root_voices
+    assert module.voices_dir() == root_voices
 
 
 def test_voices_dir_falls_back_to_package_dir(tmp_path, monkeypatch):
@@ -270,4 +270,4 @@ def test_voices_dir_falls_back_to_package_dir(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module.VOICES_DIR == package_voices
+    assert module.voices_dir() == package_voices
