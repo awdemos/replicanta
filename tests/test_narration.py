@@ -522,8 +522,8 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 # -- voice quality v2: model, think-mode, prompt register --------------------
 
 
-def test_default_model_is_qwen3_5():
-    assert llmclient.DEFAULT_MODEL == "qwen3.5:latest"
+def test_default_model_is_qwen3_8_ud_hf_q3_k_m():
+    assert llmclient.DEFAULT_MODEL == "qwen3.8-ud-hf:q3_k_m"
 
 
 def test_strip_think_removes_block():

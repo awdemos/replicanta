@@ -16,7 +16,7 @@ import urllib.request
 
 from replicanta import extensions
 
-DEFAULT_MODEL = "qwen3.5:latest"
+DEFAULT_MODEL = "qwen3.8-ud-hf:q3_k_m"
 MAX_TOKENS = 180
 
 
