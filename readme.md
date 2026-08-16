@@ -119,6 +119,15 @@ the hidden development-only `--host` option is deliberately changed.
 
 ## Interact
 
+### Personas and modules
+
+Replicanta ships with a small plugin system. Modules live in `modules/<name>/`
+with a `manifest.toml` and `init.lua`. Built-in persona modules include
+`software-engineer`, `creative-writer`, and `socratic-philosopher`.
+
+Use `/persona [name|off|list]` to adopt, clear, or list personas. Use `/modules`
+to see loaded modules and services.
+
 Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7). The status
 bar shows state, mood, belief/rule counts, and voice status.
 
