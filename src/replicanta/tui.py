@@ -249,7 +249,7 @@ class ModulesScreen(ModalScreen):
         super().__init__()
         self._loader = loader
         self._enabled = set()
-        enabled = loader.config.get("modules", {}).get("enabled")
+        enabled = loader.modules_config.get("enabled")
         if enabled is not None:
             self._enabled = set(enabled)
         elif loader.modules:
@@ -319,10 +319,11 @@ class ModulesScreen(ModalScreen):
         self.query_one("#module-detail", Label).update("\n".join(lines))
 
     def action_save(self):
-        cfg = self._loader.config
-        cfg.setdefault("modules", {})["enabled"] = sorted(self._enabled)
         from replicanta import config as project_config
 
+        cfg = project_config.load_config(self._loader.root)
+        cfg.setdefault("modules", {}).update(self._loader.modules_config)
+        cfg["modules"]["enabled"] = sorted(self._enabled)
         project_config.save_config(self._loader.root, cfg)
         self._loader.load_all()
         self.dismiss(True)

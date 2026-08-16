@@ -946,7 +946,8 @@ class Organism:
         self.module_loader = ModuleLoader(
             modules_dir=self._modules_dir(),
             organism=self,
-            config=cfg,
+            modules_config=cfg.get("modules", {}),
+            persona_config=cfg.get("persona", {}),
             emit=self._emit_log,
             root=self._root_dir(),
         )

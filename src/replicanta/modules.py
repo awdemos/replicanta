@@ -79,10 +79,32 @@ class CommandService:
 class ModuleLoader:
     """Discovers and initializes Lua modules from a directory."""
 
-    def __init__(self, modules_dir, organism=None, config=None, emit=None, root=None):
+    def __init__(
+        self,
+        modules_dir,
+        organism=None,
+        modules_config=None,
+        emit=None,
+        root=None,
+        config=None,
+        persona_config=None,
+    ):
         self.modules_dir = Path(modules_dir)
         self.organism = organism
-        self.config = config or {}
+        if modules_config is not None:
+            self.modules_config = modules_config
+        elif config is not None:
+            self.modules_config = config.get("modules", {})
+        else:
+            self.modules_config = {}
+        # Backward-compatible alias for callers that read loader.config.
+        self.config = self.modules_config
+        if persona_config is not None:
+            self.persona_config = persona_config
+        elif config is not None:
+            self.persona_config = config.get("persona", {})
+        else:
+            self.persona_config = {}
         self.emit = emit if emit is not None else (lambda _msg: None)
         self.root = root
         self.registry = ServiceRegistry()
@@ -167,7 +189,7 @@ class ModuleLoader:
         self.warnings = []
         self._register_builtin_services()
         discovered = self._discover()
-        enabled = self.config.get("modules", {}).get("enabled")
+        enabled = self.modules_config.get("enabled")
         if enabled is None:
             enabled = ["base", "software-engineer", "creative-writer", "socratic-philosopher"]
         enabled = set(enabled)
@@ -189,7 +211,7 @@ class ModuleLoader:
             "persona",
             PersonaService(
                 self.organism.store if self.organism else None,
-                config=self.config,
+                persona_config=self.persona_config,
                 root=self.root,
             ),
         )
@@ -264,9 +286,14 @@ def _lua_to_py(obj, seen=None):
 class PersonaService:
     """Registry and activation for persona modules."""
 
-    def __init__(self, store, config=None, root=None):
+    def __init__(self, store, persona_config=None, root=None, config=None):
         self.store = store
-        self.config = config if config is not None else {}
+        if persona_config is not None:
+            self.persona_config = persona_config
+        elif config is not None:
+            self.persona_config = config.setdefault("persona", {})
+        else:
+            self.persona_config = {}
         self.root = root
         self._personas = {}
 
@@ -282,7 +309,7 @@ class PersonaService:
         return sorted(self._personas)
 
     def active(self):
-        active = self.config.get("persona", {}).get("active")
+        active = self.persona_config.get("active")
         return self._personas.get(active)
 
     def prompt_fragment(self):
@@ -291,14 +318,16 @@ class PersonaService:
 
     def _save(self):
         if self.root is not None:
-            project_config.save_config(self.root, self.config)
+            cfg = project_config.load_config(self.root)
+            cfg["persona"] = self.persona_config
+            project_config.save_config(self.root, cfg)
 
     def activate(self, name):
         spec = self._personas.get(name)
         if spec is None:
             logger.warning("unknown persona: %s", name)
             return
-        self.config.setdefault("persona", {})["active"] = name
+        self.persona_config["active"] = name
         if self.store is not None:
             for belief in spec.get("beliefs", []):
                 if len(belief) == 3:
@@ -307,5 +336,5 @@ class PersonaService:
         self._save()
 
     def deactivate(self):
-        self.config.setdefault("persona", {})["active"] = ""
+        self.persona_config["active"] = ""
         self._save()
