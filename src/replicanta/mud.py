@@ -672,11 +672,11 @@ def validate_scenario(data) -> Scenario:
                     f"exit {direction} from {room_id} to unknown {target}"
                 )
 
-    if "item" in win_condition:
+    if win_condition.get("item") is not None:
         item = win_condition["item"]
         if not any(item in room.items for room in rooms.values()):
             raise ValueError(f"win item {item!r} not found in any room")
-    elif "room" in win_condition:
+    elif win_condition.get("room") is not None:
         if win_condition["room"] not in rooms:
             raise ValueError(f"win room {win_condition['room']!r} not found")
     else:
