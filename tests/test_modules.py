@@ -1,4 +1,10 @@
-from replicanta.modules import ModuleLoader, ServiceRegistry
+from replicanta.modules import (
+    CommandService,
+    HookService,
+    ModuleLoader,
+    PersonaService,
+    ServiceRegistry,
+)
 
 
 def test_service_registry_register_and_get():
@@ -37,7 +43,7 @@ def test_resolve_load_order_linear(tmp_path):
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
     ordered = loader._resolve_load_order(modules)
-    assert ordered == ["base", "derived"]
+    assert [m["name"] for m in ordered] == ["base", "derived"]
 
 
 def test_resolve_load_order_missing_dependency(tmp_path):
@@ -76,5 +82,20 @@ def test_resolve_load_order_invalid_depends_type(tmp_path):
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
     ordered = loader._resolve_load_order(modules)
-    assert ordered == ["bad"]
+    assert [m["name"] for m in ordered] == ["bad"]
     assert any("depends must be a list" in w for w in loader.warnings)
+
+
+def test_load_all_initializes_modules(tmp_path):
+    d = tmp_path / "cmdmod"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "cmdmod"\nversion = "1.0.0"\n')
+    (d / "init.lua").write_text(
+        'function init(ctx)\n'
+        '  ctx.services.get("commands"):register("/hello", function(args) return "hi" end)\n'
+        'end\n'
+    )
+    loader = ModuleLoader(tmp_path, organism=None, config={})
+    loader.load_all()
+    result = loader.registry.get("commands").dispatch("/hello", [])
+    assert result == "hi"

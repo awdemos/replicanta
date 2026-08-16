@@ -8,7 +8,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore[no-redef]
 
+from lupa import LuaRuntime
+
 from replicanta import config as project_config
+
+_BLOCKED_GLOBALS = ("os", "io", "load", "loadstring", "require", "dofile")
 
 logger = logging.getLogger(__name__)
 
@@ -76,16 +80,18 @@ class CommandService:
 
 
 class ModuleLoader:
-    """Discovers Lua modules from a directory."""
+    """Discovers and initializes Lua modules from a directory."""
 
-    def __init__(self, modules_dir, organism=None, config=None, emit=None):
+    def __init__(self, modules_dir, organism=None, config=None, emit=None, root=None):
         self.modules_dir = Path(modules_dir)
         self.organism = organism
         self.config = config or {}
         self.emit = emit if emit is not None else (lambda _msg: None)
+        self.root = root
         self.registry = ServiceRegistry()
         self.modules = {}
         self.warnings = []
+        self._lua = None
 
     def _discover(self):
         """Return list of manifest dicts for modules under modules_dir."""
@@ -156,6 +162,83 @@ class ModuleLoader:
             if name not in visited and not visit(name, []):
                 return []
         return ordered
+
+    def load_all(self):
+        """Discover, resolve, and initialize all enabled modules."""
+        self.registry = ServiceRegistry()
+        self.modules = {}
+        self.warnings = []
+        self._register_builtin_services()
+        discovered = self._discover()
+        enabled = self.config.get("modules", {}).get("enabled")
+        if enabled is None:
+            enabled = [m.get("name") for m in discovered]
+        enabled = set(enabled)
+        if enabled:
+            discovered = [m for m in discovered if m.get("name") in enabled]
+        ordered = self._resolve_load_order(discovered)
+        for manifest in ordered:
+            self._init_module(manifest)
+
+    def _register_builtin_services(self):
+        self.registry.register("organism", self.organism)
+        self.registry.register(
+            "store",
+            _StoreService(self.organism.store) if self.organism else None,
+        )
+        self.registry.register("hooks", HookService())
+        self.registry.register("commands", CommandService())
+        self.registry.register(
+            "persona",
+            PersonaService(
+                self.organism.store if self.organism else None,
+                config=self.config,
+                root=self.root,
+            ),
+        )
+
+    def _init_module(self, manifest):
+        name = manifest.get("name")
+        init_path = manifest.get("_init_path")
+        if not init_path.is_file():
+            self.warnings.append(f"{name}: init.lua missing; skipping")
+            return
+        try:
+            lua = self._runtime()
+            lua.execute(init_path.read_text())
+            init = lua.globals()["init"]
+            if init is None:
+                self.warnings.append(f"{name}: no init() function; skipping")
+                return
+            ctx = self._build_context(name)
+            init(ctx)
+        except Exception as exc:  # noqa: BLE001
+            self.warnings.append(f"{name}: init failed: {exc}")
+            return
+        self.modules[name] = manifest
+
+    def _runtime(self):
+        if self._lua is None:
+            self._lua = LuaRuntime(register_eval=False, register_builtins=False)
+            for name in _BLOCKED_GLOBALS:
+                self._lua.execute(f"{name} = nil")
+        return self._lua
+
+    def _build_context(self, module_name):
+        lua = self._runtime()
+        return lua.table(
+            module_name=module_name,
+            log=lambda msg: self.emit(str(msg)),
+            services=self.registry,
+        )
+
+
+class _StoreService:
+    def __init__(self, store):
+        self.store = store
+
+    def observe(self, belief, conf):
+        self.store.observe(belief, conf)
 
 
 class PersonaService:
