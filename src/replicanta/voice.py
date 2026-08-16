@@ -11,25 +11,58 @@ from replicanta.narration import dedup_emerge, state_snapshot
 from replicanta.skills import Skill
 
 
-def narrate(org, model=None, timeout=None, rng=None):
-    """First-person idle thought; None when it would just repeat a recent line."""
-    return dedup_emerge(
-        org, lambda: ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(org)
+def _emerge(
+    org,
+    task,
+    *,
+    message=None,
+    question=None,
+    structured=False,
+    fallback=None,
+    on_token=None,
+    quick=False,
+    model=None,
+    timeout=None,
+    rng=None,
+):
+    """Build a ThoughtArena and run the requested utterance path.
+
+    All public voice helpers route through here so they only vary
+    task-specific arguments instead of repeating the arena construction
+    and emerge/quick_take dispatch.
+    """
+    arena = ThoughtArena(rng=rng, model=model, timeout=timeout)
+    method = arena.quick_take if quick else arena.emerge
+    return method(
+        org,
+        task=task,
+        user_message=message,
+        question=question,
+        structured=structured,
+        fallback=fallback,
+        on_token=on_token,
     )
 
 
-def respond(
-    org, user_text, model=None, timeout=None, rng=None, on_token=None, quick=False
-):
+def narrate(org, model=None, timeout=None, rng=None):
+    """First-person idle thought; None when it would just repeat a recent line."""
+    return dedup_emerge(
+        org, lambda: _emerge(org, task="idle", model=model, timeout=timeout, rng=rng)
+    )
+
+
+def respond(org, message, model=None, timeout=None, rng=None, on_token=None, quick=False):
     """First-person reply to the user; quick=True skips the debate."""
-    arena = ThoughtArena(rng=rng, model=model, timeout=timeout)
-    fallback = lambda snap: narration.fallback_respond(snap, user_text)
-    if quick:
-        return arena.quick_take(
-            org, user_message=user_text, fallback=fallback, on_token=on_token
-        )
-    return arena.emerge(
-        org, user_message=user_text, fallback=fallback, on_token=on_token
+    return _emerge(
+        org,
+        task="reply",
+        message=message,
+        fallback=lambda snap: narration.fallback_respond(snap, message),
+        on_token=on_token,
+        quick=quick,
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
 
 
@@ -38,11 +71,14 @@ def respond(
 
 def reflect(org, model=None, timeout=None, rng=None):
     """One reflection cycle: distill, patch, or 'nothing'; structured."""
-    text = ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+    text = _emerge(
         org,
         task="reflect",
         structured=True,
         fallback=lambda _snap: None,
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
     if text is None:
         return {"action": "none"}
@@ -91,11 +127,14 @@ def reflect(org, model=None, timeout=None, rng=None):
 
 def form_goal(org, model=None, timeout=None, rng=None):
     """One concrete intention grounded in the organism's beliefs."""
-    return ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+    return _emerge(
         org,
         task="form_goal",
         structured=True,
         fallback=lambda snap: narration.fallback_form_goal(snap, rng),
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
 
 
@@ -104,11 +143,14 @@ def form_goal(org, model=None, timeout=None, rng=None):
 
 def diary_entry(org, model=None, timeout=None, rng=None):
     """One short diary entry about recent days."""
-    return ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+    return _emerge(
         org,
         task="diary",
         structured=True,
         fallback=narration.fallback_diary_entry,
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
 
 
@@ -117,11 +159,14 @@ def diary_entry(org, model=None, timeout=None, rng=None):
 
 def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
     """One curious question for the user, grounded in a seed."""
-    return ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+    return _emerge(
         org,
         task="ask_user",
         fallback=narration.fallback_ask_user,
         on_token=on_token,
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
 
 
@@ -132,11 +177,14 @@ def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
     """One self-question, steered away from recent repeats."""
     question = dedup_emerge(
         org,
-        lambda: ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+        lambda: _emerge(
             org,
             task="self_ask",
             fallback=narration.fallback_self_ask,
             on_token=on_token,
+            model=model,
+            timeout=timeout,
+            rng=rng,
         ),
     )
     if question is None:
@@ -144,32 +192,38 @@ def self_ask(org, model=None, timeout=None, rng=None, on_token=None):
     return question
 
 
-def self_answer(org, question, model=None, timeout=None, rng=None, on_token=None):
+def self_answer(org, message, model=None, timeout=None, rng=None, on_token=None):
     """First-person answer to the organism's own question."""
     answer = dedup_emerge(
         org,
-        lambda: ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+        lambda: _emerge(
             org,
             task="self_answer",
-            question=question,
-            fallback=lambda snap: narration.fallback_self_answer(snap, question),
+            question=message,
+            fallback=lambda snap: narration.fallback_self_answer(snap, message),
             on_token=on_token,
+            model=model,
+            timeout=timeout,
+            rng=rng,
         ),
     )
     if answer is None:
-        answer = narration.fallback_self_answer(state_snapshot(org), question)
+        answer = narration.fallback_self_answer(state_snapshot(org), message)
     return answer
 
 
 # -- mud companion --------------------------------------------------------------
 
 
-def mud_decide(org, user_message, model=None, timeout=None, rng=None, on_token=None):
+def mud_decide(org, message, model=None, timeout=None, rng=None, on_token=None):
     """One MUD move chosen by the organism itself; None on failure."""
-    return ThoughtArena(rng=rng, model=model, timeout=timeout).emerge(
+    return _emerge(
         org,
         task="mud",
-        user_message=user_message,
+        message=message,
         fallback=lambda _snap: None,
         on_token=on_token,
+        model=model,
+        timeout=timeout,
+        rng=rng,
     )
