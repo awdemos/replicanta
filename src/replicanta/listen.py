@@ -144,8 +144,12 @@ class Listener:
 
     def set_mic(self, spec):
         """Choose the input device for future captures (exact id or name
-        substring). Returns the matched device name; raises LookupError
-        when nothing matches."""
+        substring).
+
+        When using real hardware, returns the matched device name and raises
+        LookupError when nothing matches. When a mic_factory is injected,
+        stores and returns the resolved spec without matching.
+        """
         if self._mic_factory is not None:
             self.mic_spec = spec
             return spec

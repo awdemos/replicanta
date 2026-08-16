@@ -6,6 +6,8 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from replicanta import mud
 from replicanta.mud import MudGame, Room
 
@@ -508,6 +510,22 @@ def test_validate_scenario_falls_back_on_bad_exits():
     }
     scenario = mud.scenario_or_default(data)
     assert scenario.title == "The Amulet of Vatox"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"title": "x"},
+        {"title": "x", "premise": "y"},
+        {"title": "x", "premise": "y", "start_room": "z"},
+        {"title": "x", "premise": "y", "start_room": "z", "win_condition": {}},
+        {"title": "x", "premise": "y", "start_room": "z", "win_condition": {"item": "a"}},
+    ],
+)
+def test_validate_scenario_raises_valueerror_on_bad_input(payload):
+    with pytest.raises(ValueError):
+        mud.validate_scenario(payload)
 
 
 def test_generate_scenario_uses_default_on_bad_json():

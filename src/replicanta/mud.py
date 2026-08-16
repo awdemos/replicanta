@@ -632,11 +632,14 @@ def validate_scenario(data) -> Scenario:
     unsatisfiable. Callers that want a fallback should use
     ``scenario_or_default``.
     """
-    title = data["title"]
-    premise = data["premise"]
-    start_room = data["start_room"]
-    win_condition = dict(data["win_condition"])
-    rooms_data = data["rooms"]
+    try:
+        title = data["title"]
+        premise = data["premise"]
+        start_room = data["start_room"]
+        win_condition = dict(data["win_condition"])
+        rooms_data = data["rooms"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"invalid scenario data: {exc}") from exc
 
     if start_room not in rooms_data:
         raise ValueError(f"start_room {start_room!r} not in rooms")
