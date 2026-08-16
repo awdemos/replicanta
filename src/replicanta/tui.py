@@ -18,7 +18,7 @@ from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
@@ -168,6 +168,17 @@ class MutationBanner(Horizontal):
         yield Button("Approve", id="mutation-approve", variant="success")
         yield Button("Reject", id="mutation-reject", variant="error")
         yield Button("Why?", id="mutation-why")
+
+
+class QuickActions(Grid):
+    """One-click sidebar buttons for common state changes."""
+
+    def compose(self) -> ComposeResult:
+        yield Button("Sleep / Wake", id="qa-sleep")
+        yield Button("Voice", id="qa-voice")
+        yield Button("Listen", id="qa-listen")
+        yield Button("Look", id="qa-look")
+        yield Button("MUD", id="qa-mud")
 
 
 class HelpScreen(ModalScreen):
@@ -531,6 +542,8 @@ class OrganismApp(App):
                border-right: solid $primary; }
     #sidebar-header { height: 1; padding: 0 1; background: $surface;
                       color: $text-muted; text-style: bold; }
+    #quick-actions { height: auto; padding: 1 0; grid-size: 2; grid-gutter: 0 1; }
+    #quick-actions > Button { width: 1fr; margin: 0; }
     #sidebar-list { padding: 0; height: 1fr; border: none;
                      background: $surface; }
     #sidebar-list > ListItem { padding: 0 1; }
@@ -646,6 +659,7 @@ class OrganismApp(App):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
                 yield ListView(id="sidebar-list")
+                yield QuickActions(id="quick-actions")
             with Vertical(id="content"):
                 yield TabBar(id="tab-bar")
                 with TabbedContent(initial="chat-pane"):
@@ -784,6 +798,16 @@ class OrganismApp(App):
         if button_id == "mutation-why":
             self._show_mutation_why()
             return
+        mapping = {
+            "qa-sleep": self.action_sleep_wake,
+            "qa-voice": self.action_voice,
+            "qa-listen": self.action_talk,
+            "qa-look": self.action_look,
+            "qa-mud": self.action_mud,
+        }
+        action = mapping.get(button_id)
+        if action:
+            action()
 
     def action_help(self):
         self.push_screen(HelpScreen())
@@ -1159,6 +1183,21 @@ class OrganismApp(App):
 
     def action_look(self):
         self._look_now()
+
+    def action_sleep_wake(self):
+        """Toggle between wake and sleep states."""
+        if self.org.lifecycle.state == "wake":
+            self.handle_command("/sleep")
+        else:
+            self.handle_command("/wake")
+
+    def action_voice(self):
+        """Toggle spoken voice output."""
+        self.handle_command("/voice")
+
+    def action_mud(self):
+        """Toggle the MUD mini-game."""
+        self._mud_command([])
 
     # -- sight (camera) ------------------------------------------------------
     def _look_now(self):
@@ -1828,6 +1867,20 @@ class OrganismApp(App):
         bottombar = self._safe_query("#bottombar-text", Static)
         if bottombar is not None:
             bottombar.update(self._bottombar_text)
+        self._update_quick_actions()
+
+    def _update_quick_actions(self):
+        qa = self._safe_query("#quick-actions", QuickActions)
+        if qa is None:
+            return
+        sleep_btn = qa.query_one("#qa-sleep", Button)
+        sleep_btn.label = (
+            "Wake" if self.org.lifecycle.state == "sleep" else "Sleep / Wake"
+        )
+        voice_btn = qa.query_one("#qa-voice", Button)
+        voice_btn.label = f"Voice: {'on' if speech.enabled else 'off'}"
+        mud_btn = qa.query_one("#qa-mud", Button)
+        mud_btn.label = "MUD: on" if self._mud_game is not None else "MUD: off"
 
     def set_activity(self, text):
         """Show a transient activity message in the status bar."""

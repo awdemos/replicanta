@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from textual.containers import VerticalScroll
-from textual.widgets import ListView, Static
+from textual.widgets import Button, ListView, Static
 
 from replicanta.organism import Organism
 from replicanta.tui import OrganismApp
@@ -180,7 +180,7 @@ def test_bottom_bar_shows_counts_and_keys(monkeypatch, tmp_path):
     async def check():
         async with app.run_test():
             app.refresh_status()
-            text = _renderable_text(app.query_one("#bottombar", Static))
+            text = _renderable_text(app.query_one("#bottombar-text", Static))
             assert "beliefs" in text
             assert "rules" in text
             assert "ctrl+q quit" in text
@@ -785,5 +785,17 @@ def test_mud_organism_move_shows_its_reason(monkeypatch, tmp_path):
             lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
             idx = next(i for i, line in enumerate(lines) if "cave mouth calls" in line)
             assert "> go north" in lines[idx + 1]
+
+    asyncio.run(check())
+
+
+def test_quick_actions_buttons_exist(monkeypatch, tmp_path):
+    """The sidebar must expose one-click action buttons."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            for bid in ("qa-sleep", "qa-voice", "qa-listen", "qa-look", "qa-mud"):
+                assert app.query_one(f"#{bid}", Button)
 
     asyncio.run(check())
