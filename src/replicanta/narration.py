@@ -53,7 +53,7 @@ def state_snapshot(org):
     attention_rationale = getattr(org.window, "rationale", None)
     surprises = org.store.activity.get("surprises", [])[-3:]
     derived = org.store.derived()
-    return {
+    snapshot = {
         "state": org.lifecycle.state,
         "cycle": org.store.cycle,
         "chaos": round(org.store.chaos, 2),
@@ -98,6 +98,9 @@ def state_snapshot(org):
         "scallop_contradictions": derived["contradictions"],
         "stress_mood": derived["stress_mood"],
     }
+    persona_service = getattr(org, "persona_service", None)
+    snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
+    return snapshot
 
 
 def _last_self_exchange(chat_log):
@@ -599,7 +602,12 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             '   notebook I had just started."',
             "Short sentences. Specific images. No purple prose.",
         ]
-    lines = intro + [
+    lines = list(intro)
+    if snapshot.get("persona"):
+        lines.append("")
+        lines.append("Persona:")
+        lines.append(snapshot["persona"])
+    lines += [
         "",
         "Here is your current state:",
         "",

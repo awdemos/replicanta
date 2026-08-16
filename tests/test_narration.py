@@ -724,3 +724,49 @@ def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
     assert len(seeds) == 2
     assert seeds[0] != seeds[1]
     assert all("what is most alive in you right now" in p for p in prompts)
+
+
+def test_state_snapshot_includes_persona(tmp_path):
+    from replicanta.modules import PersonaService
+
+    svc = PersonaService(BeliefStore(tmp_path))
+    svc.register({
+        "name": "se",
+        "description": "engineer",
+        "prompt": "You are an engineer.",
+        "beliefs": [],
+    })
+    svc.activate("se")
+
+    class FakeOrg:
+        def __init__(self):
+            self.store = BeliefStore(tmp_path)
+            self.lifecycle = Lifecycle(self.store)
+            self.window = type("W", (), {"pairs": set()})()
+            self.last_sight = None
+            self.skills = None
+            self.persona_service = svc
+
+        def metrics(self):
+            return Metrics(self.store)
+
+    org = FakeOrg()
+    snap = state_snapshot(org)
+    assert snap["persona"] == "You are an engineer."
+
+
+def test_build_prompt_appends_persona(tmp_path):
+    class FakeOrg:
+        def __init__(self):
+            self.store = BeliefStore(tmp_path)
+            self.lifecycle = Lifecycle(self.store)
+            self.window = type("W", (), {"pairs": set()})()
+            self.last_sight = None
+            self.skills = None
+            self.persona_service = None
+
+        def metrics(self):
+            return Metrics(self.store)
+
+    prompt = build_prompt(state_snapshot(FakeOrg()))
+    assert "Persona:" not in prompt
