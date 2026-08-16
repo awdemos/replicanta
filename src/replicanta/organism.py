@@ -1060,7 +1060,7 @@ class Organism:
             self.store.cycle, limit=self.SKILL_STALE_CYCLES
         ):
             self.store.remember("skill", f"archived: {name}")
-        for name in self.skills.flush():
+        for name in self.skills.archive_ineffective():
             self.store.remember("skill", f"deprecated low-effectiveness: {name}")
         genome = self.store.genome_dirty
         self.store.save()
