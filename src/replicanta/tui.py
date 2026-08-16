@@ -2320,7 +2320,7 @@ def main():
     parser = argparse.ArgumentParser(description="Replicanta TUI")
     parser.add_argument("--dir", default=str(Path(__file__).parent))
     parser.add_argument("--org", default=None, help="organism name in the nursery")
-    parser.add_argument("--wake", type=int, default=180)
+    parser.add_argument("--wake", type=int, default=300)
     parser.add_argument("--sleep", type=int, default=60)
     parser.add_argument("--chaos", type=float, default=0.5)
     parser.add_argument(
