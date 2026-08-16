@@ -9,7 +9,7 @@ from rich.console import Console
 from textual.widgets import Static, TabbedContent
 
 from replicanta.organism import Organism
-from replicanta.tui import CommandPalette, OrganismApp
+from replicanta.tui import CommandHints, CommandPalette, OrganismApp
 
 
 def _renderable_text(widget):
@@ -178,6 +178,23 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
     )
     with pytest.raises(SystemExit):
         tui.main()
+
+
+def test_command_hints_filter_on_slash(monkeypatch, tmp_path):
+    """Typing '/' must surface command hints, filtered by the command token."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            hints = app.query_one(CommandHints)
+            hints.update_for("/voi")
+            text = _renderable_text(hints)
+            assert "voice" in text.lower()
+            hints.update_for("/chaos ")
+            text = _renderable_text(hints)
+            assert "/chaos 0..1" in text
+
+    asyncio.run(check())
 
 
 def test_command_palette_fills_input(monkeypatch, tmp_path):

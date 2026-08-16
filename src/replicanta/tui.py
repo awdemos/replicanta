@@ -103,6 +103,29 @@ class SlashCommands(Provider):
                 )
 
 
+class CommandHints(Static):
+    """Renders filtered slash-command hints above the chat input."""
+
+    def update_for(self, value):
+        if not value.startswith("/"):
+            self.update("")
+            self.styles.display = "none"
+            return
+        parts = value.split(None, 1)
+        query = parts[0]
+        prefix = parts[1] if len(parts) > 1 else ""
+        items = tui_commands.filter_commands(query)
+        if prefix:
+            items = [c for c in items if c[0] == query]
+            if items:
+                self.update(f"Usage: {items[0][1]}")
+                self.styles.display = "block"
+                return
+        lines = [f"{usage:<16} {desc}" for _name, usage, desc, _category in items[:8]]
+        self.update("\n".join(lines))
+        self.styles.display = "block" if lines else "none"
+
+
 class HelpScreen(ModalScreen):
     """Overlay with every slash command and key binding."""
 
@@ -479,6 +502,8 @@ class OrganismApp(App):
     #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
     #mind, #memory, #inner { padding: 1 2; }
     #inner { overflow-y: auto; }
+    #command-hints { height: auto; max-height: 4; padding: 0 1;
+                      color: $text-muted; }
     #chat { height: 3; border: solid yellow; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
@@ -588,6 +613,7 @@ class OrganismApp(App):
                     yield Static("", id="inner", markup=False)
                 with TabPane("cells", id="cells-pane"), VerticalScroll():
                     yield Static("", id="cells", markup=False)
+        yield CommandHints("", id="command-hints")
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes · "
             "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells · F9 modules)",
@@ -1496,6 +1522,9 @@ class OrganismApp(App):
         if not self._suppress_changed:
             self._completion_index = 0
             self._history_index = -1
+        hints = self._safe_query("#command-hints", CommandHints)
+        if hints is not None:
+            hints.update_for(event.value)
         self._suppress_changed = False
 
     # -- voice health ------------------------------------------------------
