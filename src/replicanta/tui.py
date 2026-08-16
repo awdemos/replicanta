@@ -148,6 +148,18 @@ class TabBar(Horizontal):
             button.variant = "primary" if button.id == f"tab-{pane}" else "default"
 
 
+class ActivityLabel(Static):
+    """Compact, transient activity indicator in the status bar."""
+
+    def show(self, text):
+        self.update(text)
+        self.styles.display = "block"
+
+    def clear(self):
+        self.update("")
+        self.styles.display = "none"
+
+
 class HelpScreen(ModalScreen):
     """Overlay with every slash command and key binding."""
 
@@ -541,6 +553,8 @@ class OrganismApp(App):
                   height: auto; background: $surface; }
     #bottombar { height: 1; padding: 0 1; background: $surface;
                   color: $text-muted; }
+    #activity { width: auto; }
+    #bottombar-text { width: 1fr; content-align: right middle; }
     CommandPalette { align: center middle; }
     #palette { width: 60; height: auto; max-height: 24; border: round $primary;
                background: $surface; padding: 1 2; }
@@ -653,7 +667,9 @@ class OrganismApp(App):
             id="chat",
         )
         yield self.chat_input
-        yield Static("", id="bottombar")
+        with Horizontal(id="bottombar"):
+            yield ActivityLabel("", id="activity")
+            yield Static("", id="bottombar-text")
 
     def on_mount(self):
         """Render the initial organism state and start background timers."""
@@ -1288,6 +1304,7 @@ class OrganismApp(App):
 
     @work(thread=True)
     def _mud_scenario_worker(self, description):
+        self.call_from_thread(self.set_activity, "MUD dreaming")
         try:
             scenario = mud.generate_scenario(description, self.org)
         except Exception as exc:  # noqa: BLE001 — voice offline etc.
@@ -1295,6 +1312,8 @@ class OrganismApp(App):
                 self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN
             )
             return
+        finally:
+            self.call_from_thread(self.clear_activity)
         self.call_from_thread(self._mud_start_scenario, scenario)
 
     def _mud_start_scenario(self, scenario):
@@ -1367,12 +1386,18 @@ class OrganismApp(App):
         if game is None:
             self._mud_thinking = False
             return
+        self.call_from_thread(self.set_activity, "MUD thinking")
         hint, self._mud_hint = self._mud_hint, None
         gen = self._mud_turn_gen
-        command, reason = mud.choose_action(
-            game, hint=hint, rng=self._rng, org=self.org
-        )
-        self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
+        try:
+            command, reason = mud.choose_action(
+                game, hint=hint, rng=self._rng, org=self.org
+            )
+            self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
+        except Exception as exc:  # noqa: BLE001
+            self.call_from_thread(self._worker_error, "MUD turn", exc)
+        finally:
+            self.call_from_thread(self.clear_activity)
 
     def _mud_apply(self, game, command, actor="organism", gen=None, reason=None):
         if actor == "organism":
@@ -1726,12 +1751,9 @@ class OrganismApp(App):
             self._reflect()
 
     def refresh_status(self):
-        """Render the custom bottom bar: counts, inner voice/model status,
-        mode flags, thinking indicator, and keyboard shortcuts. Nothing here
-        duplicates the top bar (state, mood, mental scalars, voice/mic/speech,
-        clock)."""
+        """Render the custom bottom bar: activity on the left, compact
+        counters and keyboard shortcuts on the right."""
         m = self.org.metrics()
-        busy = f" · thinking{'.' * (self._busy_frame + 1)}" if self._busy() else ""
         if self._mud_game is not None:
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
         else:
@@ -1740,13 +1762,33 @@ class OrganismApp(App):
             playing += f" · 👥 group ({len(self._group.names())})"
         self._bottombar_text = (
             f"{m.belief_count} beliefs · {m.rule_count} rules · "
-            f"inner voice {llmclient.voice_status()}{playing}{busy}  │  "
+            f"inner voice {llmclient.voice_status()}{playing}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)"
         )
-        bottombar = self._safe_query("#bottombar", Static)
+        bottombar = self._safe_query("#bottombar-text", Static)
         if bottombar is not None:
             bottombar.update(self._bottombar_text)
+
+    def set_activity(self, text):
+        """Show a transient activity message in the status bar."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is not None:
+            label.show(text)
+
+    def clear_activity(self):
+        """Hide the transient activity message."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is not None:
+            label.clear()
+
+    @property
+    def activity_text(self):
+        """Current activity label text (for tests)."""
+        label = self._safe_query("#activity", ActivityLabel)
+        if label is None:
+            return ""
+        return str(getattr(label, "_Static__content", "") or "")
 
     # -- log ---------------------------------------------------------------
     def _safe_query(self, selector, cls):
@@ -1944,6 +1986,7 @@ class OrganismApp(App):
     def _ask_user(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         question = None
+        self.call_from_thread(self.set_activity, "org is wondering")
         try:
             self.call_from_thread(self._pending_show, "org is wondering")
             question = voice.ask_user(
@@ -1953,6 +1996,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "question", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._narrating = False
         if question is not None and org is self.org:
             self.call_from_thread(self._set_user_question, question)
@@ -1975,6 +2019,7 @@ class OrganismApp(App):
     def _self_talk(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         answer = None
+        self.call_from_thread(self.set_activity, "org is talking to itself")
         try:
             self.call_from_thread(self._pending_show, "org is asking itself")
             question = voice.self_ask(org)
@@ -1991,6 +2036,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "self-talk", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._self_talking = False
         if answer is not None and org is self.org:
             self.call_from_thread(self._set_self_answer, answer)
@@ -2012,12 +2058,14 @@ class OrganismApp(App):
     def _narrate(self):
         org = self.org  # capture: a swap mid-debate drops the delivery
         text = None
+        self.call_from_thread(self.set_activity, "org is musing")
         try:
             self.call_from_thread(self._pending_show, "org is musing")
             text = voice.narrate(org)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "narration", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._narrating = False
         if text is not None and org is self.org:
             self.call_from_thread(self._log_narration, text)
@@ -2356,6 +2404,7 @@ class OrganismApp(App):
     def _respond(self, text):
         org = self.org  # capture: a swap mid-debate drops the delivery
         reply = None
+        self.call_from_thread(self.set_activity, "org is thinking")
         try:
             self.call_from_thread(self._pending_show, "org is thinking")
             reply = voice.respond(
@@ -2366,6 +2415,7 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._responding = False
         if reply is not None and org is self.org:
             self.call_from_thread(self._set_reply, reply)
@@ -2474,12 +2524,14 @@ class OrganismApp(App):
         if group is None:
             return
         utterances = None
+        self.call_from_thread(self.set_activity, "group is thinking")
         try:
             self.call_from_thread(self._pending_show, "group is thinking")
             utterances = group.broadcast(text)
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "group reply", exc)
         finally:
+            self.call_from_thread(self.clear_activity)
             self._group_responding = False
         if utterances is not None and group is self._group:
             self.call_from_thread(self._deliver_group, utterances)

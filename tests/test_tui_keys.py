@@ -227,3 +227,29 @@ def test_tab_bar_labels_visible(monkeypatch, tmp_path):
             assert "Memory" in labels
 
     asyncio.run(check())
+
+
+def test_activity_shows_during_response(monkeypatch, tmp_path):
+    """A response worker must surface an activity indicator in the status bar."""
+    import time
+
+    from replicanta import speech, tui
+
+    app = _headless_app(monkeypatch, tmp_path)
+
+    def slow_respond(*a, **k):
+        time.sleep(0.2)
+
+    monkeypatch.setattr("replicanta.voice.respond", slow_respond)
+    monkeypatch.setattr(speech, "say", lambda text: None)
+    monkeypatch.setattr(tui, "speech", speech)
+
+    async def check():
+        async with app.run_test():
+            app._maybe_respond("hi")
+            await asyncio.sleep(0.05)
+            assert "thinking" in app.activity_text.lower()
+            await asyncio.sleep(0.3)
+            assert app.activity_text == ""
+
+    asyncio.run(check())
