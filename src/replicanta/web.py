@@ -6,6 +6,7 @@ change to the same public organism/nursery APIs used by the TUI.
 """
 
 import base64
+import contextlib
 import json
 import threading
 import webbrowser
@@ -71,12 +72,10 @@ class Glasshouse:
             ]
             registry = extensions.registry()
             mud_state = None
-            try:
+            with contextlib.suppress(Exception):
                 session = self.org.load_mud_session()
                 if session is not None:
                     mud_state = session.to_json()
-            except Exception:  # noqa: BLE001 — MUD is optional display data
-                pass
             return {
                 "organism": {
                     "name": self.name,
@@ -189,9 +188,8 @@ class Glasshouse:
         elif args[0] == "use" and len(args) == 2:
             if not speech.set_voice(args[1]):
                 raise WebError(f"no voice named {args[1]!r}")
-        elif args[0] == "get" and len(args) == 2:
-            if not speech.download_voice(args[1]):
-                raise WebError(f"could not download voice {args[1]!r}")
+        elif args[0] == "get" and len(args) == 2 and not speech.download_voice(args[1]):
+            raise WebError(f"could not download voice {args[1]!r}")
 
     def _apply_git(self, spec):
         if spec == "on":
@@ -400,10 +398,10 @@ class Glasshouse:
                 speech.say("This is my new voice.")
                 return f"voice: {speech.voice_name()}"
             return f"no voice named {args[1]!r}"
-        if args[0] == "get" and len(args) == 2:
-            if speech.download_voice(args[1]):
-                return f"downloaded voice {args[1]}"
+        if args[0] == "get" and len(args) == 2 and not speech.download_voice(args[1]):
             return f"could not download voice {args[1]!r}"
+        if args[0] == "get" and len(args) == 2:
+            return f"downloaded voice {args[1]}"
         return "/voice [on|off|list|use name|get name]"
 
     def _git_command(self, args):

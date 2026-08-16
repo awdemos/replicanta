@@ -1784,7 +1784,7 @@ class OrganismApp(App):
     def _update_mutation_banner(self):
         pending = extensions.registry().get("pending")
         banner = self._safe_query("#mutation-banner", MutationBanner)
-        if banner is None:
+        if not isinstance(banner, MutationBanner):
             return
         if pending:
             summary = tui_views._pending_proposal(self.org) or f"pending {pending.get('kind', 'patch')}"
@@ -1891,7 +1891,7 @@ class OrganismApp(App):
 
     def _update_quick_actions(self):
         qa = self._safe_query("#quick-actions", QuickActions)
-        if qa is None:
+        if not isinstance(qa, QuickActions):
             return
         sleep_btn = qa.query_one("#qa-sleep", Button)
         sleep_btn.label = (
