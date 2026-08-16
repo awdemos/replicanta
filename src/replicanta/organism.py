@@ -204,6 +204,7 @@ class BeliefStore:
             self.genome_dirty = True
 
     def conf(self, belief):
+        """Confidence for ``belief``, or None when it is not held."""
         return self.beliefs_map.get(belief)
 
     def observe(self, belief, conf):
@@ -229,6 +230,7 @@ class BeliefStore:
         self.genome_dirty = True
 
     def beliefs(self):
+        """Return a shallow copy of the live belief map."""
         return dict(self.beliefs_map)
 
     def belief_value(self, obj, attr, default=None):
@@ -237,7 +239,12 @@ class BeliefStore:
             (v for (bo, ba, v) in self.beliefs() if (bo, ba) == (obj, attr)), default
         )
 
+    def count_beliefs(self, obj):
+        """Count beliefs whose object matches `obj`."""
+        return sum(1 for (o, _a, _v) in self.beliefs() if o == obj)
+
     def archived(self):
+        """Return a shallow copy of the archived belief map."""
         return dict(self.archived_map)
 
     # -- chat memory -------------------------------------------------------
@@ -280,9 +287,11 @@ class BeliefStore:
         self.dirty = True
 
     def active_goal(self):
+        """Return the first unfinished goal, or None."""
         return next((g for g in self.goals if g["done_cycle"] is None), None)
 
     def complete_active_goal(self):
+        """Mark the active goal done and return it (or None)."""
         goal = self.active_goal()
         if goal is not None:
             goal["done_cycle"] = self.cycle
@@ -403,16 +412,19 @@ class Mind:
     and exposes belief facts with their minmaxprob confidences."""
 
     def __init__(self, scl_path):
+        """Build a Mind for the .scl genome at ``scl_path``."""
         self.scl_path = scl_path
         self.ctx = None
 
     def rebuild(self):
+        """Re-import the .scl genome and run the Scallop program."""
         self.ctx = scallopy.ScallopContext(provenance=PROVENANCE)
         if self.scl_path.exists():
             self.ctx.import_file(str(self.scl_path))
         self.ctx.run()
 
     def beliefs(self):
+        """Return the current genome beliefs as ``(obj, attr, val): conf`` dict."""
         out = {}
         for tag, tup in self.ctx.relation(BEL):
             out[tuple(tup)] = float(tag)
@@ -441,9 +453,11 @@ class ChaosKnob:
     wild dreams, wandering. Low = conservative consolidation."""
 
     def __init__(self, value=0.5):
+        """Create a clamped 0..1 chaos knob."""
         self.value = max(0.0, min(1.0, float(value)))
 
     def set(self, value):
+        """Clamp and store a new chaos value."""
         self.value = max(0.0, min(1.0, float(value)))
 
     def roll(self, rng):
@@ -473,10 +487,12 @@ class StressMeter:
     }
 
     def __init__(self, store):
+        """Track stress for ``store``; mutations are written back to the store."""
         self.store = store
 
     @property
     def value(self):
+        """Current stress level (0.0-1.0)."""
         return self.store.stress
 
     def _clamp(self, value):
@@ -502,10 +518,9 @@ class StressMeter:
         self.store.stress = self._clamp(stress)
 
     def _negative_mood(self):
-        return any(
-            ("self", "mood", mood) in self.store.beliefs()
-            for mood in self.NEGATIVE_MOODS
-        )
+        """True when the organism's current mood is one of the draining ones."""
+        mood = self.store.belief_value("self", "mood")
+        return mood in self.NEGATIVE_MOODS
 
 
 class MentalState:
@@ -520,11 +535,13 @@ class MentalState:
 
     INSANE_STRESS = 0.75  # extreme stress
     INSANE_IRRATIONALITY = 0.6  # incoherence dominance
-    SANE_STRESS = 0.6  # hysteresis exits below these
-    SANE_IRRATIONALITY = 0.45
+    RECOVERY_STRESS = 0.6  # hysteresis: recover when stress drops below this
+    RECOVERY_IRRATIONALITY = 0.45  # hysteresis: recover when incoherence drops below this
     SMOOTHING = 0.25  # EMA share per tick-second
 
     def __init__(self, store):
+        """MentalState smooths arousal/rationality/irrationality and decides the
+        insane flag with hysteresis."""
         self.store = store
 
     @staticmethod
@@ -537,6 +554,14 @@ class MentalState:
         a = self.store.activity
         utterances = a.get("llm_calls", 0) / 5
         return min(1.0, a.get("grounded_utterances", 0) / max(1.0, utterances))
+
+    def _crossed_into_insane(self, stress, irrationality):
+        """True when stress and incoherence cross the entry threshold."""
+        return stress >= self.INSANE_STRESS and irrationality >= self.INSANE_IRRATIONALITY
+
+    def _recovered_from_insane(self, stress, irrationality):
+        """Hysteresis: True when either metric has dropped below recovery."""
+        return stress < self.RECOVERY_STRESS or irrationality < self.RECOVERY_IRRATIONALITY
 
     def tick(self, sleeping, chaos, dt=1.0):
         """Advance the three attributes toward their targets. Returns True
@@ -558,15 +583,9 @@ class MentalState:
         s.dirty = True
         was = s.insane
         if was:
-            s.insane = (
-                stress >= self.SANE_STRESS
-                and s.irrationality >= self.SANE_IRRATIONALITY
-            )
+            s.insane = not self._recovered_from_insane(stress, s.irrationality)
         else:
-            s.insane = (
-                stress >= self.INSANE_STRESS
-                and s.irrationality >= self.INSANE_IRRATIONALITY
-            )
+            s.insane = self._crossed_into_insane(stress, s.irrationality)
         return s.insane != was
 
 
@@ -577,6 +596,7 @@ class AttentionWindow:
     MIN_WINDOW = 3
 
     def __init__(self, beliefs):
+        """Create an attention window over ``beliefs`` (a ``(obj, attr, val): conf`` map)."""
         self.beliefs = beliefs
         self.pairs = set()
         self.focus_attr = None
@@ -599,6 +619,7 @@ class AttentionWindow:
         )
 
     def focus(self, attr):
+        """Steer attention to ``attr`` (or ``None`` to release steering)."""
         self.focus_attr = attr
         if attr is not None:
             self.pairs = {(a, v) for (a, v) in self.pairs if a == attr} or {
@@ -619,6 +640,10 @@ class SelfQuestioner:
     into a committed rule."""
 
     def __init__(self, store, mind, dir_path, stress=None):
+        """Pose self-questions over ``store`` using the Scallop ``mind``.
+
+        ``stress`` is bumped on failed questions; pass ``None`` to disable.
+        """
         self.store = store
         self.mind = mind
         self.dir_path = dir_path
@@ -637,6 +662,10 @@ class SelfQuestioner:
         )
 
     def ask(self, attr_val_a, attr_val_b):
+        """Ask what follows when two attribute/value pairs hold together.
+
+        Returns the list of newly created belief tuples.
+        """
         head = f"q{self._next_rule_id()}"
         rule = self._candidate_rule(head, attr_val_a, attr_val_b)
         self.store.note_activity("rules_tried")
@@ -681,6 +710,10 @@ class DreamEngine:
     derived beliefs; unsupported dreams are discarded with a log line."""
 
     def __init__(self, store, mind, stress=None):
+        """Recombine beliefs into dream rules during sleep.
+
+        ``stress`` is bumped when a dream is discarded; pass ``None`` to disable.
+        """
         self.store = store
         self.mind = mind
         self.rng = random.Random()  # nosec B311 - simulation RNG, not cryptography
@@ -690,6 +723,7 @@ class DreamEngine:
         return sorted({(a, v) for (_o, a, v) in self.store.beliefs()})
 
     def dream(self, count=3):
+        """Generate ``count`` candidate dream rules from random belief pairs."""
         pairs = self._attr_val_pairs()
         if len(pairs) < 2:
             return []
@@ -744,6 +778,7 @@ class Lifecycle:
     FADE_LIMIT = 3  # consecutive critical transitions before death
 
     def __init__(self, store, wake_seconds=180, sleep_seconds=60):
+        """Wake/sleep clock. Transitions after ``wake_seconds`` / ``sleep_seconds``."""
         self.store = store
         self.wake_seconds = wake_seconds
         self.sleep_seconds = sleep_seconds
@@ -751,6 +786,7 @@ class Lifecycle:
         self.state_started = time.time()
 
     def elapsed(self):
+        """Seconds since the last state transition."""
         return time.time() - self.state_started
 
     def tick(self):
@@ -801,10 +837,12 @@ class Lifecycle:
         self.transition("wake")
 
     def transition(self, new_state):
+        """Record a state change and reset the elapsed timer."""
         self.state = new_state
         self.state_started = time.time()
 
     def due(self):
+        """True when the current state's duration has elapsed."""
         if self.state == "dead":
             return False
         limit = self.wake_seconds if self.state == "wake" else self.sleep_seconds
@@ -817,6 +855,7 @@ class Metrics:
     (rules whose body attrs appear as other rules' head attrs)."""
 
     def __init__(self, store):
+        """Score an organism from its belief store."""
         self.store = store
 
     @property
@@ -843,6 +882,7 @@ class Metrics:
         return refs
 
     def score(self):
+        """Weighted consciousness score from beliefs, rules, depth, abstraction."""
         return (
             0.4 * self.belief_count
             + 0.3 * self.rule_count
@@ -880,6 +920,7 @@ class Organism:
         probe=None,
         git_probe=None,
     ):
+        """Wire a full organism: belief store, reasoner, meters, lifecycle, skills."""
         self.dir_path = dir_path
         self.store = BeliefStore(dir_path)
         self.mind = Mind(dir_path / "organism.scl")
@@ -917,6 +958,7 @@ class Organism:
         self.last_sight = None  # latest camera scene description (transient)
 
     def load(self):
+        """Load persisted state, wire modules/persona/hooks, rebuild the reasoner."""
         # First boot = no state.json yet: the .scl genome is the source of
         # truth, so seed the belief store from the mind before anything runs.
         fresh = not self.store.state_path.exists()
@@ -1020,9 +1062,6 @@ class Organism:
             self.git_probe = GitProbe(self.dir_path, config=git_cfg)
         except OSError as exc:
             if not self._git_warning_emitted:
-                import logging
-
-                logger = logging.getLogger(__name__)
                 logger.warning("git sensing unavailable: %s", exc)
                 self._git_warning_emitted = True
 
@@ -1160,7 +1199,7 @@ class Organism:
         """Give the organism an intention (formed by its voice, or a
         fallback). Records the user-fact count as the progress marker for
         learn-goals and remembers the moment as an episode."""
-        marker = sum(1 for (o, _a, _v) in self.store.beliefs() if o == "user")
+        marker = self.store.count_beliefs("user")
         self.store.add_goal(
             text, marker=marker, strategy=goals.formulate_subgoals(text)
         )
@@ -1176,7 +1215,7 @@ class Organism:
             done = False
             text = goal["text"].lower()
             if any(w in text for w in ("learn", "user", "know")):
-                facts = sum(1 for (o, _a, _v) in self.store.beliefs() if o == "user")
+                facts = self.store.count_beliefs("user")
                 done = facts >= goal["marker"] + self.GOAL_LEARN_GROWTH
                 goals.update_progress(goal, self.store.cycle, facts)
             else:
@@ -1230,6 +1269,7 @@ class Organism:
         self.store.dirty = True
 
     def _stress_band(self):
+        """Map current stress to a discrete band index (0 = low)."""
         band = 0
         for i, threshold in enumerate(self.STRESS_BANDS, start=1):
             if self.store.stress >= threshold:
@@ -1285,6 +1325,7 @@ class Organism:
         self.store.dirty = True
 
     def _recent_tone(self):
+        """Return the recent sentiment tone if it is still within the linger window."""
         if self._sentiment is None:
             return None
         tone, when = self._sentiment
@@ -1354,6 +1395,7 @@ class Organism:
         return True
 
     def metrics(self):
+        """Return a fresh ``Metrics`` wrapper for the organism's store."""
         return Metrics(self.store)
 
     def chaos_effective(self):
@@ -1363,12 +1405,13 @@ class Organism:
             return min(1.0, self.store.chaos + (self.store.stress - 0.5) * 0.3)
         return self.store.chaos
 
-    def cycle(self):
+    def advance_cycle(self):
         """One full wake->sleep transition (forced, for scheduler + tests)."""
         self._wake()
         self._sleep()
 
     def _wake(self):
+        """Run one wake cycle: self-questions, belief growth, persistence."""
         self.window.refresh(cycle=self.store.cycle)
         pairs = sorted(self.window.pairs)
         rng = random.Random()  # nosec B311 - self-question RNG, not cryptography
@@ -1383,6 +1426,7 @@ class Organism:
         return new_beliefs
 
     def _sleep(self):
+        """Run one sleep cycle: dream, promote supported dreams, persist."""
         self.dreamer.rng = random.Random()  # nosec B311 - dream RNG, not cryptography
         dreams = self.dreamer.dream(count=3)
         promoted = self.dreamer.promote(dreams)

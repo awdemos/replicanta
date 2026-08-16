@@ -55,7 +55,15 @@ from replicanta import (
     voice,
 )
 from replicanta.organism import Organism
-from replicanta.tui_views import STYLE_DIM, STYLE_ORG, STYLE_USER
+from replicanta.tui_views import (
+    STYLE_DIM,
+    STYLE_DREAM,
+    STYLE_LEARNED,
+    STYLE_ORG,
+    STYLE_SELF,
+    STYLE_USER,
+    STYLE_WARN,
+)
 
 
 class SlashCommands(Provider):
@@ -80,10 +88,12 @@ class SlashCommands(Provider):
         )
 
     async def discover(self):
+        """Yield every slash command as an unfiltered command-palette hit."""
         for name, usage, description in tui_commands.COMMANDS:
             yield self._hit(name, usage, description)
 
     async def search(self, query):
+        """Yield slash commands whose name/description match the palette query."""
         matcher = Matcher(query)
         for name, usage, description in tui_commands.COMMANDS:
             match = matcher.match(f"{name} {description}")
@@ -99,6 +109,7 @@ class HelpScreen(ModalScreen):
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def compose(self) -> ComposeResult:
+        """Build the help overlay from the generated slash-command text."""
         yield Static(tui_commands.help_text(), id="help")
 
 
@@ -109,11 +120,13 @@ class OrganismMenuScreen(ModalScreen):
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, name, is_current):
+        """Create a context menu for the named organism."""
         super().__init__()
         self._name = name
         self._is_current = is_current
 
     def compose(self) -> ComposeResult:
+        """Build swap / rename / move-to-group / cancel options."""
         options = []
         if not self._is_current:
             options.append(Option(f"swap to {self._name}", id="swap"))
@@ -123,9 +136,11 @@ class OrganismMenuScreen(ModalScreen):
         yield OptionList(*options, id="org-menu")
 
     def on_mount(self):
+        """Focus the option list so Enter works immediately."""
         self.query_one(OptionList).focus()
 
     def on_option_list_option_selected(self, event):
+        """Dismiss with (action, name) or None on cancel."""
         action = event.option.id
         self.dismiss(None if action == "cancel" else (action, self._name))
 
@@ -138,16 +153,20 @@ class NamePromptScreen(ModalScreen):
     INPUT_ID: ClassVar[str] = "name-input"
 
     def __init__(self, placeholder):
+        """Create a one-line input prompt with the given placeholder."""
         super().__init__()
         self._placeholder = placeholder
 
     def compose(self) -> ComposeResult:
+        """Build the single input field."""
         yield Input(placeholder=self._placeholder, id=self.INPUT_ID)
 
     def on_mount(self):
+        """Focus the input field on open."""
         self.query_one(Input).focus()
 
     def on_input_submitted(self, event):
+        """Dismiss with the stripped value, or None if empty."""
         self.dismiss(event.value.strip() or None)
 
 
@@ -157,6 +176,7 @@ class RenameScreen(NamePromptScreen):
     INPUT_ID: ClassVar[str] = "rename-input"
 
     def __init__(self, name):
+        """Create a rename prompt for the named organism."""
         super().__init__(f"new name for {name} (letters, digits, - and _)")
 
 
@@ -167,10 +187,12 @@ class GroupMenuScreen(ModalScreen):
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, name):
+        """Create a context menu for the named group header."""
         super().__init__()
         self._name = name
 
     def compose(self) -> ComposeResult:
+        """Build rename / remove / cancel options."""
         yield OptionList(
             Option(f"rename {self._name}", id="rename"),
             Option(f"remove group {self._name} (organisms stay)", id="remove"),
@@ -179,9 +201,11 @@ class GroupMenuScreen(ModalScreen):
         )
 
     def on_mount(self):
+        """Focus the option list so Enter works immediately."""
         self.query_one(OptionList).focus()
 
     def on_option_list_option_selected(self, event):
+        """Dismiss with (action, group_name) or None on cancel."""
         action = event.option.id
         self.dismiss(None if action == "cancel" else (action, self._name))
 
@@ -193,11 +217,13 @@ class GroupPickScreen(ModalScreen):
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, org_name, groups):
+        """Create a picker for moving org_name into one of the listed groups."""
         super().__init__()
         self._org_name = org_name
         self._groups = list(groups)
 
     def compose(self) -> ComposeResult:
+        """Build the group list plus no-group / new-group / cancel options."""
         options = [Option(g, id=f"g:{g}") for g in self._groups]
         options.append(Option("(no group)", id="none"))
         options.append(Option("new group…", id="new"))
@@ -205,9 +231,11 @@ class GroupPickScreen(ModalScreen):
         yield OptionList(*options, id="group-pick")
 
     def on_mount(self):
+        """Focus the option list so Enter works immediately."""
         self.query_one(OptionList).focus()
 
     def on_option_list_option_selected(self, event):
+        """Dismiss with the chosen group name, '' for none, 'new', or None."""
         oid = event.option.id
         if oid == "cancel":
             self.dismiss(None)
@@ -226,13 +254,16 @@ class CellDetailScreen(ModalScreen):
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def __init__(self, cell):
+        """Create an inspector for a single neural-memory cell."""
         super().__init__()
         self._cell = cell
 
     def compose(self) -> ComposeResult:
+        """Build the cell detail read-out."""
         yield Static(Text(tui_views.cell_detail_text(self._cell)), id="cell-detail")
 
     def on_click(self, event):
+        """Dismiss on any mouse click (including outside the panel)."""
         self.dismiss()
 
 
@@ -246,6 +277,7 @@ class ModulesScreen(ModalScreen):
     ]
 
     def __init__(self, loader):
+        """Create the module manager for the given ModuleLoader."""
         super().__init__()
         self._loader = loader
         self._enabled = set()
@@ -257,6 +289,7 @@ class ModulesScreen(ModalScreen):
             self._enabled = set(loader.modules)
 
     def compose(self) -> ComposeResult:
+        """Build the title, module list, and detail label."""
         yield Label(
             "Modules — space/enter toggles · s saves & reloads · esc closes",
             id="modules-title",
@@ -265,6 +298,7 @@ class ModulesScreen(ModalScreen):
         yield Label("", id="module-detail")
 
     def on_mount(self):
+        """Populate the list once the DOM is ready."""
         self._refresh_list()
 
     def _discovered(self):
@@ -284,6 +318,7 @@ class ModulesScreen(ModalScreen):
             list_view.focus()
 
     def on_list_view_selected(self, event):
+        """Toggle the selected module and refresh its detail label."""
         item = event.item
         if item.id is None:
             return
@@ -319,6 +354,7 @@ class ModulesScreen(ModalScreen):
         self.query_one("#module-detail", Label).update("\n".join(lines))
 
     def action_save(self):
+        """Persist the enabled set, reload modules, and dismiss the screen."""
         from replicanta import config as project_config
 
         cfg = project_config.load_config(self._loader.root)
@@ -330,10 +366,8 @@ class ModulesScreen(ModalScreen):
 
 
 # role -> log style (Rich markup); engine events get their own styles
-STYLE_DREAM = "magenta"
-STYLE_LEARNED = "yellow"
-STYLE_SELF = "italic yellow"
-STYLE_WARN = "red"
+# (STYLE_USER, STYLE_ORG, STYLE_DIM, STYLE_DREAM, STYLE_LEARNED, STYLE_SELF and
+# STYLE_WARN are imported from tui_views.py so view styling lives in one place.)
 
 NARRATE_INTERVAL = 45.0  # seconds between self-narrations (each = 5 LLM calls)
 VOICE_PROBE_INTERVAL = 60.0  # seconds between ollama reachability probes
@@ -409,6 +443,15 @@ class OrganismApp(App):
     """
 
     def __init__(self, organism, root=None, spawn=None):
+        """Wire the organism, nursery, voice, camera, and MUD state for the TUI.
+
+        Args:
+            organism: The currently active Organism instance.
+            root: Nursery root directory (defaults to two levels above the
+                organism's directory).
+            spawn: Keyword arguments passed to Organism() when birthing or
+                swapping organisms (wake/sleep/chaos overrides).
+        """
         super().__init__()
         self.org = organism
         # nursery root for /new, /swap, /organisms; when the organism was
@@ -455,11 +498,11 @@ class OrganismApp(App):
         self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
-        self._inner_text = ""
         self._topbar_text = ""
         self._bottombar_text = ""
 
     def compose(self) -> ComposeResult:
+        """Build the top bar, sidebar, tabbed content area, chat input, and bottom bar."""
         yield Static("", id="topbar")
         with Horizontal(id="main"):
             with Vertical(id="sidebar"):
@@ -494,6 +537,7 @@ class OrganismApp(App):
         yield Static("", id="bottombar")
 
     def on_mount(self):
+        """Render the initial organism state and start background timers."""
         self._show_org()
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
@@ -1463,7 +1507,6 @@ class OrganismApp(App):
     def _refresh_views(self):
         self._mind_text = tui_views.mind_view(self.org)
         self._memory_text = tui_views.memory_view(self.org)
-        self._inner_text = tui_views.inner_view(self.org)
         self.query_one("#mind", Static).update(tui_views.mind_renderable(self.org))
         self.query_one("#memory", Static).update(tui_views.memory_renderable(self.org))
         self.query_one("#inner", Static).update(tui_views.inner_renderable(self.org))
@@ -1856,6 +1899,7 @@ class OrganismApp(App):
             self.handle_chat(text)
 
     def handle_command(self, cmd):
+        """Parse and dispatch a slash-command line from the chat input."""
         parts = cmd.split()
         name = parts[0]
         try:
@@ -2134,6 +2178,7 @@ class OrganismApp(App):
         self.action_modules()
 
     def handle_chat(self, text):
+        """Route ordinary user chat to MUD, group chat, or the organism."""
         self._log_chat("user", text)
         if self._mud_game is not None:
             command = mud.parse_player_command(text)
@@ -2314,6 +2359,7 @@ class OrganismApp(App):
 
 
 def main():
+    """CLI entry point: parse args, prepare the nursery, and run TUI or web UI."""
     import argparse
 
     parser = argparse.ArgumentParser(description="Replicanta TUI")

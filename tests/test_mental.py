@@ -86,11 +86,11 @@ def test_insanity_hysteresis(store):
     store.stress = 0.9
     _drive(store, mental, chaos=0.9)
     assert store.insane is True
-    # stress between SANE_STRESS and INSANE_STRESS: still insane
+    # stress between RECOVERY_STRESS and INSANE_STRESS: still insane
     store.stress = 0.7
     mental.tick(sleeping=False, chaos=0.9, dt=1.0)
     assert store.insane is True
-    # stress below SANE_STRESS: recovers
+    # stress below RECOVERY_STRESS: recovers
     store.stress = 0.4
     mental.tick(sleeping=False, chaos=0.9, dt=1.0)
     assert store.insane is False

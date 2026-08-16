@@ -19,7 +19,7 @@ import os
 import random
 from dataclasses import dataclass, field
 from collections.abc import Callable
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 from replicanta import fileutil, llmclient, voice
 
@@ -51,6 +51,9 @@ _FILLER = ("the", "a", "an", "to")
 
 @dataclass
 class Room:
+    """One location in a MUD scenario: description, exits, items, and
+    optional locked gates with a key requirement."""
+
     desc: str
     exits: dict[str, str] = field(default_factory=dict)
     items: list[str] = field(default_factory=list)
@@ -104,8 +107,18 @@ class MudSessionDict(TypedDict, total=False):
     outcome: str | None
 
 
+class ActionChoice(NamedTuple):
+    """A chosen MUD command plus the model's stated reason (if any)."""
+
+    command: str | None
+    reason: str | None
+
+
 @dataclass
 class Scenario:
+    """A complete MUD world: title, premise, starting room, rooms, and
+    the win condition that ends the quest."""
+
     title: str
     premise: str
     start_room: str
@@ -115,6 +128,8 @@ class Scenario:
 
 @dataclass
 class TurnResult:
+    """Structured outcome of a single MUD command."""
+
     text: str
     moved: bool = False
     took: str | None = None
@@ -125,6 +140,9 @@ class TurnResult:
 
 @dataclass
 class MudSession:
+    """Persistable record of a play-through: visited rooms, known exits,
+    story beats, inventory and command logs, and final outcome."""
+
     scenario_id: str
     scenario_title: str
     premise: str
@@ -136,6 +154,7 @@ class MudSession:
     outcome: str | None = None
 
     def to_json(self) -> MudSessionDict:
+        """Serialize to the JSON-safe dict consumed by :meth:`from_json`."""
         return {
             "scenario_id": self.scenario_id,
             "scenario_title": self.scenario_title,
@@ -150,6 +169,7 @@ class MudSession:
 
     @classmethod
     def from_json(cls, data: MudSessionDict) -> "MudSession":
+        """Rebuild a session from its JSON serialization."""
         return cls(
             scenario_id=data["scenario_id"],
             scenario_title=data["scenario_title"],
@@ -247,6 +267,7 @@ class MudGame:
         self.won = False
 
     def look(self):
+        """Describe the current room, its items, and its exits."""
         room = self.rooms[self.room]
         bits = [room.desc]
         if room.items:
@@ -529,11 +550,11 @@ def parse_action(text):
 
 
 def parse_action_with_reason(text):
-    """Model output -> (command, reason): the first command-like line
-    normalized, plus whatever else the organism said as its stated
+    """Model output -> ActionChoice(command, reason): the first command-like
+    line normalized, plus whatever else the organism said as its stated
     reason (None when it offered nothing but the command)."""
     if not text:
-        return None, None
+        return ActionChoice(None, None)
     command = None
     reason_lines = []
     for line in text.strip().splitlines():
@@ -543,7 +564,7 @@ def parse_action_with_reason(text):
         elif line.strip():
             reason_lines.append(line.strip())
     reason = " ".join(reason_lines).strip() or None
-    return command, reason
+    return ActionChoice(command, reason)
 
 
 def parse_player_command(text):
@@ -596,11 +617,15 @@ def fallback_action(game, rng):
     return "go " + rng.choice(sorted(room.exits))
 
 
-def choose_action(game, hint=None, rng=None, generate=None, org=None):
+def choose_action(
+    game, hint=None, rng=None, generate=None, org=None, temperature=0.7
+):
     """The organism's next move: ask the voice, parse it, fall back to
     the wanderer when the voice is silent or speaks nonsense. Returns
-    (command, reason) — the reason is the organism's stated because-line,
-    or the honest fallback excuse when the wanderer chose."""
+    ActionChoice(command, reason) — the reason is the organism's stated
+    because-line, or the honest fallback excuse when the wanderer chose.
+    ``temperature`` is forwarded to the direct LLM fallback path; the
+    organism voice path keeps its own debate jitter."""
     rng = rng if rng is not None else random.Random()  # nosec B311 - scenario RNG, not cryptography
     command = reason = None
     try:
@@ -617,7 +642,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
                 action_prompt(game, hint=hint),
                 model=_mud_model(),
                 timeout=_mud_timeout(),
-                temperature=0.7,
+                temperature=temperature,
             )
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
@@ -627,7 +652,7 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None):
     if command is None:
         command = fallback_action(game, rng)
         reason = "the inner voice was silent — wandering on instinct"
-    return command, reason
+    return ActionChoice(command, reason)
 
 
 # -- scenario generation -------------------------------------------------------
@@ -763,13 +788,18 @@ def scenario_to_json(scenario: Scenario) -> ScenarioDict:
     }
 
 
-def generate_scenario(description: str, org: Any, generate: Callable[[str], str] | None = None) -> Scenario:
+def generate_scenario(
+    description: str,
+    org: Any,
+    generate: Callable[[str], str] | None = None,
+    temperature: float = 0.7,
+) -> Scenario:
     """Ask the voice for a scenario, validate it, and fall back on failure."""
     if generate is None:
 
         def generate(prompt):
             return llmclient.generate(
-                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=0.7
+                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=temperature
             )
 
     prompt = _scenario_generation_prompt(description, org)

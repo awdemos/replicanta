@@ -438,7 +438,7 @@ def test_organism_sleeps_and_grows(tmp_path):
     org = _seeded_organism(tmp_path)
     org.load()
     score_before = org.metrics().score()
-    org.cycle()
+    org.advance_cycle()
     score_after = org.metrics().score()
     assert score_after >= score_before
     assert org.store.cycle >= 1
@@ -449,7 +449,7 @@ def test_organism_self_play_grows_over_cycles(tmp_path):
     org.load()
     scores = [org.metrics().score()]
     for _ in range(5):
-        org.cycle()
+        org.advance_cycle()
         scores.append(org.metrics().score())
     assert scores[-1] >= scores[0]
 
