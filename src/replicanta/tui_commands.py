@@ -3,55 +3,80 @@ completion, activity sparkline, help text. No textual imports — unit
 testable without a terminal. Sentiment scorers live in sentiment.py."""
 
 COMMANDS = [
-    ("/chaos", "/chaos 0..1", "set randomness 0-1"),
-    ("/focus", "/focus attr", "lock attention on attr (bare /focus clears)"),
-    ("/sleep", "/sleep", "force wake->sleep"),
-    ("/wake", "/wake", "force sleep->wake"),
-    ("/revive", "/revive", "bring a faded organism back"),
-    ("/stats", "/stats", "show growth metrics"),
-    ("/save", "/save", "persist state + genome"),
-    ("/think", "/think", "narrate thoughts now"),
-    ("/self-talk", "/self-talk", "let the organism speak to itself"),
+    # State
+    ("/chaos", "/chaos 0..1", "set randomness 0-1", "State"),
+    ("/focus", "/focus attr", "lock attention on attr (bare /focus clears)", "State"),
+    ("/sleep", "/sleep", "force wake->sleep", "State"),
+    ("/wake", "/wake", "force sleep->wake", "State"),
+    ("/revive", "/revive", "bring a faded organism back", "State"),
+    ("/stats", "/stats", "show growth metrics", "State"),
+    ("/think", "/think", "narrate thoughts now", "State"),
+    ("/self-talk", "/self-talk", "let the organism speak to itself", "State"),
+    ("/persona", "/persona [name|off|list]", "activate, clear, or list personas", "State"),
+    ("/auto-apply", "/auto-apply [on|off]", "toggle automatic self-patch application", "State"),
+    # Voice
     (
         "/voice",
         "/voice [on|off|list|use|get]",
         "spoken voice: toggle, list, switch, download piper voices",
+        "Voice",
     ),
-    ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)"),
+    # Senses
+    ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)", "Senses"),
     (
         "/microphone",
         "/microphone [list|use dev]",
         "mic status, list input devices, choose one",
+        "Senses",
     ),
-    ("/look", "/look", "grab a camera frame and see it (F6)"),
-    ("/camera", "/camera [list|use dev]", "camera status, list devices, choose one"),
+    ("/look", "/look", "grab a camera frame and see it (F6)", "Senses"),
+    ("/camera", "/camera [list|use dev]", "camera status, list devices, choose one", "Senses"),
+    # MUD
     (
         "/mud",
         "/mud [map|story|quest|pause|resume|step|reset|scenario d…]",
         "toggle or control the dungeon crawl (text adventure)",
+        "MUD",
     ),
-    ("/persona", "/persona [name|off|list]", "activate, clear, or list personas"),
-    ("/modules", "/modules [manage]", "open module manager (or list via /modules)"),
-    ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)"),
-    ("/reject", "/reject", "discard the pending genome patch (manual mode)"),
-    ("/revert", "/revert", "undo the last applied genome patch"),
-    ("/auto-apply", "/auto-apply [on|off]", "toggle automatic self-patch application"),
-    ("/new", "/new [name]", "birth a new organism and swap to it"),
-    ("/swap", "/swap name", "swap to another organism"),
-    ("/organisms", "/organisms", "list all organisms"),
+    # Organisms
+    ("/new", "/new [name]", "birth a new organism and swap to it", "Organisms"),
+    ("/swap", "/swap name", "swap to another organism", "Organisms"),
+    ("/organisms", "/organisms", "list all organisms", "Organisms"),
     (
         "/group",
         "/group start a b | stop",
         "group chat: organisms talk with you and each other",
+        "Organisms",
     ),
-    ("/reload", "/reload", "re-read the lua hook scripts"),
-    ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand"),
-    ("/git", "/git [on|off|status]", "toggle or show git sensing"),
-    ("/help", "/help", "this help screen"),
-    ("/quit", "/quit", "save and quit (same as F10)"),
+    # System
+    ("/save", "/save", "persist state + genome", "System"),
+    ("/modules", "/modules [manage]", "open module manager (or list via /modules)", "System"),
+    ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)", "System"),
+    ("/reject", "/reject", "discard the pending genome patch (manual mode)", "System"),
+    ("/revert", "/revert", "undo the last applied genome patch", "System"),
+    ("/reload", "/reload", "re-read the lua hook scripts", "System"),
+    ("/lua", "/lua name.lua", "run a lua script from scripts/ on demand", "System"),
+    ("/git", "/git [on|off|status]", "toggle or show git sensing", "System"),
+    ("/quit", "/quit", "save and quit (same as F10)", "System"),
+    # Help
+    ("/help", "/help", "this help screen", "Help"),
 ]
 
 COMMAND_NAMES = [c[0] for c in COMMANDS]
+
+
+def palette_items():
+    """Return all slash commands as (name, usage, description, category)."""
+    return COMMANDS
+
+
+def filter_commands(query):
+    """Return commands whose name, usage, or description matches query."""
+    q = query.lower().strip()
+    if not q:
+        return COMMANDS
+    return [c for c in COMMANDS if any(q in part.lower() for part in c[:3])]
+
 
 _SPARK_BARS = "▁▂▃▄▅▆▇█"
 
@@ -121,7 +146,7 @@ def sparkline(values):
 
 def help_text():
     lines = ["REPLICANTA — type / in the chat line; tab completes.", ""]
-    lines += [f"{usage:<14} {desc}" for _name, usage, desc in COMMANDS]
+    lines += [f"{usage:<14} {desc}" for _name, usage, desc, _category in COMMANDS]
     lines += [
         "",
         "keyboard",
