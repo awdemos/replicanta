@@ -3,11 +3,27 @@ focus off the chat input (typing would be lost), completion must still
 work, and F-pane switches must not strand a following Tab."""
 
 import asyncio
+import io
 
-from textual.widgets import TabbedContent
+from rich.console import Console
+from textual.widgets import Static, TabbedContent
 
 from replicanta.organism import Organism
 from replicanta.tui import OrganismApp
+
+
+def _renderable_text(widget):
+    """Render a Static widget's current content to a plain string."""
+    content = getattr(widget, "_Static__content", "")
+    console = Console(
+        width=80,
+        force_terminal=False,
+        color_system=None,
+        record=True,
+        file=io.StringIO(),
+    )
+    console.print(content)
+    return console.export_text()
 
 
 def _headless_app(monkeypatch, tmp_path):
@@ -107,8 +123,9 @@ def test_f7_switches_to_inner_pane(monkeypatch, tmp_path):
             await asyncio.sleep(0.1)
             assert tabs.active == "inner-pane", "F7 did not activate the inner pane"
             assert inp.has_focus, "F7 left the chat input unfocused"
-            assert app._inner_text, "inner view rendered empty"
-            assert "mental state" in app._inner_text
+            inner_text = _renderable_text(app.query_one("#inner", Static))
+            assert inner_text, "inner view rendered empty"
+            assert "mental state" in inner_text
             await pilot.press("tab")
             await asyncio.sleep(0.05)
             assert inp.has_focus, "Tab after F7 moved focus off the chat input"

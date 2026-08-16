@@ -15,6 +15,10 @@ from replicanta.learning import describe
 STYLE_USER = "cyan"
 STYLE_ORG = "green"
 STYLE_DIM = "dim"
+STYLE_DREAM = "magenta"
+STYLE_LEARNED = "yellow"
+STYLE_SELF = "italic yellow"
+STYLE_WARN = "red"
 
 _BELIEF_LIMIT = 12
 _RULE_LIMIT = 10
