@@ -181,6 +181,15 @@ class QuickActions(Grid):
         yield Button("MUD", id="qa-mud")
 
 
+class Toast(Static):
+    """Transient bottom-of-screen feedback for errors and warnings."""
+
+    def show(self, message, duration=3.0):
+        self.update(message)
+        self.styles.display = "block"
+        self.set_timer(duration, lambda: setattr(self.styles, "display", "none"))
+
+
 class HelpScreen(ModalScreen):
     """Overlay with every slash command and key binding."""
 
@@ -569,6 +578,8 @@ class OrganismApp(App):
     #mutation-banner > Static { width: 1fr; content-align: left middle; }
     #mutation-banner > Button { min-width: 8; margin: 0 1; }
     #chat { height: 3; border: solid yellow; }
+    #toast { height: auto; display: none; padding: 0 1;
+             background: $error-darken-2; color: $text; }
     #help { border: round green; padding: 1 2; width: 60; height: auto; }
     OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
     GroupPickScreen { align: center middle; }
@@ -696,6 +707,7 @@ class OrganismApp(App):
             id="chat",
         )
         yield self.chat_input
+        yield Toast("", id="toast")
         with Horizontal(id="bottombar"):
             yield ActivityLabel("", id="activity")
             yield Static("", id="bottombar-text")
@@ -1216,6 +1228,7 @@ class OrganismApp(App):
                 "no camera frame (plugged in? opencv installed? see /camera list)",
                 STYLE_WARN,
             )
+            self.call_from_thread(self.show_toast, "Camera not found")
             return
         try:
             sight = llmclient.describe_image(frame)
@@ -1551,6 +1564,7 @@ class OrganismApp(App):
             cams = camera.list_cameras()
             if not cams:
                 self._append_log("no cameras found (plug one in)", STYLE_WARN)
+                self.show_toast("No cameras found")
             for index, dev_name in cams:
                 self._append_log(f"  /dev/video{index}  {dev_name}", STYLE_DIM)
             return
@@ -1559,6 +1573,7 @@ class OrganismApp(App):
                 index, dev_name = self.camera.set_device(args[1])
             except LookupError as exc:
                 self._append_log(f"/camera: {exc}", STYLE_WARN)
+                self.show_toast(f"Camera error: {exc}")
                 return
             self._append_log(f"camera: using /dev/video{index} ({dev_name})", STYLE_DIM)
             return
@@ -1606,6 +1621,7 @@ class OrganismApp(App):
             mics = listen.list_microphones()
             if not mics:
                 self._append_log("no input devices found", STYLE_WARN)
+                self.show_toast("No microphone matched")
             for dev_id, dev_name in mics:
                 self._append_log(f"  {dev_name}  [{dev_id}]", STYLE_DIM)
             return
@@ -1614,6 +1630,7 @@ class OrganismApp(App):
                 matched = self.listener.set_mic(args[1])
             except (LookupError, OSError) as exc:
                 self._append_log(f"/microphone: {exc}", STYLE_WARN)
+                self.show_toast(f"Microphone error: {exc}")
                 return
             self._append_log(f"microphone: using {matched}", STYLE_DIM)
             return
@@ -1725,6 +1742,9 @@ class OrganismApp(App):
                 "en_US-lessac-medium, see "
                 "huggingface.co/rhasspy/piper-voices",
                 STYLE_WARN,
+            )
+            self.call_from_thread(
+                self.show_toast, f"Voice download failed: {name}"
             )
             return
         speech.set_voice(name)
@@ -1901,6 +1921,12 @@ class OrganismApp(App):
         if label is None:
             return ""
         return str(getattr(label, "_Static__content", "") or "")
+
+    def show_toast(self, message, duration=3.0):
+        """Show a transient toast at the bottom of the screen."""
+        toast = self._safe_query("#toast", Toast)
+        if toast is not None:
+            toast.show(message, duration=duration)
 
     # -- log ---------------------------------------------------------------
     def _safe_query(self, selector, cls):
@@ -2443,6 +2469,7 @@ class OrganismApp(App):
             self._modules_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
+            self.show_toast(f"Invalid command: {name}")
 
     def _git_command(self, args):
         if not args or args[0] == "status":

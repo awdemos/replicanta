@@ -15,6 +15,7 @@ from replicanta.tui import (
     MutationBanner,
     OrganismApp,
     TabBar,
+    Toast,
 )
 
 
@@ -231,6 +232,20 @@ def test_tab_bar_labels_visible(monkeypatch, tmp_path):
             assert "Chat" in labels
             assert "Mind" in labels
             assert "Memory" in labels
+
+    asyncio.run(check())
+
+
+def test_toast_shows_message(monkeypatch, tmp_path):
+    """show_toast must populate the toast widget and make it visible."""
+    app = _headless_app(monkeypatch, tmp_path)
+
+    async def check():
+        async with app.run_test():
+            app.show_toast("Camera not found")
+            await asyncio.sleep(0.05)
+            toast = app.query_one(Toast)
+            assert "Camera not found" in str(toast._Static__content)
 
     asyncio.run(check())
 
