@@ -1,8 +1,19 @@
+import shutil
+import subprocess
 from pathlib import Path
 
-from replicanta.organism import Mind
+from replicanta.organism import Mind, Organism
+from replicanta.probe import SystemProbe
 
 SCL = Path(__file__).parent.parent / "organism.scl"
+
+
+def _dummy_probe():
+    return SystemProbe(proc=Path("/nonexistent"), sys=Path("/nonexistent"))
+
+
+def _seed_organism(tmp_path):
+    shutil.copy(SCL, tmp_path / "organism.scl")
 
 
 def test_mind_loads_seed_and_reads_beliefs():
@@ -1250,3 +1261,118 @@ def test_load_tolerates_corrupt_state_json(tmp_path):
     store.state_path.write_text("{not json")
     store.load()  # must not raise; keeps fresh defaults
     assert store.cycle == 0
+
+
+def test_organism_git_probe_disabled_by_default(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    assert org.git_probe is None
+
+
+def test_organism_git_probe_attached_when_enabled(tmp_path):
+    _seed_organism(tmp_path)
+    (tmp_path / "replicanta.toml").write_text("[git]\nenabled = true\n")
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    assert org.git_probe is not None
+
+
+def test_organism_sense_folds_git_beliefs(tmp_path, monkeypatch):
+    _seed_organism(tmp_path)
+    from replicanta.gitstate import GitProbe
+
+    fake = GitProbe(
+        tmp_path,
+        spawn=lambda _w, _a: subprocess.CompletedProcess(_a, 0, "true\n", ""),
+    )
+    monkeypatch.setattr(
+        fake,
+        "snapshot",
+        lambda: {
+            "is_repo": True,
+            "branch": "main",
+            "upstream": "origin/main",
+            "dirty_count": 3,
+            "unpushed_count": 2,
+            "behind_count": 0,
+        },
+    )
+    org = Organism(tmp_path, probe=_dummy_probe(), git_probe=fake)
+    org.load()
+    org.sense()
+    assert ("git", "dirty", "few") in org.store.beliefs()
+    assert ("git", "unpushed", "few") in org.store.beliefs()
+    assert ("git", "behind", "none") in org.store.beliefs()
+
+
+def test_organism_git_distress_records_memory(tmp_path, monkeypatch):
+    _seed_organism(tmp_path)
+    from replicanta.gitstate import GitProbe
+
+    fake = GitProbe(
+        tmp_path,
+        spawn=lambda _w, _a: subprocess.CompletedProcess(_a, 0, "true\n", ""),
+    )
+    monkeypatch.setattr(
+        fake,
+        "snapshot",
+        lambda: {
+            "is_repo": True,
+            "branch": "main",
+            "upstream": "origin/main",
+            "dirty_count": 3,
+            "unpushed_count": 0,
+            "behind_count": 0,
+        },
+    )
+    org = Organism(tmp_path, probe=_dummy_probe(), git_probe=fake)
+    org.load()
+    org.sense()
+    assert any("uncommitted" in m.get("text", "") for m in org.store.memory)
+
+
+def test_organism_git_enable_disable_persist_config(tmp_path):
+    _seed_organism(tmp_path)
+    from replicanta import config
+
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    org.git_enable()
+    assert org.git_probe is not None
+    assert config.load_config(tmp_path)["git"]["enabled"] is True
+    org.git_disable()
+    assert org.git_probe is None
+    assert config.load_config(tmp_path)["git"]["enabled"] is False
+
+
+def test_organism_git_status(tmp_path, monkeypatch):
+    _seed_organism(tmp_path)
+    from replicanta.gitstate import GitProbe
+
+    fake = GitProbe(
+        tmp_path,
+        spawn=lambda _w, _a: subprocess.CompletedProcess(_a, 0, "true\n", ""),
+    )
+    monkeypatch.setattr(
+        fake,
+        "snapshot",
+        lambda: {
+            "is_repo": True,
+            "branch": "main",
+            "upstream": "origin/main",
+            "dirty_count": 3,
+            "unpushed_count": 2,
+            "behind_count": 1,
+        },
+    )
+    org = Organism(tmp_path, probe=_dummy_probe(), git_probe=fake)
+    org.load()
+    assert org.git_status() == "main · 3△ · 2↑ · 1↓"
+
+
+def test_organism_git_status_when_disabled(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    assert org.git_status() == "git sensing is off"

@@ -12,8 +12,11 @@ from typing import ClassVar
 
 import scallopy
 
+from replicanta import config as project_config
 from replicanta import extensions, goals, learning, mud, sentiment
 from replicanta.fileutil import atomic_write_text
+from replicanta.gitstate import CONDITION_TEXT as GIT_CONDITION_TEXT
+from replicanta.gitstate import GitProbe
 from replicanta.hooks import HookEngine, scripts_dir_for
 from replicanta.probe import SystemProbe
 from replicanta.skills import SkillStore
@@ -865,7 +868,13 @@ class Organism:
     SKILL_STALE_CYCLES = 100  # untouched skills get archived after this
 
     def __init__(
-        self, dir_path, wake_seconds=180, sleep_seconds=60, chaos=0.5, probe=None
+        self,
+        dir_path,
+        wake_seconds=180,
+        sleep_seconds=60,
+        chaos=0.5,
+        probe=None,
+        git_probe=None,
     ):
         self.dir_path = dir_path
         self.store = BeliefStore(dir_path)
@@ -880,6 +889,7 @@ class Organism:
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.mental = MentalState(self.store)
         self.probe = probe if probe is not None else SystemProbe()
+        self.git_probe = git_probe
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
         self.hooks = HookEngine(scripts_dir_for(dir_path))
         self.store.on_utterance = lambda role, text: self.hooks.fire(
@@ -892,6 +902,7 @@ class Organism:
         self._last_stress_band = 0
         self._sentiment = None  # (tone, timestamp): "harsh" | "kind" | "learn"
         self._mood = None
+        self._git_warning_emitted = False
         # arena seed history: the last few utterance seeds, excluded from
         # the next pick so an idle voice keeps wandering (per-organism,
         # resets naturally on swap or restart)
@@ -929,19 +940,77 @@ class Organism:
             self.hooks.fire("birth", self)
         self.window = AttentionWindow(self.store.beliefs())
         self.window.refresh(cycle=self.store.cycle)
+        cfg = project_config.load_config(self._root_dir())
+        if cfg.get("git", {}).get("enabled"):
+            self._attach_git_probe(cfg.get("git", {}))
 
     def sense(self):
-        """Perceive the host machine: fold a fresh metric snapshot into the
-        belief store and let adverse conditions raise stress. Returns the
-        distress amount applied (0 when the host is fine). Persistence is
-        the caller's job (`flush()`), so sensing stays cheap to schedule."""
+        """Perceive the host machine and git state: fold fresh snapshots into
+        the belief store and let adverse conditions raise stress. Returns the
+        total distress amount applied (0 when everything is fine). Persistence
+        is the caller's job (`flush()`), so sensing stays cheap to schedule."""
         snap = self.probe.snapshot()
         for belief, conf in self.probe.beliefs(snap).items():
             self.store.observe(belief, conf)
         distress = self.probe.distress(snap)
         if distress:
             self.meter.bump(distress)
+        if self.git_probe is not None:
+            git_snap = self.git_probe.snapshot()
+            for belief, conf in self.git_probe.beliefs(git_snap).items():
+                self.store.observe(belief, conf)
+            git_distress = self.git_probe.distress(git_snap)
+            if git_distress:
+                self.meter.bump(git_distress)
+                distress += git_distress
+            for condition in self.git_probe.new_adverse:
+                text = GIT_CONDITION_TEXT.get(condition, f"git: {condition}")
+                self.store.remember("git", text)
         return distress
+
+    def _root_dir(self):
+        """Project root: grandparent of an organism in organisms/; otherwise
+        the organism's own directory."""
+        if self.dir_path.parent.name == "organisms":
+            return self.dir_path.parent.parent
+        return self.dir_path
+
+    def _attach_git_probe(self, git_cfg):
+        """Attach a GitProbe using the given config. Never raises."""
+        try:
+            self.git_probe = GitProbe(self.dir_path, config=git_cfg)
+        except OSError as exc:
+            if not self._git_warning_emitted:
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.warning("git sensing unavailable: %s", exc)
+                self._git_warning_emitted = True
+
+    def git_enable(self):
+        """Enable git sensing and persist the flag in replicanta.toml."""
+        root = self._root_dir()
+        cfg = project_config.load_config(root)
+        cfg.setdefault("git", {})["enabled"] = True
+        project_config.save_config(root, cfg)
+        self._attach_git_probe(cfg.get("git", {}))
+
+    def git_disable(self):
+        """Disable git sensing and persist the flag in replicanta.toml."""
+        root = self._root_dir()
+        cfg = project_config.load_config(root)
+        cfg.setdefault("git", {})["enabled"] = False
+        project_config.save_config(root, cfg)
+        self.git_probe = None
+
+    def git_status(self):
+        """Return a short git summary for the worktree."""
+        if self.git_probe is None:
+            return "git sensing is off"
+        snap = self.git_probe.snapshot()
+        if not snap["is_repo"]:
+            return "git sensing on, but this worktree is not a git repository"
+        return self.git_probe.summary(snap)
 
     def flush(self, force=False):
         """Persist state and refresh the reasoner when anything changed. The
