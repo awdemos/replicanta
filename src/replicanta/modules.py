@@ -8,6 +8,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore[no-redef]
 
+from replicanta import config as project_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -154,3 +156,51 @@ class ModuleLoader:
             if name not in visited and not visit(name, []):
                 return []
         return ordered
+
+
+class PersonaService:
+    """Registry and activation for persona modules."""
+
+    def __init__(self, store, config=None, root=None):
+        self.store = store
+        self.config = config if config is not None else {}
+        self.root = root
+        self._personas = {}
+
+    def register(self, spec):
+        name = spec.get("name")
+        if not name:
+            logger.warning("persona spec missing name; skipping")
+            return
+        self._personas[name] = spec
+
+    def list(self):
+        return sorted(self._personas)
+
+    def active(self):
+        active = self.config.get("persona", {}).get("active")
+        return self._personas.get(active)
+
+    def prompt_fragment(self):
+        spec = self.active()
+        return spec.get("prompt", "") if spec else ""
+
+    def _save(self):
+        if self.root is not None:
+            project_config.save_config(self.root, self.config)
+
+    def activate(self, name):
+        spec = self._personas.get(name)
+        if spec is None:
+            logger.warning("unknown persona: %s", name)
+            return
+        self.config.setdefault("persona", {})["active"] = name
+        for belief in spec.get("beliefs", []):
+            if len(belief) == 3:
+                self.store.observe(tuple(belief), 0.9)
+        self.store.remember("persona", f"adopted the {name} persona")
+        self._save()
+
+    def deactivate(self):
+        self.config.setdefault("persona", {})["active"] = ""
+        self._save()
