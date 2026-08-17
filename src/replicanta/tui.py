@@ -877,6 +877,36 @@ class OrganismApp(App):
         path.write_text(body, encoding="utf-8")
         self._append_log(f"— chat log saved to {path} —", STYLE_DIM, stamp=True)
 
+    def _export_chat(self, path=None):
+        """Write the full chat log to a markdown file. Returns the path."""
+        from datetime import datetime, timezone
+
+        org_name = self._org_name()
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        if path:
+            dest = Path(path).expanduser()
+        else:
+            dest = Path.home() / f"replicanta-chat-{org_name}-{timestamp}.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            f"# Chat with {org_name}",
+            "",
+            f"Exported: {datetime.now(timezone.utc).isoformat()}",
+            f"Organism: {org_name}",
+            f"Cycles: {self.org.store.cycle}",
+            "",
+        ]
+        for role, text in self.org.store.chat_log:
+            who = "You" if role == "user" else org_name
+            lines.append(f"## {who}")
+            lines.append("")
+            lines.append(text)
+            lines.append("")
+
+        fileutil.atomic_write_text(dest, "\n".join(lines))
+        return dest
+
     def action_toggle_mouse(self):
         """Toggle Textual's mouse capture. When captured, clicks work inside
         the app but the terminal cannot select text. When released, native
@@ -2297,6 +2327,12 @@ class OrganismApp(App):
                 self._append_log(line, STYLE_DIM)
         elif name == "/save":
             self.action_save_now()
+        elif name == "/export":
+            try:
+                dest = self._export_chat(parts[1] if len(parts) > 1 else None)
+                self._append_log(f"— chat exported to {dest} —", STYLE_DIM, stamp=True)
+            except OSError as exc:
+                self._append_log(f"— export failed: {exc} —", STYLE_WARN, stamp=True)
         elif name == "/think":
             self.action_think_now()
         elif name == "/listen":

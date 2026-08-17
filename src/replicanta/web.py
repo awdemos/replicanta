@@ -10,6 +10,7 @@ import contextlib
 import json
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -343,6 +344,12 @@ class Glasshouse:
             elif name == "/save":
                 self.org.flush(force=True)
                 messages.append("saved")
+            elif name == "/export":
+                try:
+                    dest = self._export_chat(args[0] if args else None)
+                    messages.append(f"chat exported to {dest}")
+                except OSError as exc:
+                    messages.append(f"export failed: {exc}")
             elif name == "/think":
                 thought = voice.narrate(self.org)
                 if thought:
@@ -475,6 +482,34 @@ class Glasshouse:
             self.org.git_disable()
             return "git sensing off"
         return "/git [on|off|status]"
+
+    def _export_chat(self, path=None):
+        """Write the full chat log to a markdown file. Returns the path."""
+        org_name = self.name
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        if path:
+            dest = Path(path).expanduser()
+        else:
+            dest = Path.home() / f"replicanta-chat-{org_name}-{timestamp}.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            f"# Chat with {org_name}",
+            "",
+            f"Exported: {datetime.now(timezone.utc).isoformat()}",
+            f"Organism: {org_name}",
+            f"Cycles: {self.org.store.cycle}",
+            "",
+        ]
+        for role, text in self.org.store.chat_log:
+            who = "You" if role == "user" else org_name
+            lines.append(f"## {who}")
+            lines.append("")
+            lines.append(text)
+            lines.append("")
+
+        fileutil.atomic_write_text(dest, "\n".join(lines))
+        return dest
 
     def _persona_command(self, args):
         svc = getattr(self.org, "persona_service", None)

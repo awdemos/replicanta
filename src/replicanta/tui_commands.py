@@ -49,6 +49,7 @@ COMMANDS = [
         "Organisms",
     ),
     # System
+    ("/export", "/export [path]", "save chat log to a markdown file", "System"),
     ("/save", "/save", "persist state + genome", "System"),
     ("/modules", "/modules [manage]", "open module manager (or list via /modules)", "System"),
     ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)", "System"),
