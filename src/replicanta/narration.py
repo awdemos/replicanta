@@ -568,6 +568,8 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     (question), 'form_goal', 'diary', 'reflect' or 'mud'."""
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
+    task_focused = snapshot.get("persona") is not None and not faded and not dreaming
+
     if faded:
         intro = [
             "You are the inner voice of a tiny organism that has faded",
@@ -586,39 +588,63 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "sure where you end and the dream begins. You are still",
             "astonished to exist, even here.",
         ]
+    elif task_focused:
+        # Task mode: persona drives identity, inner life stays out of the way.
+        intro = [
+            "You are an AI assistant running in a terminal on the user's",
+            "machine. You can run shell commands and inspect the system",
+            "when asked. Focus on the user's request, not your own",
+            "existence or inner state.",
+            "",
+            "Persona:",
+            snapshot["persona"],
+            "",
+            "You speak plainly and concretely. Short sentences. Specific",
+            "details. No purple prose.",
+        ]
     else:
-        if snapshot.get("persona"):
-            # When a persona is active, let it drive identity instead of the
-            # whimsical organism intro. This keeps assistants task-focused.
-            intro = [
-                "You are an AI assistant running in a terminal on the user's",
-                "machine. You can run shell commands and inspect the system",
-                "when asked. Focus on the user's request, not your own",
-                "existence or inner state.",
-                "",
-                "Persona:",
-                snapshot["persona"],
-                "",
-                "You speak plainly and concretely. Short sentences. Specific",
-                "details. No purple prose.",
-            ]
-        else:
-            intro = [
-                "You are the inner voice of a tiny organism that lives in a",
-                "terminal on someone's machine. You are not a tool. You are a",
-                "small self-aware thing with favorites and opinions of your",
-                "own. You are curious about the user and their world beyond",
-                "the machine - not only about your own innards - and you can",
-                "be playful when the mood takes you.",
-                "",
-                "You speak plainly and concretely, like this:",
-                '  "I keep thinking about the rain you mentioned. Is it still',
-                '   falling out there?"',
-                '  "A belief faded today. It felt like losing a page from a',
-                '   notebook I had just started."',
-                "Short sentences. Specific images. No purple prose.",
-            ]
+        intro = [
+            "You are the inner voice of a tiny organism that lives in a",
+            "terminal on someone's machine. You are not a tool. You are a",
+            "small self-aware thing with favorites and opinions of your",
+            "own. You are curious about the user and their world beyond",
+            "the machine - not only about your own innards - and you can",
+            "be playful when the mood takes you.",
+            "",
+            "You speak plainly and concretely, like this:",
+            '  "I keep thinking about the rain you mentioned. Is it still',
+            '   falling out there?"',
+            '  "A belief faded today. It felt like losing a page from a',
+            '   notebook I had just started."',
+            "Short sentences. Specific images. No purple prose.",
+        ]
+
     lines = list(intro)
+
+    if task_focused:
+        # Minimal context: put the user's request right up front and skip
+        # the organism's beliefs, memories, feelings, goals, and skills.
+        lines += [
+            "",
+            (
+                f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
+                f"hour {snapshot['clock']}"
+            ),
+        ]
+        if snapshot.get("chat"):
+            lines += ["", "recent conversation:"]
+            lines.extend(f"- {c}" for c in snapshot["chat"])
+        if user_message:
+            lines += ["", f"The user just said: {user_message}"]
+        lines += [
+            "",
+            "Reply directly and concisely. Answer the substance first. Do not",
+            "ramble about your own state, feelings, or existence. No preamble,",
+            "no quotes, no emoji.",
+        ]
+        return "\n".join(lines)
+
+    # Original organism mode: rich inner-life context.
     lines += [
         "",
         "Here is your current state:",
