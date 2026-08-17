@@ -72,6 +72,14 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 # audio backend; cap spoken output so voice stays responsive.
 _MAX_SPEECH_CHARS = 280
 
+# Piper emits a small amount of leading silence, but some PulseAudio/PipeWire
+# sinks and Bluetooth DACs need a longer wake-up period. Prepend a short
+# silent buffer so the first word isn't clipped.
+_SPEECH_PREROLL_SECONDS = 0.25
+# A matching tail buffer keeps the audio backend from trimming the end of the
+# utterance while the stream is still draining.
+_SPEECH_POSTROLL_SECONDS = 0.1
+
 enabled = False
 _queue = queue.Queue()
 _worker = None
@@ -255,6 +263,17 @@ def _speak(text):
     pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     if channels > 1:
         pcm = pcm.reshape(-1, channels)
+    # Book-end silence gives the audio backend and DAC time to start the
+    # stream before speech begins and keeps the sink from trimming the tail.
+    def _silence(seconds):
+        frames = int(rate * seconds)
+        if channels > 1:
+            return np.zeros((frames, channels), dtype=np.float32)
+        return np.zeros(frames, dtype=np.float32)
+
+    pcm = np.concatenate(
+        [_silence(_SPEECH_PREROLL_SECONDS), pcm, _silence(_SPEECH_POSTROLL_SECONDS)]
+    )
     sc.default_speaker().play(pcm, samplerate=rate)
 
 

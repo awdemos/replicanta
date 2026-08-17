@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/replicanta.png" alt="Replicanta logo" width="180">
+</p>
+
 # Replicanta
 
 **Introducing Replicanta.** The name deliberately includes **REPL** and
@@ -40,7 +44,8 @@ rules, then return to the awake state.
 ## Run
 
 Requires Python 3.14, [uv](https://docs.astral.sh/uv/), and a local LLM
-backend. Ollama is the default; set `OLLAMA_MODEL` and `OLLAMA_URL` as needed.
+backend. Ollama is the default; set `OLLAMA_MODEL` and `OLLAMA_URL` as needed,
+or switch to a llama.cpp/llama-server with `REPLICANTA_LLM_BACKEND=llama_cpp`.
 The default inner voice is `qwen3.8:latest`.
 
 ### 1. Base install
@@ -67,9 +72,28 @@ steps (~15 minutes).
 
 ### 3. LLM backend
 
+**Ollama (default)**
+
 ```bash
 ollama pull qwen3.8:latest
 ```
+
+**llama.cpp / llama-server**
+
+Set `REPLICANTA_LLM_BACKEND=llama_cpp` and point `LLAMACPP_URL` at a running
+llama-server. The bundled GGUF is already in `models/`:
+
+```bash
+llama-server \
+  -m models/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-Q3_K_M.gguf \
+  --jinja --reasoning-format deepseek \
+  --host 127.0.0.1 --port 8085 \
+  -ngl 99 -fa on -c 32768
+
+REPLICANTA_LLM_BACKEND=llama_cpp LLAMACPP_URL=http://localhost:8085 .venv/bin/replicanta
+```
+
+Vision (`/look`) is only supported on the Ollama backend.
 
 ### 4. Optional extras
 

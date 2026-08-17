@@ -4,9 +4,12 @@ daemon thread, and swallows synthesis/playback failures so speech can
 never take the organism down. Piper and soundcard are never imported in
 these tests: _speak is patched out."""
 
+import sys
 import threading
 import time
 from pathlib import Path
+
+import numpy as np
 
 from replicanta import speech
 
@@ -124,6 +127,43 @@ def test_speak_with_timeout_abandons_hung_utterance(monkeypatch):
     after = time.time()
     assert started.is_set()
     assert after - before < 1.0  # returned before the 10s sleep finished
+
+
+def test_speak_adds_preroll_silence(monkeypatch):
+    """_speak prepends silence so the audio backend/DAC has time to start
+    the stream before speech begins; without it the first word can be
+    clipped on some PulseAudio/PipeWire setups."""
+    played = []
+
+    class FakeSpeaker:
+        def play(self, data, samplerate):
+            played.append((np.array(data, copy=True), samplerate))
+
+    fake_soundcard = type(sys)("soundcard")
+    fake_soundcard.default_speaker = lambda: FakeSpeaker()
+    monkeypatch.setitem(sys.modules, "soundcard", fake_soundcard)
+
+    class FakeVoice:
+        def synthesize_wav(self, _text, wav_file):
+            rate = 22050
+            duration = 0.2
+            frames = int(rate * duration)
+            sine = (np.sin(2 * np.pi * 440 * np.arange(frames) / rate) * 32767).astype(np.int16)
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(rate)
+            wav_file.writeframes(sine.tobytes())
+
+    monkeypatch.setattr(speech, "_load_voice", lambda: FakeVoice())
+
+    speech._speak("hello")
+
+    assert len(played) == 1
+    data, rate = played[0]
+    preroll_frames = int(rate * speech._SPEECH_PREROLL_SECONDS)
+    assert data.shape[0] >= preroll_frames + int(rate * 0.1)
+    assert np.max(np.abs(data[:preroll_frames])) < 1e-6
+    assert np.max(np.abs(data[preroll_frames:])) > 0.1
 
 
 # -- voice management: list / switch / download ---------------------------

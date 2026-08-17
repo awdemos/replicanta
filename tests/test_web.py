@@ -105,6 +105,14 @@ def test_state_is_real_organism_state(live):
     assert isinstance(state["beliefs"], list)
 
 
+def test_state_includes_persona_snapshot(live):
+    status, _headers, state = request(live, "/api/state")
+    assert status == 200
+    assert "persona" in state
+    assert isinstance(state["persona"]["available"], list)
+    assert "active" in state["persona"]
+
+
 def test_chat_runs_hear_reply_persist_pipeline(live):
     status, _headers, result = request(
         live, "/api/chat", {"text": "my name is sam"}
@@ -278,6 +286,42 @@ def test_command_lists_organisms_and_rejects_unknown(live):
     )
     assert status == 400
     assert "unknown command" in error["error"]
+
+
+def test_mud_start_creates_game(live):
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/mud start"}
+    )
+    assert status == 200
+    assert result["state"]["mud"]["active"] is True
+    assert result["state"]["mud"]["scenario"] == "The Amulet of Vatox"
+    assert any(a["name"] == "default" for a in result["state"]["mud"]["roster"])
+
+
+def test_mud_act_applies_command_and_advances_turn(live):
+    request(live, "/api/command", {"command": "/mud start"})
+    status, _headers, result = request(
+        live, "/api/mud-act", {"text": "go north"}
+    )
+    assert status == 200
+    state = result["state"]
+    assert state["mud"]["active"] is True
+    default_actor = next(a for a in state["mud"]["roster"] if a["name"] == "default")
+    assert default_actor["room"] == "cave mouth"
+
+
+def test_mud_join_adds_second_organism(live):
+    request(live, "/api/command", {"command": "/mud start"})
+    request(live, "/api/organisms", {"name": "fern"})
+    request(live, "/api/swap", {"name": "fern"})
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/mud join default"}
+    )
+    assert status == 200
+    state = result["state"]
+    assert state["mud"]["active"] is True
+    names = {a["name"] for a in state["mud"]["roster"]}
+    assert names == {"default", "fern"}
 
 
 def test_settings_voice_and_git(live):

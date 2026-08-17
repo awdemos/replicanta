@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from replicanta import activity, extensions, nursery, speech, tui_commands, voice
+from replicanta import activity, extensions, fileutil, mud, nursery, speech, tui_commands, voice
 from replicanta.organism import Organism
 from replicanta.web_static import APP_CSS, APP_HTML, APP_JS
 
@@ -37,6 +37,10 @@ class Glasshouse:
         self._listener = None
         self._camera = None
         self._last_frame = None
+        # Hosted MUD games: host organism name -> MudGame.
+        self._mud_games: dict[str, mud.MudGame] = {}
+        # organism name -> host name for games this adapter has joined/started.
+        self._mud_member_of: dict[str, str] = {}
 
     @property
     def name(self):
@@ -71,11 +75,8 @@ class Glasshouse:
                 for skill in self.org.skills.list()
             ]
             registry = extensions.registry()
-            mud_state = None
-            with contextlib.suppress(Exception):
-                session = self.org.load_mud_session()
-                if session is not None:
-                    mud_state = session.to_json()
+            mud_state = self._mud_snapshot()
+            persona_state = self._persona_snapshot()
             return {
                 "organism": {
                     "name": self.name,
@@ -111,6 +112,7 @@ class Glasshouse:
                 },
                 "git_enabled": getattr(self.org, "git_probe", None) is not None,
                 "self_talk": self._self_talk,
+                "persona": persona_state,
                 "mud": mud_state,
                 "sight": self._last_frame,
                 "extensions": {
@@ -124,6 +126,65 @@ class Glasshouse:
                     "groups": nursery.load_groups(self.root),
                 },
             }
+
+    def _mud_snapshot(self):
+        """Build the MUD payload for the web client, or None when no game."""
+        game = self._mud_game_for(self.org)
+        if game is None:
+            return None
+        host = self._mud_host_for(self.org)
+        actor_name = self.name
+        actor = game.actors.get(actor_name)
+        current = game.current_actor()
+        return {
+            "active": True,
+            "host": host,
+            "scenario": game.world.scenario.title,
+            "premise": game.world.scenario.premise,
+            "room": actor.room if actor else "",
+            "inventory": list(actor.inventory) if actor else [],
+            "roster": [
+                {
+                    "name": name,
+                    "room": game.actors[name].room,
+                    "inventory": list(game.actors[name].inventory),
+                    "kind": game.actors[name].kind,
+                    "is_you": name == actor_name,
+                    "is_turn": name == current.name,
+                }
+                for name in game.turn_order
+            ],
+            "turn": current.name,
+            "paused": game.paused,
+            "finished": game.finished,
+            "won": game.won,
+            "log": [f"({a}) {c}" for a, c, _t in game.session.command_log[-20:]],
+        }
+
+    def _persona_snapshot(self):
+        """Build the persona payload for the web client."""
+        svc = getattr(self.org, "persona_service", None)
+        if svc is None:
+            return {"available": [], "active": None}
+        active = svc.active()
+        return {
+            "available": svc.list(),
+            "active": active["name"] if active else None,
+        }
+
+    def _mud_host_for(self, org):
+        """Return the host organism name for the game org participates in."""
+        name = org.dir_path.name
+        if name in self._mud_games:
+            return name
+        return self._mud_member_of.get(name)
+
+    def _mud_game_for(self, org):
+        """Return the MudGame org participates in, or None."""
+        host = self._mud_host_for(org)
+        if host is None:
+            return None
+        return self._mud_games.get(host)
 
     def chat(self, text):
         text = str(text).strip()
@@ -307,7 +368,7 @@ class Glasshouse:
             elif name == "/look":
                 messages.append(self._look_command())
             elif name == "/mud":
-                messages.append("/mud is only available in the TUI.")
+                messages.append(self._mud_command(args))
             elif name == "/persona":
                 messages.append(self._persona_command(args))
             elif name == "/modules":
@@ -464,6 +525,231 @@ class Glasshouse:
         except Exception as exc:  # noqa: BLE001 — camera is optional hardware
             return f"camera unavailable: {exc}"
 
+    # -- MUD controller --------------------------------------------------------
+
+    def _mud_load_scenario(self, slug):
+        """Load a saved generated scenario by slug, or the built-in default."""
+        if not slug or fileutil.slug(slug) != slug:
+            return None
+        directory = self.org.dir_path / "artifacts" / "mud" / "scenarios"
+        path = directory / f"{slug}.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+                return mud.validate_scenario(data)
+            except Exception:  # noqa: BLE001
+                return None
+        default = mud.default_scenario()
+        if fileutil.slug(default.title) == slug:
+            return default
+        return None
+
+    def _mud_start(self, scenario=None, description=None):
+        """Start a new MUD game hosted by the current organism."""
+        host_name = self.name
+        if host_name in self._mud_games:
+            return "mud: a game is already running"
+        if description:
+            scenario = mud.generate_scenario(description, self.org)
+            self._mud_save_scenario(scenario)
+        elif scenario is None:
+            loaded = self._mud_load_scenario_from_session()
+            scenario = loaded or mud.default_scenario()
+        game = mud.MudGame(scenario)
+        # The web host plays as the user; the legacy default "organism"
+        # actor is replaced by the host organism.
+        game.remove_actor("organism")
+        game.add_actor(host_name, kind="user")
+        self._mud_games[host_name] = game
+        self._mud_member_of[host_name] = host_name
+        self.org.store.save_mud_session(game.session)
+        return f"mud: entered {game.world.scenario.title}"
+
+    def _mud_load_scenario_from_session(self):
+        """Resume a saved session's scenario when available."""
+        session = self.org.store.load_mud_session()
+        if session is None:
+            return None
+        return self._mud_load_scenario(session.scenario_id)
+
+    def _mud_save_scenario(self, scenario):
+        """Persist a generated scenario to artifacts/mud/scenarios/<slug>.json."""
+        try:
+            directory = self.org.dir_path / "artifacts" / "mud" / "scenarios"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{fileutil.slug(scenario.title)}.json"
+            fileutil.atomic_write_text(
+                path, json.dumps(mud.scenario_to_json(scenario), indent=1)
+            )
+        except OSError:
+            pass
+
+    def _mud_join(self, host_name):
+        """Add the current organism to a hosted game."""
+        game = self._mud_games.get(host_name)
+        if game is None:
+            return f"mud: no hosted game named {host_name!r}"
+        member_name = self.name
+        if member_name in self._mud_member_of:
+            return "mud: already in a game; /mud leave first"
+        if member_name in game.actors:
+            return "mud: already in this game"
+        game.add_actor(member_name, kind="organism")
+        self._mud_member_of[member_name] = host_name
+        return f"mud: joined {host_name}'s game as {member_name}"
+
+    def _mud_leave(self):
+        """Remove the current organism from its game."""
+        name = self.name
+        host = self._mud_member_of.get(name)
+        if host is None:
+            return "mud: not in a game"
+        game = self._mud_games.get(host)
+        if game is not None:
+            game.remove_actor(name)
+        del self._mud_member_of[name]
+        if host == name:
+            # Host leaving ends the game for everyone.
+            for member in list(self._mud_member_of):
+                if self._mud_member_of[member] == host:
+                    del self._mud_member_of[member]
+            self._mud_games.pop(host, None)
+            return "mud: game ended"
+        return "mud: left the game"
+
+    def _mud_stop(self):
+        """Stop the current organism's hosted game."""
+        name = self.name
+        if name not in self._mud_games:
+            return "mud: you are not hosting a game"
+        game = self._mud_games.pop(name)
+        for member in list(self._mud_member_of):
+            if self._mud_member_of[member] == name:
+                del self._mud_member_of[member]
+        return f"mud: {game.world.scenario.title} ended"
+
+    def _mud_command(self, args):
+        """Dispatch /mud subcommands for the web UI."""
+        if not args:
+            if self.name in self._mud_games:
+                return self._mud_stop()
+            return self._mud_start()
+
+        sub = args[0]
+        if sub == "start":
+            return self._mud_start()
+        if sub == "join" and len(args) == 2:
+            return self._mud_join(args[1])
+        if sub == "leave":
+            return self._mud_leave()
+        if sub == "stop":
+            return self._mud_stop()
+
+        game = self._mud_game_for(self.org)
+        if game is None:
+            return "mud: no game running (start with /mud)"
+
+        if sub in ("map", "story", "quest"):
+            render = {
+                "map": mud.render_map,
+                "story": mud.render_story,
+                "quest": mud.render_quest,
+            }[sub]
+            return render(game)
+        if sub == "pause":
+            if game.paused:
+                return "mud: already paused"
+            game.paused = True
+            return "mud: paused"
+        if sub == "resume":
+            if not game.paused:
+                return "mud: not paused"
+            game.paused = False
+            return "mud: resumed"
+        if sub == "step":
+            return self._mud_step(game)
+        if sub == "reset":
+            scenario = game.world.scenario
+            host = self._mud_host_for(self.org)
+            self._mud_stop()
+            if host == self.name:
+                return self._mud_start(scenario=scenario)
+            return "mud: reset the scenario"
+        if sub == "scenario":
+            description = " ".join(args[1:]).strip()
+            if not description:
+                return "/mud scenario needs a description"
+            host = self._mud_host_for(self.org)
+            if host != self.name:
+                return "mud: only the host can start a new scenario"
+            self._mud_stop()
+            return self._mud_start(description=description)
+        return "/mud [start|join <name>|leave|stop|map|story|quest|pause|resume|step|reset|scenario <desc>]"
+
+    def _mud_step(self, game):
+        """Execute one organism turn."""
+        actor = game.current_actor()
+        if actor.kind != "organism":
+            return f"mud: it is {actor.name}'s turn (not an organism)"
+        org = self._mud_organism_for(actor.name)
+        if org is None:
+            return f"mud: cannot find organism {actor.name}"
+        choice = mud.choose_action(game, org=org, actor_name=actor.name)
+        result = game.act_event(choice.command or "look", actor_name=actor.name)
+        host = self._mud_host_for(self.org)
+        if host and host in self._mud_games:
+            self._mud_games[host].session = game.session
+        self.org.store.save_mud_session(game.session)
+        return f"mud: {actor.name} {result.text}"
+
+    def _mud_organism_for(self, name):
+        """Load an organism by name for taking a MUD turn."""
+        if self.org.dir_path.name == name:
+            return self.org
+        org_dir = nursery.organism_dir(self.root, name)
+        if not org_dir.exists():
+            return None
+        try:
+            org = Organism(org_dir, **self.spawn)
+            org.load()
+            return org
+        except Exception:  # noqa: BLE001
+            return None
+
+    def mud_act(self, text):
+        """Apply a player command while it is their organism's turn."""
+        with self.lock:
+            game = self._mud_game_for(self.org)
+            if game is None:
+                raise WebError("no active MUD game")
+            actor_name = self.name
+            if game.current_actor_name() != actor_name:
+                raise WebError(f"it is {game.current_actor_name()}'s turn")
+            command = mud.parse_player_command(text)
+            if command is None:
+                raise WebError("not a MUD command")
+            result = game.act_event(command, actor_name=actor_name)
+            host = self._mud_host_for(self.org)
+            if host and host in self._mud_games:
+                self._mud_games[host].session = game.session
+            self.org.store.save_mud_session(game.session)
+            messages = [result.text]
+            # Auto-step one organism turn if the next actor is an organism.
+            if not game.finished and not game.paused:
+                next_actor = game.current_actor()
+                if next_actor.kind == "organism" and next_actor.name != actor_name:
+                    org = self._mud_organism_for(next_actor.name)
+                    if org is not None:
+                        choice = mud.choose_action(game, org=org, actor_name=next_actor.name)
+                        next_result = game.act_event(
+                            choice.command or "look", actor_name=next_actor.name
+                        )
+                        messages.append(f"{next_actor.name}: {next_result.text}")
+                        if host and host in self._mud_games:
+                            self._mud_games[host].session = game.session
+                        self.org.store.save_mud_session(game.session)
+            return {"messages": messages, "state": self.snapshot()}
+
 
 class GlasshouseHandler(BaseHTTPRequestHandler):
     server_version = "ReplicantaGlasshouse/0.1"
@@ -506,6 +792,7 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
                 "/api/mutation": lambda: self.app.mutation(data.get("action")),
                 "/api/organisms": lambda: self.app.create_organism(data.get("name", "")),
                 "/api/swap": lambda: self.app.swap(data.get("name", "")),
+                "/api/mud-act": lambda: self.app.mud_act(data.get("text", "")),
             }
             if path not in routes:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})

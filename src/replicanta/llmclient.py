@@ -1,10 +1,15 @@
-"""LLM client: the shared ollama text-generation gateway. Everything that
-talks to the local ollama server lives here — the non-streaming generate
-call, the vision describe call, reachability probing and voice-health
-bookkeeping, token metering — plus the text helpers three modules share:
-seed rotation for prompts and candidate cleaning for chatty model output.
-narration.py builds prompts, arena.py debates them, mud.py plays games
-with them; none of them owns the transport."""
+"""LLM client: the shared text-generation gateway.
+
+Supports two local backends:
+- Ollama (default): `OLLAMA_URL` / `OLLAMA_MODEL`
+- llama.cpp/llama-server: `LLAMACPP_URL`
+
+Everything that talks to the local LLM lives here — the non-streaming
+generate call, the vision describe call, reachability probing and
+voice-health bookkeeping, token metering — plus the text helpers three
+modules share: seed rotation for prompts and candidate cleaning for chatty
+model output. narration.py builds prompts, arena.py debates them, mud.py
+plays games with them; none of them owns the transport."""
 
 import base64
 import json
@@ -28,6 +33,16 @@ def vision_model():
 def vision_timeout():
     """Vision timeout seconds (env: REPLICANTA_VISION_TIMEOUT, per call)."""
     return int(os.environ.get("REPLICANTA_VISION_TIMEOUT", "60"))
+
+
+def llm_backend():
+    """Active LLM backend (env: REPLICANTA_LLM_BACKEND, default 'ollama')."""
+    return os.environ.get("REPLICANTA_LLM_BACKEND", "ollama").lower()
+
+
+def llama_cpp_url():
+    """llama-server base URL (env: LLAMACPP_URL, default localhost:8085)."""
+    return os.environ.get("LLAMACPP_URL", "http://localhost:8085")
 
 
 def ollama_url():
@@ -76,9 +91,23 @@ def _tags_url():
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, "/api/tags", "", ""))
 
 
+def _llama_cpp_health_url():
+    return f"{llama_cpp_url().rstrip('/')}/health"
+
+
 def probe_voice(model=None):
-    """Network probe: is ollama reachable with the model pulled? Updates the
-    cached voice state and returns it."""
+    """Network probe: is the configured backend reachable? Updates the cached
+    voice state and returns it."""
+    if llm_backend() == "llama_cpp":
+        try:
+            req = urllib.request.Request(_llama_cpp_health_url())
+            with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:  # nosec B310 - local llama-server endpoint
+                _voice.online = resp.status == 200
+        except (urllib.error.URLError, OSError, ValueError):
+            _voice.online = False
+        _voice.failures = 0
+        return _voice.online
+
     model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
     try:
         req = urllib.request.Request(_tags_url())
@@ -146,12 +175,8 @@ def _strip_special(text):
     return text.strip()
 
 
-def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
-    """(text, stats) from ollama /api/generate, non-streaming; stats are
-    the exact prompt/gen token counts from ollama's eval fields. Raises
-    on failure."""
-    if timeout is None:
-        timeout = default_timeout()
+def _generate_ollama(prompt, model, timeout, temperature):
+    """POST to ollama /api/generate, non-streaming."""
     payload = json.dumps(
         {
             "model": model,
@@ -180,14 +205,64 @@ def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     return _strip_special(_strip_think(data.get("response", ""))), stats
 
 
+def _generate_llama_cpp(prompt, model, timeout, temperature):
+    """POST to llama-server /completion, non-streaming.
+
+    The loaded model is determined by the server, so the ``model`` argument
+    is accepted for API compatibility but not sent in the payload.
+    """
+    payload = json.dumps(
+        {
+            "prompt": prompt,
+            "n_predict": MAX_TOKENS,
+            "temperature": temperature,
+            "repeat_penalty": 1.1,
+            "stop": _STOP_TOKENS,
+            "stream": False,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"{llama_cpp_url().rstrip('/')}/completion",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local llama-server endpoint
+        data = json.loads(resp.read().decode())
+    if data.get("error"):
+        raise RuntimeError(data["error"])
+    stats = {
+        "prompt_tokens": int(data.get("tokens_evaluated") or 0),
+        "gen_tokens": int(data.get("tokens_predicted") or 0),
+    }
+    return _strip_special(_strip_think(data.get("content", ""))), stats
+
+
+def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
+    """(text, stats) from the configured backend, non-streaming.
+
+    Stats are the best prompt/gen token counts each backend exposes. Raises
+    on failure.
+    """
+    if timeout is None:
+        timeout = default_timeout()
+    if llm_backend() == "llama_cpp":
+        return _generate_llama_cpp(prompt, model, timeout, temperature)
+    return _generate_ollama(prompt, model, timeout, temperature)
+
+
 def generate(prompt, model, timeout=None, temperature=0.95):
-    """POST to ollama /api/generate, non-streaming. Raises on failure."""
+    """Non-streaming generation through the configured backend."""
     return generate_with_stats(prompt, model, timeout, temperature)[0]
 
 
 def describe_image(image_bytes, model=None, timeout=None):
-    """JPEG bytes -> a short scene description from a local vision model
-    (ollama /api/generate with base64 images). Raises on failure."""
+    """JPEG bytes -> a short scene description from a local vision model.
+
+    Vision is currently supported on the Ollama backend only; llama.cpp
+    vision support is out of scope for this iteration.
+    """
+    if llm_backend() == "llama_cpp":
+        raise RuntimeError("vision is not supported on the llama.cpp backend")
     if model is None:
         model = vision_model()
     if timeout is None:

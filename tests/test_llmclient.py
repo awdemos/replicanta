@@ -92,3 +92,81 @@ def test_generate_with_stats_sends_expected_payload(monkeypatch):
     assert captured["body"]["stream"] is False
     assert captured["body"]["options"]["temperature"] == 0.3
     assert captured["timeout"] == 9
+
+
+# -- llama.cpp backend -------------------------------------------------------
+
+
+def test_llama_cpp_generate_with_stats_maps_token_counts(monkeypatch):
+    _patch_urlopen(
+        monkeypatch,
+        {
+            "content": "hello",
+            "tokens_evaluated": 42,
+            "tokens_predicted": 7,
+        },
+    )
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    text, stats = llmclient.generate_with_stats("prompt", "ignored", 5)
+    assert text == "hello"
+    assert stats == {"prompt_tokens": 42, "gen_tokens": 7}
+
+
+def test_llama_cpp_generate_sends_expected_payload(monkeypatch):
+    captured = {}
+
+    def spy(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data.decode())
+        captured["timeout"] = timeout
+        return _fake_resp({"content": "ok"})
+
+    monkeypatch.setattr("urllib.request.urlopen", spy)
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    monkeypatch.setenv("LLAMACPP_URL", "http://localhost:9999")
+    llmclient.generate_with_stats("p", "any-model", 9, temperature=0.3)
+    assert captured["url"] == "http://localhost:9999/completion"
+    assert "model" not in captured["body"]
+    assert captured["body"]["prompt"] == "p"
+    assert captured["body"]["stream"] is False
+    assert captured["body"]["n_predict"] == llmclient.MAX_TOKENS
+    assert captured["body"]["temperature"] == 0.3
+    assert captured["timeout"] == 9
+
+
+def test_llama_cpp_probe_voice_checks_health(monkeypatch):
+    captured = {}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        status = 200
+
+        def read(self):
+            return b"{}"
+
+    def spy(req, timeout=None):
+        captured["url"] = req.full_url
+        return FakeResp()
+
+    monkeypatch.setattr("urllib.request.urlopen", spy)
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    monkeypatch.setenv("LLAMACPP_URL", "http://localhost:9999")
+    llmclient.reset_voice()
+    assert llmclient.probe_voice() is True
+    assert captured["url"] == "http://localhost:9999/health"
+
+
+def test_backend_defaults_to_ollama():
+    # Default backend should be ollama when env var is absent/unset.
+    assert llmclient.llm_backend() == "ollama"
+
+
+def test_describe_image_raises_on_llama_cpp_backend(monkeypatch):
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    with pytest.raises(RuntimeError, match="vision is not supported"):
+        llmclient.describe_image(b"fake-image-bytes")

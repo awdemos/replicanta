@@ -629,3 +629,87 @@ def test_room_based_win_condition():
     result = game.act_event("go north")
     assert result.finished and result.won
     assert "won" in result.text
+
+
+# -- multi-actor sessions ------------------------------------------------------
+
+
+def test_default_game_has_single_organism_actor():
+    game = MudGame()
+    assert "organism" in game.actors
+    assert game.current_actor_name() == "organism"
+    assert game.current_actor().kind == "organism"
+
+
+def test_multi_actor_game_advances_turns_round_robin():
+    game = MudGame()
+    game.add_actor("alice", kind="user")
+    game.add_actor("bob", kind="organism")
+    assert game.turn_order == ["organism", "alice", "bob"]
+    assert game.current_actor_name() == "organism"
+    game.act("go north")  # organism
+    assert game.current_actor_name() == "alice"
+    game.act("go north")  # alice
+    assert game.current_actor_name() == "bob"
+
+
+def test_actors_have_separate_rooms_and_inventories():
+    game = MudGame()
+    game.add_actor("alice", kind="user")
+    game.act("go north")  # organism moves to cave mouth
+    assert game.actors["organism"].room == "cave mouth"
+    assert game.actors["alice"].room == "clearing"
+    game.act("go north")  # alice moves to cave mouth
+    game.act("take torch", actor_name="alice")
+    assert "torch" in game.actors["alice"].inventory
+    assert "torch" not in game.actors["organism"].inventory
+
+
+def test_items_removed_from_room_are_unavailable_to_other_actors():
+    game = MudGame()
+    game.add_actor("alice", kind="user")
+    game.act("go north")  # organism moves to cave mouth
+    game.act("go north")  # alice moves to cave mouth
+    game.act("take torch")  # organism takes torch
+    result = game.act_event("take torch", actor_name="alice")
+    assert "no torch" in result.text.lower()
+
+
+def test_multi_actor_command_log_records_actor_name():
+    game = MudGame()
+    game.add_actor("alice", kind="user")
+    game.act("go north")  # organism
+    game.act("go north")  # alice
+    log = game.session.command_log
+    assert log[0] == ("organism", "go north", 1)
+    assert log[1] == ("alice", "go north", 2)
+
+
+def test_session_migration_from_single_actor_save():
+    """Old saves have no actors dict; loading should create a default organism actor."""
+    old = {
+        "scenario_id": "amulet-of-vatox",
+        "scenario_title": "The Amulet of Vatox",
+        "premise": "A mossy clearing...",
+        "visited": ["clearing"],
+        "known_exits": {"clearing": ["north"]},
+        "plot_beats": [],
+        "inventory_log": [],
+        "command_log": [["organism", "go north", 1]],
+        "outcome": None,
+    }
+    session = mud.MudSession.from_json(old)
+    assert "organism" in session.actors
+    assert session.actors["organism"].room == "cave mouth"
+
+
+def test_multi_actor_session_serialization_roundtrip():
+    game = MudGame()
+    game.add_actor("alice", kind="user")
+    game.act("go north")
+    game.act("go north")
+    data = game.session.to_json()
+    restored = mud.MudSession.from_json(data)
+    assert "organism" in restored.actors
+    assert "alice" in restored.actors
+    assert restored.turn_order == ["organism", "alice"]

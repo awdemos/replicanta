@@ -1694,8 +1694,8 @@ class OrganismApp(App):
 
     # -- voice health ------------------------------------------------------
     def _probe_voice(self):
-        """Probe ollama reachability off the UI thread (noop while one is
-        already in flight); the arena reads the cached result."""
+        """Probe LLM backend reachability off the UI thread (noop while one
+        is already in flight); the arena reads the cached result."""
         if not self._probing_voice:
             self._probing_voice = True
             self._probe_voice_worker()
@@ -1720,8 +1720,10 @@ class OrganismApp(App):
                 )
                 self.notify("inner voice offline — local fallback", severity="warning")
             elif state == "online":
-                self._append_log("inner voice: online (ollama)", STYLE_DIM)
-                self.notify("inner voice online (ollama)")
+                backend = llmclient.llm_backend()
+                label = "llama.cpp" if backend == "llama_cpp" else "ollama"
+                self._append_log(f"inner voice: online ({label})", STYLE_DIM)
+                self.notify(f"inner voice online ({label})")
         self.refresh_status()
 
     # -- spoken voice (piper tts) ------------------------------------------
