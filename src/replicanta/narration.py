@@ -568,7 +568,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     (question), 'form_goal', 'diary', 'reflect' or 'mud'."""
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
-    task_focused = snapshot.get("persona") is not None and not faded and not dreaming
+    task_focused = bool(snapshot.get("persona")) and not faded and not dreaming
 
     if faded:
         intro = [
