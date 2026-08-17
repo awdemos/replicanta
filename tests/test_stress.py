@@ -226,13 +226,13 @@ def test_wake_uses_effective_chaos_for_question_count(tmp_path, monkeypatch):
     org.store.chaos = 0.5
     asked = []
 
-    orig_ask = org.questioner.ask
+    from replicanta import organism as organism_module
 
-    def spy_ask(a, b):
+    def spy_derive(genome_text, rule, head):
         asked.append(1)
-        return orig_ask(a, b)
+        return []
 
-    monkeypatch.setattr(org.questioner, "ask", spy_ask)
+    monkeypatch.setattr(organism_module, "derive_in_thread", spy_derive)
     org._wake()
     assert len(asked) == 3
 

@@ -6,17 +6,26 @@ change to the same public organism/nursery APIs used by the TUI.
 """
 
 import base64
-import contextlib
 import json
 import threading
 import webbrowser
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from replicanta import activity, extensions, fileutil, mud, nursery, speech, tui_commands, voice
+from replicanta import (
+    activity,
+    extensions,
+    fileutil,
+    mud,
+    nursery,
+    speech,
+    tui_commands,
+    voice,
+)
+from replicanta import memory as memory_module
 from replicanta.organism import Organism
 from replicanta.web_static import APP_CSS, APP_HTML, APP_JS
 
@@ -100,6 +109,17 @@ class Glasshouse:
                 },
                 "beliefs": beliefs,
                 "memory": list(reversed(store.memory[-50:])),
+                "memory_ranked": self._ranked_memory_snapshot(),
+                "threads": [
+                    {
+                        "id": t.id,
+                        "kind": t.kind,
+                        "status": t.status,
+                        "created_cycle": t.created_cycle,
+                    }
+                    for t in store.threads.values()
+                ],
+                "thread_results": list(store.thread_results),
                 "chat": [{"role": role, "text": text} for role, text in store.chat_log],
                 "goals": list(store.goals),
                 "skills": skills,
@@ -173,6 +193,26 @@ class Glasshouse:
             "active": active["name"] if active else None,
         }
 
+    def _ranked_memory_snapshot(self):
+        """Return the top-ranked memories for the web client."""
+        store = self.org.store
+        query = " ".join(
+            text for _role, text in store.chat_log[-4:]
+        ) or "current situation"
+        scorer = memory_module.MemoryScorer()
+        ranked = scorer.rank(
+            store.memory, query, top_k=8, current_cycle=store.cycle
+        )
+        return [
+            {
+                "cycle": m["cycle"],
+                "kind": m["kind"],
+                "text": m["text"],
+                "importance": m.get("importance", 0.5),
+            }
+            for m in ranked
+        ]
+
     def _mud_host_for(self, org):
         """Return the host organism name for the game org participates in."""
         name = org.dir_path.name
@@ -199,6 +239,16 @@ class Glasshouse:
             self.org.store.record_chat("org", reply)
             self.org.flush(force=True)
             return {"reply": reply, "events": events, "state": self.snapshot()}
+
+    def typing(self, data):
+        """Record typing activity. Optionally nudges sleep near its boundary."""
+        with self.lock:
+            nudged = self.org.typing_activity()
+            events = [{"kind": "typing", "nudged": nudged}]
+            if nudged:
+                events.extend(self.org.force_state("wake"))
+            self.org.flush(force=True)
+            return {"events": events, "state": self.snapshot()}
 
     def lifecycle(self, action):
         with self.lock:
@@ -486,7 +536,7 @@ class Glasshouse:
     def _export_chat(self, path=None):
         """Write the full chat log to a markdown file. Returns the path."""
         org_name = self.name
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         if path:
             dest = Path(path).expanduser()
         else:
@@ -496,7 +546,7 @@ class Glasshouse:
         lines = [
             f"# Chat with {org_name}",
             "",
-            f"Exported: {datetime.now(timezone.utc).isoformat()}",
+            f"Exported: {datetime.now(UTC).isoformat()}",
             f"Organism: {org_name}",
             f"Cycles: {self.org.store.cycle}",
             "",
@@ -828,6 +878,7 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
                 "/api/organisms": lambda: self.app.create_organism(data.get("name", "")),
                 "/api/swap": lambda: self.app.swap(data.get("name", "")),
                 "/api/mud-act": lambda: self.app.mud_act(data.get("text", "")),
+                "/api/typing": lambda: self.app.typing(data),
             }
             if path not in routes:
                 return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})

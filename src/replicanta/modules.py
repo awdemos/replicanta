@@ -1,9 +1,8 @@
 """Lua module loader and service registry for Replicanta plugins."""
 
 import logging
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 from lupa import LuaRuntime
 

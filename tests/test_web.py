@@ -274,6 +274,15 @@ def test_command_chaos_and_focus(live):
     assert "between 0 and 1" in error["error"]
 
 
+def test_typing_records_activity(live):
+    before = live.app.org.store.activity.get("user_typing", 0)
+    status, _headers, result = request(live, "/api/typing", {"typing": True})
+    assert status == 200
+    assert result["events"][0]["kind"] == "typing"
+    assert live.app.org.store.activity.get("user_typing") == before + 1
+    assert "typing_sessions" in live.app.org.store.activity
+
+
 def test_command_lists_organisms_and_rejects_unknown(live):
     status, _headers, result = request(
         live, "/api/command", {"command": "/organisms"}

@@ -84,6 +84,16 @@ def test_state_snapshot_includes_chat(org):
     assert snap["chat"] == ["user: hello there", "org: hi back"]
 
 
+def test_state_snapshot_ranks_memory_by_relevance(org):
+    org.store.remember("dream", "a vague dream about clouds")
+    org.store.remember("learned", "the user likes rain")
+    org.store.record_chat("user", "tell me about rain")
+    snap = state_snapshot(org)
+    assert snap["memory"]
+    # The learned memory about rain should outrank the unrelated dream.
+    assert "rain" in snap["memory"][0]
+
+
 def test_build_prompt_includes_recent_chat(org):
     org.store.record_chat("user", "hello there")
     org.store.record_chat("org", "hi back")

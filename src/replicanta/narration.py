@@ -8,6 +8,7 @@ import random
 import re
 
 from replicanta import activity, goals, learning
+from replicanta import memory as memory_module
 
 
 def state_snapshot(org):
@@ -28,6 +29,17 @@ def state_snapshot(org):
     goal = goal_dict.get("text")
     goal_progress = goals.goal_progress(org.store)
     goal_strategy = goal_dict.get("strategy")
+    memory_query = " ".join(
+        ([goal] if goal else [])
+        + [t for _r, t in org.store.chat_log[-4:]]
+        + user_facts
+    ) or "current situation"
+    memory_scorer = memory_module.MemoryScorer()
+    ranked_memory = memory_scorer.rank(
+        memory, memory_query, top_k=8, current_cycle=org.store.cycle
+    )
+    for mem in ranked_memory:
+        memory_module.MemoryScorer.mark_recalled(mem)
     skill_names = []
     skill_lines = []
     relevant_skills = []
@@ -85,7 +97,7 @@ def state_snapshot(org):
         "relevant_skills": relevant_skills,
         "self_model": self_model,
         "surprises": surprises,
-        "memory": [f"cycle {m['cycle']}: {m['text']}" for m in memory[-4:]],
+        "memory": [f"cycle {m['cycle']}: {m['text']}" for m in ranked_memory],
         "asked": [
             text
             for role, text in org.store.chat_log

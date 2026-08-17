@@ -15,6 +15,7 @@ import scallopy
 
 from replicanta import config as project_config
 from replicanta import extensions, goals, learning, mud, sentiment
+from replicanta import memory as memory_module
 from replicanta.fileutil import atomic_write_text
 from replicanta.gitstate import CONDITION_TEXT as GIT_CONDITION_TEXT
 from replicanta.gitstate import GitProbe
@@ -22,6 +23,7 @@ from replicanta.hooks import HookEngine, scripts_dir_for
 from replicanta.modules import ModuleLoader
 from replicanta.probe import SystemProbe
 from replicanta.skills import SkillStore
+from replicanta.threads import ThreadPool, derive_in_thread, make_self_question_thread
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,9 @@ class BeliefStore:
         self.rules = []  # list of (text, depth)
         self.attention = set()  # (attr, val) pairs in the window
         self.chat_log = []  # list of [role, text], capped by CHAT_LOG_LIMIT
-        self.memory = []  # episodes: {"cycle", "kind", "text"}
+        self.memory = []  # episodes: {"cycle", "kind", "text", "importance", "recall"}
+        self.threads = {}  # id -> CognitiveThread
+        self.thread_results = deque(maxlen=20)  # harvested thread summaries
         self.goals = []  # {"text","created_cycle","done_cycle","marker"}
         self.last_goal_cycle = 0
         self.last_diary_cycle = 0
@@ -303,9 +307,46 @@ class BeliefStore:
         """Record one notable episode (cycle-stamped), capped at
         MEMORY_LIMIT with oldest-first eviction. `kind` is a free-form
         tag; MUD events are recorded with kind "mud" by the TUI."""
-        self.memory.append({"cycle": self.cycle, "kind": kind, "text": text})
+        entry = {"cycle": self.cycle, "kind": kind, "text": text}
+        memory_module.attach_importance(entry, current_cycle=self.cycle)
+        self.memory.append(entry)
         if len(self.memory) > MEMORY_LIMIT:
             del self.memory[: len(self.memory) - MEMORY_LIMIT]
+        self.dirty = True
+
+    # -- cognitive threads ---------------------------------------------------
+    def queue_thread(self, thread):
+        """Store a thread and mark state dirty."""
+        self.threads[thread.id] = thread
+        thread.status = "pending"
+        self.dirty = True
+        return thread.id
+
+    def start_thread(self, thread_id):
+        """Mark a thread as running."""
+        thread = self.threads.get(thread_id)
+        if thread is not None:
+            thread.status = "running"
+            self.dirty = True
+
+    def finish_thread(self, thread_id, result=None, error=None):
+        """Finalize a thread, archive its result, and remove it from active."""
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            return
+        thread.status = "failed" if error else "done"
+        thread.result = result
+        thread.error = error
+        self.thread_results.append(
+            {
+                "id": thread.id,
+                "kind": thread.kind,
+                "cycle": thread.created_cycle,
+                "result": result,
+                "error": error,
+            }
+        )
+        del self.threads[thread_id]
         self.dirty = True
 
     # -- MUD session --------------------------------------------------------
@@ -358,6 +399,7 @@ class BeliefStore:
             "attention": [list(p) for p in self.attention],
             "chat": self.chat_log,
             "memory": self.memory,
+            "thread_results": list(self.thread_results),
             "goals": self.goals,
             "last_goal_cycle": self.last_goal_cycle,
             "last_diary_cycle": self.last_diary_cycle,
@@ -393,7 +435,13 @@ class BeliefStore:
         }
         self.attention = {tuple(p) for p in state.get("attention", [])}
         self.chat_log = [list(c) for c in state.get("chat", [])]
-        self.memory = [dict(m) for m in state.get("memory", [])]
+        self.memory = [
+            memory_module.attach_importance(dict(m), current_cycle=self.cycle)
+            for m in state.get("memory", [])
+        ]
+        self.thread_results = deque(
+            state.get("thread_results", []), maxlen=20
+        )
         self.goals = [dict(g) for g in state.get("goals", [])]
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
@@ -936,6 +984,7 @@ class Organism:
         self.probe = probe if probe is not None else SystemProbe()
         self.git_probe = git_probe
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
+        self.thread_pool = ThreadPool(max_workers=4)
         # Hooks engine is created here so code can attach to it before load();
         # the module-driven hooks service is wired in load().
         self.hooks = HookEngine(scripts_dir_for(dir_path), hooks_service=None)
@@ -1194,6 +1243,42 @@ class Organism:
             self.flush()
         return events
 
+    def typing_activity(self):
+        """Record that the user is typing. Called by front-ends (web/TUI).
+
+        Returns True if the typing nudged a near-boundary sleep toward wake.
+        """
+        self.store.note_activity("user_typing")
+        self.store.activity["typing_sessions"] = (
+            self.store.activity.get("typing_sessions", 0) + 1
+        )
+        nudged = False
+        if (
+            self.lifecycle.state == "sleep"
+            and self.lifecycle.elapsed()
+            >= self.lifecycle.sleep_seconds * 0.8
+        ):
+            self.lifecycle.transition("wake")
+            self.store.dirty = True
+            nudged = True
+        return nudged
+
+    def harvest_threads(self):
+        """Collect any completed background threads and apply their results.
+
+        Returns a list of event dicts for the front-end.
+        """
+        if not self.thread_pool:
+            return []
+        events = []
+        for thread_id, result, error in self.thread_pool.harvest():
+            self.store.finish_thread(thread_id, result=result, error=error)
+            if error:
+                events.append({"kind": "thread_failed", "id": thread_id})
+            else:
+                events.append({"kind": "thread_done", "id": thread_id})
+        return events
+
     # -- goals ---------------------------------------------------------------
     def add_goal(self, text):
         """Give the organism an intention (formed by its voice, or a
@@ -1434,22 +1519,84 @@ class Organism:
             return min(1.0, self.store.chaos + (self.store.stress - 0.5) * 0.3)
         return self.store.chaos
 
+    def close(self):
+        """Release background resources (thread pool, camera, listener)."""
+        if self.thread_pool is not None:
+            self.thread_pool.shutdown(wait=False)
+            self.thread_pool = None
+
     def advance_cycle(self):
         """One full wake->sleep transition (forced, for scheduler + tests)."""
         self._wake()
         self._sleep()
 
     def _wake(self):
-        """Run one wake cycle: self-questions, belief growth, persistence."""
+        """Run one wake cycle: self-questions, belief growth, persistence.
+
+        Self-questions are dispatched through the thread pool so several can
+        run concurrently; results are harvested before the cycle ends.
+        """
         self.window.refresh(cycle=self.store.cycle)
         pairs = sorted(self.window.pairs)
         rng = random.Random()  # nosec B311 - self-question RNG, not cryptography
         questions = 2 + (1 if self.chaos_effective() > 0.5 else 0)
-        new_beliefs = []
+        if not self.thread_pool or len(pairs) < 2:
+            new_beliefs = []
+            for _ in range(questions):
+                if len(pairs) >= 2:
+                    a, b = rng.sample(pairs, 2)
+                    new_beliefs.extend(self.questioner.ask(a, b))
+            self.store.cycle += 1
+            self.flush(force=True)
+            return new_beliefs
+
+        genome_text = self.store.render_scl()
+        submitted = []
         for _ in range(questions):
-            if len(pairs) >= 2:
-                a, b = rng.sample(pairs, 2)
-                new_beliefs.extend(self.questioner.ask(a, b))
+            a, b = rng.sample(pairs, 2)
+            thread, rule, head = make_self_question_thread(
+                a[0], a[1], b[0], b[1], self.store.rule_counter, self.store.cycle
+            )
+            self.store.rule_counter += 1
+            self.store.queue_thread(thread)
+            self.store.start_thread(thread.id)
+            self.thread_pool.submit(
+                thread.id,
+                derive_in_thread,
+                genome_text,
+                rule,
+                head,
+            )
+            submitted.append((thread.id, rule, thread.payload["combo"]))
+
+        # Wait for all questions; this keeps _wake synchronous for tests/lifecycle.
+        new_beliefs = []
+        for thread_id, rule, combo in submitted:
+            future = self.thread_pool.pending.get(thread_id)
+            if future is None:
+                continue
+            try:
+                derived = future.result(timeout=10.0)
+                self.store.finish_thread(thread_id, result=len(derived))
+                for tag, (obj,) in derived:
+                    belief = (obj, combo, "true")
+                    before = self.store.conf(belief)
+                    self.store.add(belief, tag)
+                    if before is None:
+                        new_beliefs.append(belief)
+                    else:
+                        self.store.add(belief, max(before, tag))
+                # chaos-weighted generalization: commit the rule itself
+                if self.store.chaos > 0.0 and rng.random() < self.store.chaos * 0.25:
+                    depth = self.questioner._rule_depth(
+                        rule.split('"')[1], rule.split('"')[3]
+                    )
+                    self.store.commit_rule(rule, depth)
+                    self.store.remember("rule", f"committed a rule: {rule[:80]}")
+            except Exception as exc:  # noqa: BLE001 — thread errors are logged, not fatal
+                self.store.finish_thread(thread_id, error=str(exc))
+                logger.warning("wake question failed: %s", exc)
+
         self.store.cycle += 1
         self.flush(force=True)
         return new_beliefs

@@ -23,7 +23,13 @@ def test_remember_records_cycle_stamped_episode(tmp_path):
     store = BeliefStore(tmp_path)
     store.cycle = 7
     store.remember("learned", "you like rain")
-    assert store.memory == [{"cycle": 7, "kind": "learned", "text": "you like rain"}]
+    assert len(store.memory) == 1
+    entry = store.memory[0]
+    assert entry["cycle"] == 7
+    assert entry["kind"] == "learned"
+    assert entry["text"] == "you like rain"
+    assert "importance" in entry
+    assert "recall" in entry
     assert store.dirty
 
 

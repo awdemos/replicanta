@@ -3,6 +3,7 @@ the thought arena (arena.py) and the MUD engine (mud.py) to the terminal,
 delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
 
 import json
+import logging
 import os
 import random
 import tempfile
@@ -65,6 +66,8 @@ from replicanta.tui_views import (
     STYLE_USER,
     STYLE_WARN,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SlashCommands(Provider):
@@ -650,6 +653,8 @@ class OrganismApp(App):
         self._pending_text = ""
         self._pending_visible = False
         self._busy_frame = 0
+        self._typing_timer = None
+        self._typing_last = 0.0
         self.listener = listen.Listener()
         self.camera = camera.Camera()
         self._mud_game = None
@@ -759,10 +764,13 @@ class OrganismApp(App):
         that already persisted the organism (e.g. just renamed it)."""
         if flush:
             self.org.flush(force=True)
+        old_org = self.org
         nursery.set_current(self.root, name)
         org = Organism(nursery.organism_dir(self.root, name), **self._spawn)
         org.load()
         self.org = org
+        if old_org is not None:
+            old_org.close()
         # stale workers reset these in their finally blocks anyway; clear
         # them so the new organism is never blocked by the old one's debate
         self._narrating = self._responding = self._self_talking = False
@@ -855,6 +863,8 @@ class OrganismApp(App):
         them at interpreter exit — without the hard-exit fallback the UI
         closes but the process hangs until the call times out."""
         self.action_save_now()
+        if self.org is not None:
+            self.org.close()
         self._arm_hard_exit()
         self.exit()
 
@@ -879,10 +889,10 @@ class OrganismApp(App):
 
     def _export_chat(self, path=None):
         """Write the full chat log to a markdown file. Returns the path."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         org_name = self._org_name()
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         if path:
             dest = Path(path).expanduser()
         else:
@@ -892,7 +902,7 @@ class OrganismApp(App):
         lines = [
             f"# Chat with {org_name}",
             "",
-            f"Exported: {datetime.now(timezone.utc).isoformat()}",
+            f"Exported: {datetime.now(UTC).isoformat()}",
             f"Organism: {org_name}",
             f"Cycles: {self.org.store.cycle}",
             "",
@@ -1721,6 +1731,34 @@ class OrganismApp(App):
         if hints is not None:
             hints.update_for(event.value)
         self._suppress_changed = False
+        if event.value and not event.value.startswith("/"):
+            self._touch_typing()
+
+    def _touch_typing(self):
+        """Record typing activity with debouncing; nudges near-boundary sleep."""
+        now = time.monotonic()
+        self._typing_last = now
+        activity_label = self._safe_query("#activity", ActivityLabel)
+        if activity_label is not None:
+            activity_label.show("listening…")
+        if self._typing_timer is not None:
+            self._typing_timer.stop()
+        self._typing_timer = self.set_timer(0.6, self._end_typing)
+        if now - getattr(self, "_typing_reported", 0) > 4.0:
+            self._typing_reported = now
+            try:
+                if self.org is not None:
+                    nudged = self.org.typing_activity()
+                    if nudged:
+                        self._toast("your typing woke it")
+            except Exception as exc:  # noqa: BLE001 — typing is best-effort
+                logger.debug("typing activity failed: %s", exc)
+
+    def _end_typing(self):
+        activity_label = self._safe_query("#activity", ActivityLabel)
+        if activity_label is not None:
+            activity_label.clear()
+        self._typing_timer = None
 
     # -- voice health ------------------------------------------------------
     def _probe_voice(self):
