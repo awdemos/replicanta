@@ -28,7 +28,7 @@ voice, and eventually cameras or robotics.
 > secrets, don't run it with privileges it doesn't need, and don't blame it for
 > its opinions.
 
-![Replicanta TUI demo: creating organisms, swapping the active entity, opening the help overlay, walking through chat/mind/memory/inner tabs, trying /listen, using /look, exploring /mud and /mud map, then quitting.](docs/assets/replicanta-entities.gif)
+![ASCII demo of Replicanta: creating the demo organism, chatting, switching persona, exploring a MUD, and looking around.](docs/assets/replicanta-ascii-demo.gif)
 
 ## Quick start
 
