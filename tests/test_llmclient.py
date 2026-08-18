@@ -170,3 +170,35 @@ def test_describe_image_raises_on_llama_cpp_backend(monkeypatch):
     monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
     with pytest.raises(RuntimeError, match="vision is not supported"):
         llmclient.describe_image(b"fake-image-bytes")
+
+
+# -- SSRF hardening ----------------------------------------------------------
+
+
+def test_ollama_url_rejects_metadata_endpoint(monkeypatch):
+    monkeypatch.setenv("OLLAMA_URL", "http://169.254.169.254/api/generate")
+    with pytest.raises(ValueError, match="not allowed"):
+        llmclient.ollama_url()
+
+
+def test_ollama_url_rejects_non_http_scheme(monkeypatch):
+    monkeypatch.setenv("OLLAMA_URL", "file:///etc/passwd")
+    with pytest.raises(ValueError, match="scheme must be http"):
+        llmclient.ollama_url()
+
+
+def test_ollama_url_rejects_embedded_credentials(monkeypatch):
+    monkeypatch.setenv("OLLAMA_URL", "http://user:pass@localhost:11434/api/generate")
+    with pytest.raises(ValueError, match="must not contain credentials"):
+        llmclient.ollama_url()
+
+
+def test_llama_cpp_url_rejects_metadata_endpoint(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_URL", "http://169.254.169.254:8085")
+    with pytest.raises(ValueError, match="not allowed"):
+        llmclient.llama_cpp_url()
+
+
+def test_llama_cpp_url_allows_localhost(monkeypatch):
+    monkeypatch.setenv("LLAMACPP_URL", "http://localhost:8085")
+    assert llmclient.llama_cpp_url() == "http://localhost:8085"

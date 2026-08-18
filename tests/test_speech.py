@@ -225,6 +225,31 @@ def test_set_voice_rejects_path_traversal(tmp_path, monkeypatch):
     assert speech.set_voice("en_GB-alan-low") == vdir / "en_GB-alan-low.onnx"
 
 
+def test_env_model_path_rejects_outside_voices_dir(tmp_path, monkeypatch):
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    outside = tmp_path / "evil.onnx"
+    outside.write_text("fake")
+    monkeypatch.setenv("REPLICANTA_VOICE_MODEL", str(outside))
+    speech.reset()
+    assert speech.model_path() == vdir / "en_US-lessac-medium.onnx"
+
+
+def test_env_model_path_rejects_non_onnx(tmp_path, monkeypatch):
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    bad = vdir / "not-a-voice.txt"
+    bad.write_text("fake")
+    monkeypatch.setenv("REPLICANTA_VOICE_MODEL", str(bad))
+    speech.reset()
+    assert speech.model_path() == vdir / "en_US-lessac-medium.onnx"
+
+
+def test_env_model_path_allows_voice_inside_voices_dir(tmp_path, monkeypatch):
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ("en_GB-alan-low",))
+    monkeypatch.setenv("REPLICANTA_VOICE_MODEL", str(vdir / "en_GB-alan-low.onnx"))
+    speech.reset()
+    assert speech.model_path() == vdir / "en_GB-alan-low.onnx"
+
+
 def test_voice_urls_parses_hf_layout():
     model, config = speech.voice_urls("en_US-lessac-medium")
     assert model == (

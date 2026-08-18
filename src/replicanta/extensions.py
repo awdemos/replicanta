@@ -117,10 +117,17 @@ def propose(path, entry, auto_apply=False):
 
 def approve(path):
     """Apply the pending entry: append to entries, bump version, reload.
-    Returns the applied entry, or None when nothing is pending."""
+    Returns the applied entry, or None when nothing is pending or the
+    pending entry fails validation."""
     reg = _read(path)
     entry = reg.get("pending")
     if entry is None:
+        return None
+    ok, _reason = validate(entry)
+    if not ok:
+        reg["pending"] = None
+        _write(path, reg)
+        load_global(path)
         return None
     reg["entries"].append(entry)
     reg["pending"] = None

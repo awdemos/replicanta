@@ -36,8 +36,8 @@ APP_CSS = r''':root{--p:#f3f0e7;--i:#17251e;--g:#174235;--m:#687068;--l:#dfe6d8}
 @keyframes pulse-typing{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
 '''
 
-APP_JS = r'''const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let state;
-async function api(path,data){const r=await fetch('/api/'+path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):null});const j=await r.json();if(!r.ok)throw Error(j.error);return j}
+APP_JS = r'''const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let state;const token=location.hash.replace(/^#token=/,'');
+async function api(path,data){const h={'Content-Type':'application/json'};if(token)h['X-Replicanta-Token']=token;const r=await fetch('/api/'+path,{method:data?'POST':'GET',headers:h,body:data?JSON.stringify(data):null});const j=await r.json();if(!r.ok)throw Error(j.error);return j}
 function esc(x){const d=document.createElement('div');d.textContent=String(x??'');return d.innerHTML}
 async function copyText(text){try{await navigator.clipboard.writeText(text);toast('copied')}catch(e){const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);toast('copied')}}
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),4000)}

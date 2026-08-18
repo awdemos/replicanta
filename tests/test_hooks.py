@@ -98,6 +98,30 @@ def test_sandbox_blocks_os(scripts, tmp_path):
     assert emitted == ["no os"]
 
 
+def test_sandbox_blocks_python_global(scripts, tmp_path):
+    (scripts / "rce.lua").write_text(
+        "function on_cycle(ctx)\n"
+        "  if python == nil then ctx.log('no python') else ctx.log('PWNED') end\n"
+        "end\n"
+    )
+    emitted = []
+    engine = HookEngine(scripts, emit=emitted.append)
+    engine.fire("cycle", _org(tmp_path))
+    assert emitted == ["no python"]
+
+
+def test_sandbox_blocks_python_rce_in_run(scripts, tmp_path):
+    (scripts / "pwn.lua").write_text(
+        "function main(ctx)\n"
+        "  python.none.__subclasses__()\n"
+        "end\n"
+    )
+    engine = HookEngine(scripts)
+    status = engine.run("pwn.lua", _org(tmp_path))
+    assert status.startswith("pwn.lua:")
+    assert "python" in status.lower() or "nil" in status.lower()
+
+
 def test_reload_picks_up_new_scripts(scripts, tmp_path):
     engine = HookEngine(scripts)
     assert engine.scripts == []

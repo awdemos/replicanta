@@ -4,11 +4,8 @@ import logging
 import tomllib
 from pathlib import Path
 
-from lupa import LuaRuntime
-
 from replicanta import config as project_config
-
-_BLOCKED_GLOBALS = ("os", "io", "load", "loadfile", "loadstring", "require", "dofile", "package", "debug")
+from replicanta import lua_sandbox
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +220,7 @@ class ModuleLoader:
             return
         try:
             lua = self._runtime()
-            lua.execute(init_path.read_text())
+            lua_sandbox.sandboxed_execute(lua, init_path.read_text(), name=name)
             init = lua.globals()["init"]
             if init is None:
                 self.warnings.append(f"{name}: no init() function; skipping")
@@ -237,9 +234,7 @@ class ModuleLoader:
 
     def _runtime(self):
         if self._lua is None:
-            self._lua = LuaRuntime(register_eval=False, register_builtins=False)
-            for name in _BLOCKED_GLOBALS:
-                self._lua.execute(f"{name} = nil")
+            self._lua = lua_sandbox.build_runtime()
         return self._lua
 
     def _build_context(self, module_name):

@@ -40,15 +40,42 @@ def llm_backend():
     return os.environ.get("REPLICANTA_LLM_BACKEND", "ollama").lower()
 
 
+def _validate_llm_url(url):
+    """Reject SSRF-shaped URLs for LLM endpoints.
+
+    The local backends legitimately use localhost/private addresses, so this
+    is a narrow guard: block non-http(s) schemes, embedded credentials, control
+    characters (CRLF), and well-known cloud metadata endpoints such as
+    169.254.169.254 that an attacker might redirect the LLM traffic toward.
+    """
+    if not isinstance(url, str):
+        raise TypeError("LLM URL must be a string")
+    if any(ord(c) < 32 or ord(c) == 127 for c in url):
+        raise ValueError("LLM URL contains control characters")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"LLM URL scheme must be http or https, got {parsed.scheme!r}")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("LLM URL must not contain credentials")
+    hostname = parsed.hostname
+    if hostname is None:
+        raise ValueError("LLM URL must have a host")
+    if hostname in {"169.254.169.254"}:
+        raise ValueError(f"LLM URL host {hostname!r} is not allowed")
+    return url
+
+
 def llama_cpp_url():
     """llama-server base URL (env: LLAMACPP_URL, default localhost:8085)."""
-    return os.environ.get("LLAMACPP_URL", "http://localhost:8085")
+    return _validate_llm_url(os.environ.get("LLAMACPP_URL", "http://localhost:8085"))
 
 
 def ollama_url():
     """Ollama generate endpoint (env: OLLAMA_URL, read per call so tests
     and runtime overrides are not frozen at import)."""
-    return os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
+    return _validate_llm_url(
+        os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
+    )
 
 
 def default_timeout():

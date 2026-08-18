@@ -67,12 +67,20 @@ def live(tmp_path):
     shared.clear()
 
 
-def request(base, path, data=None):
+_UNSET = object()
+
+
+def request(base, path, data=None, token=_UNSET):
     body = json.dumps(data).encode() if data is not None else None
+    headers = {"Content-Type": "application/json"}
+    if token is _UNSET and hasattr(base, "app"):
+        token = base.app.token
+    if token is not None and token is not _UNSET:
+        headers["X-Replicanta-Token"] = token
     req = urllib.request.Request(
         base + path,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST" if data is not None else "GET",
     )
     try:
@@ -93,7 +101,9 @@ def test_web_shell_and_assets_are_served(live):
     with urllib.request.urlopen(live + "/app.css") as response:
         assert b".organism" not in response.read()  # CSS, not demo JSON
     with urllib.request.urlopen(live + "/app.js") as response:
-        assert b"/api/" in response.read()
+        js = response.read()
+        assert b"/api/" in js
+        assert b"X-Replicanta-Token" in js
 
 
 def test_state_is_real_organism_state(live):
@@ -103,6 +113,19 @@ def test_state_is_real_organism_state(live):
     assert state["organism"]["state"] == "wake"
     assert state["nursery"]["organisms"] == ["default"]
     assert isinstance(state["beliefs"], list)
+
+
+def test_mutating_endpoints_require_token(live):
+    status, _headers, result = request(
+        live, "/api/chat", {"text": "hello"}, token=None
+    )
+    assert status == 401
+    assert result["error"] == "unauthorized"
+    status, _headers, result = request(
+        live, "/api/chat", {"text": "hello"}, token="wrong-token"
+    )
+    assert status == 401
+    assert result["error"] == "unauthorized"
 
 
 def test_state_includes_persona_snapshot(live):
@@ -203,7 +226,10 @@ def test_bad_routes_and_malformed_json_are_safe(live):
     req = urllib.request.Request(
         live + "/api/chat",
         data=b"{broken",
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-Replicanta-Token": live.app.token,
+        },
         method="POST",
     )
     with pytest.raises(urllib.error.HTTPError) as caught:

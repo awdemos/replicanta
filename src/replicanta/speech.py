@@ -57,9 +57,27 @@ _model_path = None
 
 
 def _env_model_path():
-    """Return the REPLICANTA_VOICE_MODEL override, or None."""
+    """Return the REPLICANTA_VOICE_MODEL override, or None.
+
+    The override is restricted to .onnx files inside voices_dir() so a
+    compromised environment cannot point synthesis at an arbitrary path
+    or load a non-model file."""
     env = os.environ.get("REPLICANTA_VOICE_MODEL")
-    return Path(env) if env else None
+    if not env:
+        return None
+    if any(ord(c) < 32 or ord(c) == 127 for c in env):
+        return None
+    path = Path(env)
+    if path.suffix != ".onnx":
+        return None
+    vdir = voices_dir().resolve()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    if not resolved.is_relative_to(vdir):
+        return None
+    return path
 
 HF_VOICE_URL = (
     "https://huggingface.co/rhasspy/piper-voices/resolve/"

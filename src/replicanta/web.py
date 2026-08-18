@@ -7,6 +7,7 @@ change to the same public organism/nursery APIs used by the TUI.
 
 import base64
 import json
+import secrets
 import threading
 import webbrowser
 from datetime import UTC, datetime
@@ -37,11 +38,14 @@ class WebError(ValueError):
 class Glasshouse:
     """Thread-safe adapter between HTTP requests and one live organism."""
 
-    def __init__(self, root, organism, spawn=None, respond=voice.respond):
+    PUBLIC_API_GETS = ("/api/state", "/api/commands")
+
+    def __init__(self, root, organism, spawn=None, respond=voice.respond, token=None):
         self.root = Path(root)
         self.org = organism
         self.spawn = dict(spawn or {})
         self.respond = respond
+        self.token = token or secrets.token_urlsafe(24)
         self.lock = threading.RLock()
         self._self_talk = False
         self._listener = None
@@ -51,6 +55,12 @@ class Glasshouse:
         self._mud_games: dict[str, mud.MudGame] = {}
         # organism name -> host name for games this adapter has joined/started.
         self._mud_member_of: dict[str, str] = {}
+
+    def auth_ok(self, request):
+        header = request.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            return header[7:] == self.token
+        return request.headers.get("X-Replicanta-Token") == self.token
 
     @property
     def name(self):
@@ -538,7 +548,7 @@ class Glasshouse:
         org_name = self.name
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         if path:
-            dest = Path(path).expanduser()
+            dest = fileutil.safe_path(Path.home(), path)
         else:
             dest = Path.home() / f"replicanta-chat-{org_name}-{timestamp}.md"
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -867,6 +877,8 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self.app.auth_ok(self):
+            return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
         try:
             data = self._body()
             routes = {
@@ -885,7 +897,7 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, routes[path]())
         except (WebError, ValueError, TypeError) as exc:
             return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-        except (OSError, RuntimeError):  # never expose local paths or prompts
+        except (OSError, RuntimeError):
             return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"})
 
     def _body(self):
@@ -930,11 +942,13 @@ def make_server(glasshouse, host="127.0.0.1", port=8765):
 
 
 def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=True):
-    server = make_server(Glasshouse(root, organism, spawn=spawn), host, port)
+    app = Glasshouse(root, organism, spawn=spawn)
+    server = make_server(app, host, port)
     url = f"http://{host}:{server.server_port}"
     print(f"Replicanta Glasshouse: {url}")
+    print(f"Authorization token: {app.token}")
     if open_browser:
-        threading.Timer(0.2, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.2, lambda: webbrowser.open(f"{url}/#token={app.token}")).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -30,6 +30,8 @@ to "lua"."""
 import threading
 from pathlib import Path
 
+from replicanta import lua_sandbox
+
 EVENTS = (
     "birth",
     "cycle",
@@ -66,12 +68,7 @@ class HookEngine:
 
     # -- runtime -----------------------------------------------------------
     def _runtime(self):
-        from lupa import LuaRuntime
-
-        lua = LuaRuntime(register_eval=False, register_builtins=False)
-        for name in _BLOCKED_GLOBALS:
-            lua.execute(f"{name} = nil")
-        return lua
+        return lua_sandbox.build_runtime()
 
     def _ctx(self, org, event, text):
         m = org.metrics()
@@ -150,7 +147,7 @@ class HookEngine:
             same_hook = self._lua.eval("function(a, b) return a == b end")
             for script in self.scripts:
                 try:
-                    self._lua.execute(script.read_text())
+                    lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=script.name)
                     hook = self._lua.globals()[f"on_{event}"]
                     if hook is not None and not same_hook(hook, prev_hook):
                         handlers.append((script.name, hook))
@@ -177,7 +174,7 @@ class HookEngine:
             if disabled is not None:
                 return disabled
             try:
-                self._lua.execute(script.read_text())
+                lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=name)
                 main = self._lua.globals()["main"]
                 if main is not None:
                     main(self._ctx(org, "lua", name))

@@ -122,3 +122,29 @@ def test_lua_sandbox_blocks_dangerous_globals(tmp_path):
     loader.load_all()
     assert "sandbox" in loader.modules
     assert not any("sandbox" in w for w in loader.warnings)
+
+
+def test_lua_sandbox_blocks_python_global(tmp_path):
+    d = tmp_path / "pwn"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "pwn"\nversion = "1.0.0"\n')
+    (d / "init.lua").write_text(
+        'function init(ctx)\n'
+        '  if python ~= nil then error("python global leaked") end\n'
+        'end\n'
+    )
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["pwn"]}})
+    loader.load_all()
+    assert "pwn" in loader.modules
+    assert not any("python" in w for w in loader.warnings)
+
+
+def test_lua_sandbox_blocks_python_rce_in_modules(tmp_path):
+    d = tmp_path / "rce"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "rce"\nversion = "1.0.0"\n')
+    (d / "init.lua").write_text('function init(ctx)\n  python.none.__subclasses__()\nend\n')
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["rce"]}})
+    loader.load_all()
+    assert "rce" not in loader.modules
+    assert any("python" in w.lower() or "nil" in w.lower() for w in loader.warnings)
