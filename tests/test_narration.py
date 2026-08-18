@@ -224,10 +224,12 @@ def test_fallback_summary_dead(org):
     assert "faded" in text and "2 beliefs" in text and "light" in text
 
 
-def test_fallback_respond_dead(org):
+def test_fallback_respond_is_empty(org):
+    text = fallback_respond(state_snapshot(org), "hello")
+    assert text is None
     org.lifecycle.transition("dead")
     text = fallback_respond(state_snapshot(org), "still there?")
-    assert text and "belief" not in text and "rule" not in text
+    assert text is None
 
 
 def _dead(org):
@@ -343,8 +345,8 @@ def test_respond_falls_back_on_ollama_failure(org, monkeypatch):
 
     patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
-    # fallback pool now answers conversationally without echoing stats
-    assert reply and "belief" not in reply and "rule" not in reply
+    # Fallback is intentionally None so the UI never renders a blank reply.
+    assert reply is None
 
 
 # -- voice quality: seeds, anti-repetition, de-emphasized stats ---------------

@@ -284,7 +284,8 @@ def test_respond_falls_back_on_arena_failure(org, monkeypatch):
 
     patch_generate(monkeypatch, boom)
     reply = respond(org, "hello there")
-    assert reply and "belief" not in reply and "rule" not in reply
+    # Fallback is intentionally None so the UI never renders a blank reply.
+    assert reply is None
 
 
 # -- candidate cleaning -----------------------------------------------------

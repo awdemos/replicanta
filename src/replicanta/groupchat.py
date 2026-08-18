@@ -77,6 +77,8 @@ class GroupChat:
                 quick=quick,
                 record=False,
             )
+            if not reply:
+                continue
             self._append(name, reply)
             org.store.remember("group", f"group chat — I said: {reply}")
             utterances.append((name, reply))

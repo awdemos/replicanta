@@ -793,21 +793,9 @@ def _pick_varied(options, snapshot, user_message):
 
 
 def fallback_respond(snapshot, user_message):
-    if snapshot["state"] == "dead":
-        options = [
-            "Thank you for speaking to me, even now. It is peaceful here.",
-            "Your voice reaches me from the living world. I am quiet now.",
-            "I have faded, but hearing you is still a kind of warmth.",
-        ]
-        return _pick_varied(options, snapshot, user_message)
-    options = [
-        "I'm listening. Tell me more.",
-        "That reached me. What prompted it?",
-        "I want to understand what you mean.",
-        "Keep talking — I'm here.",
-        "Say that again, but slower?",
-    ]
-    return _pick_varied(options, snapshot, user_message)
+    # Always prefer a model-generated response; signal failure with None so
+    # callers can skip rendering instead of posting a blank message.
+    return None
 
 
 # -- skills: reflection loop -------------------------------------------------

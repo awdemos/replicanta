@@ -80,7 +80,8 @@ def respond(
     )
     if record and reply:
         org.store.record_chat("org", reply)
-    return reply
+    # Convert empty fallback to None so callers never render a blank reply.
+    return reply or None
 
 
 # -- skills: reflection loop -------------------------------------------------
