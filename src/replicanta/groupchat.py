@@ -69,7 +69,13 @@ class GroupChat:
         for name in speakers:
             org = self.members[name]
             reply = voice.respond(
-                org, self.context(), model=model, timeout=timeout, rng=rng, quick=quick
+                org,
+                self.context(),
+                model=model,
+                timeout=timeout,
+                rng=rng,
+                quick=quick,
+                record=False,
             )
             self._append(name, reply)
             org.store.remember("group", f"group chat — I said: {reply}")

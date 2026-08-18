@@ -16,6 +16,12 @@ from replicanta.web import Glasshouse, make_server
 SEED = Path(__file__).parent.parent / "organism.scl"
 
 
+def _fake_respond(org, text):
+    reply = f"heard: {text}"
+    org.store.record_chat("org", reply)
+    return reply
+
+
 @pytest.fixture
 def glasshouse(tmp_path):
     shutil.copy(SEED, tmp_path / "organism.scl")
@@ -23,7 +29,7 @@ def glasshouse(tmp_path):
     nursery.set_current(tmp_path, "default")
     org = Organism(org_dir)
     org.load()
-    return Glasshouse(tmp_path, org, respond=lambda _org, text: f"heard: {text}")
+    return Glasshouse(tmp_path, org, respond=_fake_respond)
 
 
 @pytest.fixture
@@ -37,9 +43,7 @@ def live(tmp_path):
         nursery.set_current(tmp_path, "default")
         org = Organism(org_dir)
         org.load()
-        app = Glasshouse(
-            tmp_path, org, respond=lambda _org, text: f"heard: {text}"
-        )
+        app = Glasshouse(tmp_path, org, respond=_fake_respond)
         server = make_server(app, port=0)
         shared.update(server=server, app=app)
         ready.set()

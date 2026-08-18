@@ -154,11 +154,24 @@ class TabBar(Horizontal):
 class ActivityLabel(Static):
     """Compact, transient activity indicator in the status bar."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_text = None
+        self._visible = True
+
     def show(self, text):
-        self.update(text)
         self.styles.display = "block"
+        self._visible = True
+        if text == self._last_text:
+            return
+        self._last_text = text
+        self.update(text)
 
     def clear(self):
+        if not self._visible and self._last_text == "":
+            return
+        self._last_text = ""
+        self._visible = False
         self.update("")
         self.styles.display = "none"
 
@@ -667,6 +680,8 @@ class OrganismApp(App):
         self._memory_text = ""
         self._topbar_text = ""
         self._bottombar_text = ""
+        self._rendered_topbar_text = None
+        self._rendered_bottombar_text = None
 
     def compose(self) -> ComposeResult:
         """Build the top bar, sidebar, tabbed content area, chat input, and bottom bar."""
@@ -968,6 +983,9 @@ class OrganismApp(App):
             f"{mental}  │  {voice}{mic}{spoken}  {clock}"
         )
         self._topbar_text = text
+        if text == self._rendered_topbar_text:
+            return
+        self._rendered_topbar_text = text
         topbar = self._safe_query("#topbar", Static)
         if topbar is not None:
             topbar.update(text)
@@ -1948,15 +1966,18 @@ class OrganismApp(App):
             playing = ""
         if self._group is not None:
             playing += f" · 👥 group ({len(self._group.names())})"
-        self._bottombar_text = (
+        text = (
             f"{m.belief_count} beliefs · {m.rule_count} rules · "
             f"inner voice {llmclient.voice_status()}{playing}  │  "
             "ctrl+p palette · F1 help · F2-F8 tabs · ctrl+q quit "
             "(or F10, ctrl+c×2, /quit)"
         )
-        bottombar = self._safe_query("#bottombar-text", Static)
-        if bottombar is not None:
-            bottombar.update(self._bottombar_text)
+        self._bottombar_text = text
+        if text != self._rendered_bottombar_text:
+            self._rendered_bottombar_text = text
+            bottombar = self._safe_query("#bottombar-text", Static)
+            if bottombar is not None:
+                bottombar.update(text)
         self._update_quick_actions()
 
     def _update_quick_actions(self):
@@ -2763,7 +2784,6 @@ class OrganismApp(App):
 
     def _set_reply(self, reply):
         self._pending_hide()
-        self.org.store.record_chat("org", reply)
         self._log_chat("org", reply)
         speech.say(reply)
         self.refresh_status()

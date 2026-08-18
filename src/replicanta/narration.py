@@ -772,11 +772,9 @@ def fallback_summary(snapshot):
             f"It is over now, and strangely light."
         )
     if snapshot["state"] == "wake":
-        return (
-            f"I am awake, holding {snapshot['belief_count']} beliefs and "
-            f"{snapshot['rule_count']} rules — and somehow that still "
-            f"surprises me."
-        )
+        # The wake-state belief/rule count is repetitive and not useful to
+        # repeat on every render; return nothing so the area stays quiet.
+        return ""
     return (
         f"dreaming after cycle {snapshot['cycle']}: "
         f"{snapshot['belief_count']} beliefs drift past like slow fish. "

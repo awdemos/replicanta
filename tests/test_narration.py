@@ -203,12 +203,13 @@ def test_narrate_falls_back_on_ollama_failure(org, monkeypatch):
 
     patch_generate(monkeypatch, boom)
     text = narrate(org)
-    assert "2 beliefs" in text and "wake" in text
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
-def test_fallback_summary_wake(org):
+def test_fallback_summary_wake_is_quiet(org):
     text = fallback_summary(state_snapshot(org))
-    assert "awake" in text and "2 beliefs" in text and "1 rules" in text
+    assert text == ""
 
 
 def test_fallback_summary_sleep(org):
@@ -313,7 +314,8 @@ def test_narrate_falls_back_on_ollama_error_field(org, monkeypatch):
 
     monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: FakeResp())
     text = narrate(org)
-    assert "2 beliefs" in text
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
 def test_build_prompt_includes_user_message(org):

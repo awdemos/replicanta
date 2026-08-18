@@ -246,7 +246,7 @@ class Glasshouse:
             reply = self.respond(self.org, text)
             if not reply:
                 reply = "I am quiet for now."
-            self.org.store.record_chat("org", reply)
+                self.org.store.record_chat("org", reply)
             self.org.flush(force=True)
             return {"reply": reply, "events": events, "state": self.snapshot()}
 

@@ -100,7 +100,8 @@ def test_arena_skips_debate_when_voice_offline(org, monkeypatch):
     llmclient.note_voice_failure()  # streak -> offline
     text = ThoughtArena().emerge(org)
     assert calls == []
-    assert "belief" in text  # deterministic fallback summary
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
 def test_arena_marks_offline_after_failure_streak(org, monkeypatch):
@@ -122,3 +123,29 @@ def test_arena_success_clears_offline(org, monkeypatch):
     llmclient.reset_voice()
     ThoughtArena().emerge(org)
     assert voice_online() is True
+
+
+def test_respond_records_reply_so_next_prompt_includes_context(org, monkeypatch):
+    """voice.respond must record its own reply, otherwise the next
+    response prompt has no organism-side history and context decays."""
+    replies = ["first reply", "second reply"]
+    prompts = []
+
+    def fake_generate(prompt, model, timeout, temperature=0.95):
+        prompts.append(prompt)
+        return replies.pop(0)
+
+    patch_generate(monkeypatch, fake_generate)
+    from replicanta import voice
+
+    assert voice.respond(org, "hello", quick=True) == "first reply"
+    assert org.store.chat_log == [["user", "hello"], ["org", "first reply"]]
+    assert voice.respond(org, "again", quick=True) == "second reply"
+    assert org.store.chat_log[-2:] == [
+        ["user", "again"],
+        ["org", "second reply"],
+    ]
+    second_prompt = prompts[-1]
+    assert "first reply" in second_prompt
+    assert "hello" in second_prompt
+    assert "again" in second_prompt

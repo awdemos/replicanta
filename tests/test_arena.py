@@ -274,7 +274,8 @@ def test_late_round_failure_falls_back(org, monkeypatch):
 
     patch_generate(monkeypatch, critic_dies)
     text = ThoughtArena().emerge(org)
-    assert "2 beliefs" in text and "wake" in text
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
 def test_respond_falls_back_on_arena_failure(org, monkeypatch):
@@ -363,7 +364,8 @@ def test_no_usable_draft_falls_back(org, monkeypatch):
     local deterministic fallback answers instead."""
     _scripted(monkeypatch, ["", "Here is a draft of a candidate answer:"])
     text = ThoughtArena().emerge(org)
-    assert "2 beliefs" in text and "wake" in text
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
 def test_repetition_loop_counts_as_no_candidate(org, monkeypatch):
@@ -381,7 +383,8 @@ def test_all_loops_fall_back(org, monkeypatch):
     loop = "\n".join(["I am thinking about thinking."] * 5)
     _scripted(monkeypatch, [loop, loop])
     text = ThoughtArena().emerge(org)
-    assert "2 beliefs" in text and "wake" in text
+    # Wake-state fallback is intentionally quiet.
+    assert text == ""
 
 
 def test_anaphora_loop_counts_as_no_candidate(org, monkeypatch):

@@ -51,9 +51,23 @@ def narrate(org, model=None, timeout=None, rng=None):
     )
 
 
-def respond(org, message, model=None, timeout=None, rng=None, on_token=None, quick=False):
-    """First-person reply to the user; quick=True skips the debate."""
-    return _emerge(
+def respond(
+    org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True
+):
+    """First-person reply to the user; quick=True skips the debate.
+
+    Records both the incoming message and the generated reply in the
+    organism's chat log when ``record=True`` (the default), so direct
+    callers retain full two-sided context. Callers that already record
+    the message themselves (e.g. ``Organism.hear``) do not see a
+    duplicate because the message is only logged if it is not already
+    the most recent entry. Group-chat orchestration can pass
+    ``record=False`` to keep group lines out of individual chat logs.
+    """
+    chat_log = getattr(org.store, "chat_log", None)
+    if record and (chat_log is None or not chat_log or chat_log[-1] != ["user", message]):
+        org.store.record_chat("user", message)
+    reply = _emerge(
         org,
         task="reply",
         message=message,
@@ -64,6 +78,9 @@ def respond(org, message, model=None, timeout=None, rng=None, on_token=None, qui
         timeout=timeout,
         rng=rng,
     )
+    if record and reply:
+        org.store.record_chat("org", reply)
+    return reply
 
 
 # -- skills: reflection loop -------------------------------------------------
