@@ -360,8 +360,9 @@ def test_reflect_proposal_validates_and_pends(tmp_path, monkeypatch):
     assert extensions.pending()["regex"] == "i adore (.+)"
 
 
-def test_reflect_proposal_auto_applies_by_default(tmp_path, monkeypatch):
+def test_reflect_proposal_auto_applies_when_enabled(tmp_path, monkeypatch):
     org = _organism(tmp_path)
+    org.store.auto_apply_patches = True
     patch_generate(
         monkeypatch,
         lambda *a, **k: (
@@ -377,6 +378,24 @@ def test_reflect_proposal_auto_applies_by_default(tmp_path, monkeypatch):
     assert result.get("applied") is not None
     assert extensions.pending() is None
     assert extensions.active_entries("pattern")[0]["regex"] == "i adore (.+)"
+
+
+def test_reflect_proposal_pends_by_default(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    patch_generate(
+        monkeypatch,
+        lambda *a, **k: (
+            "patch-extension:\n"
+            "kind: pattern\n"
+            "entry: i adore (.+) -> user:like_{x}:true\n"
+            "example: i adore hiking\n"
+            "why: the user says adore"
+        ),
+    )
+    result = voice.reflect(org)
+    assert result["action"] == "proposal"
+    assert result.get("applied") is None
+    assert extensions.pending()["regex"] == "i adore (.+)"
 
 
 def test_reflect_invalid_proposal_becomes_none(tmp_path, monkeypatch):

@@ -180,7 +180,7 @@ def test_inner_view_shows_pending_proposal(org, tmp_path):
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
     assert "seed: what if the rain is curious" in view
-    assert "auto-applied" in view
+    assert "(/approve to apply · /reject to discard)" in view
 
 
 def test_inner_view_shows_manual_approval_when_auto_off(org, tmp_path):

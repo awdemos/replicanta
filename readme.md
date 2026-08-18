@@ -56,7 +56,7 @@ For the web interface: `.venv/bin/replicanta --web`
 - **MUD** — dungeon crawl with `/mud`; type moves like `go north` or
   `take torch`.
 - **Self-modification** — it can propose patches to its own code; auto-apply is
-  on by default (`/auto-apply off` to require approval).
+  off by default (`/auto-apply on` to apply without approval).
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
   utterances, and fades.
 
@@ -151,6 +151,72 @@ Web interface (Glasshouse):
 Glasshouse binds to `127.0.0.1:8765` and opens the browser. Use `--port` to
 choose another port or `--no-browser` for headless use.
 
+### 6. Run in Container Use (sandboxed agents)
+
+Replicanta can run inside [Container Use](https://container-use.com) so that
+coding agents work in an isolated Dagger container instead of on your host.
+The project's default environment is configured in
+`.container-use/environment.json`.
+
+Prerequisites:
+
+- [Container Use CLI](https://container-use.com/quickstart) (`container-use`)
+- Ollama running on the host and listening on all interfaces (or on the
+  `host.containers.internal` DNS name that Container Use provides):
+
+```bash
+ollama serve
+# or, if it only binds to localhost, restart with:
+# OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+Start the Container Use MCP server and ask your agent to create an environment
+and run Replicanta in web mode. For example, with Claude Code:
+
+```bash
+claude mcp add container-use -- container-use stdio
+# Then prompt Claude: "Start Replicanta in a Container Use environment with --web
+# and tell me the URL and environment id."
+```
+
+For OpenCode, add this to `opencode.json`:
+
+```json
+{
+  "$schema": "http://opencode.ai/config.json",
+  "mcp": {
+    "container-use": {
+      "type": "local",
+      "command": ["container-use", "stdio"],
+      "enabled": true
+    }
+  }
+}
+```
+
+The default Container Use configuration:
+
+- Base image: `ghcr.io/astral-sh/uv:python3.14-bookworm-slim`
+- Installs the project and the bundled `scallopy` wheel into `/workdir/.venv`
+- Sets `OLLAMA_URL=http://host.containers.internal:11434/api/generate`
+- Sets `REPLICANTA_LLM_BACKEND=ollama`
+
+You can inspect an agent's environment with:
+
+```bash
+container-use list
+container-use log <env-id>
+container-use diff <env-id>
+container-use terminal <env-id>
+container-use checkout <env-id>
+```
+
+> **Note:** The TUI requires a terminal device that Container Use's
+> `environment_run_cmd` may not expose interactively. Use `--web` for a
+> browser-accessible UI and `container-use environment_add_service` to expose
+> port 8765.
+
+
 ## Interacting
 
 ### Common commands
@@ -189,7 +255,8 @@ Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7).
 - Harsh words raise stress and mood `hurt`; kind words lower stress and mood
   `grateful`.
 - Self-patches are staged in `artifacts/extensions.json`. By default they
-  auto-apply; use `/auto-apply off` to require `/approve` or `/reject`. `/revert`
+  auto-apply; use `/auto-apply on` to allow self-patches without approval,
+  or `/approve` and `/reject` to handle pending patches. `/revert`
   rolls back the last applied patch.
 - Each organism lives in `organisms/<name>/` with its own state and artifacts.
   Launch directly with `.venv/bin/replicanta --org fern`.

@@ -80,7 +80,7 @@ class BeliefStore:
         self.on_utterance = None  # callback(role, text) fired on chat lines
         self.dirty = False  # any state changed since last save()
         self.genome_dirty = False  # beliefs/rules changed -> .scl needs rewrite
-        self.auto_apply_patches = True  # organism self-patches apply immediately
+        self.auto_apply_patches = False  # organism self-patches require approval
 
     # -- belief operations -------------------------------------------------
     def note_activity(self, key, n=1):
@@ -446,7 +446,7 @@ class BeliefStore:
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
         self.last_reflect_cycle = state.get("last_reflect_cycle", 0)
-        self.auto_apply_patches = state.get("auto_apply_patches", True)
+        self.auto_apply_patches = state.get("auto_apply_patches", False)
         self.activity = {}
         for k, v in state.get("activity", {}).items():
             if isinstance(v, (list, dict)):

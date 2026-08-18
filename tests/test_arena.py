@@ -109,6 +109,55 @@ def test_indifferent_deadlock_draws_randomly(org, monkeypatch):
     assert result in ("fur and paws", "fur and quiet")
 
 
+def test_prose_vote_parsed(org, monkeypatch):
+    """Voters often ignore the strict VOTE: contract; natural-language
+    preferences ("Candidate 1 is better") must still be counted."""
+    _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            "both have weaknesses",
+            "Candidate 1 is better",
+            "the first one is stronger",
+        ],
+    )
+    assert ThoughtArena().emerge(org) == "fur and paws"
+
+
+def test_prose_critique_tiebreaks(org, monkeypatch):
+    """When voters split, a prose critique preference breaks the tie."""
+    critique_prefers_draft_2 = "the second option is stronger"
+    _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            critique_prefers_draft_2,
+            "VOTE: 1",
+            "VOTE: 2",
+        ],
+    )
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+
+
+def test_strict_vote_prefix_takes_precedence(org, monkeypatch):
+    """A strict VOTE: line wins even if the surrounding prose mentions the
+    other candidate first."""
+    _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            "both weak",
+            "Candidate 1 is garbage, so VOTE: 2",
+            "Candidate 2 is also bad, so VOTE: 1",
+        ],
+    )
+    result = ThoughtArena(rng=random.Random(3)).emerge(org)
+    assert result in ("fur and paws", "fur and quiet")
+
+
 def test_narrate_runs_a_debate(org, monkeypatch):
     """narrate() delegates to the arena instead of one solo call."""
     calls = _scripted(

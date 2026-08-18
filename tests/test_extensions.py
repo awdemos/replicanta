@@ -2,8 +2,9 @@
 validated, versioned registry of extra learning patterns, utterance seeds
 and sentiment vocabulary in artifacts/extensions.json.
 
-By default patches auto-apply; manual approve/reject is available when
-auto_apply is False. /revert rolls back the last applied entry."""
+By default patches require approval; manual approve/reject is available,
+and /auto-apply on allows patches to apply immediately. /revert rolls
+back the last applied entry."""
 
 from typing import ClassVar
 

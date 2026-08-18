@@ -1,0 +1,16 @@
+{
+  "workdir": "/workdir",
+  "base_image": "ghcr.io/astral-sh/uv:python3.14-bookworm-slim",
+  "setup_commands": [
+    "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git procps && rm -rf /var/lib/apt/lists/*"
+  ],
+"install_commands": [
+    "uv venv --python 3.14 /workdir/.venv \u0026\u0026 uv pip install --python /workdir/.venv/bin/python3 -e /workdir \u0026\u0026 uv pip install --python /workdir/.venv/bin/python3 https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl"
+  ],
+  "env": [
+    "OLLAMA_URL=http://host.containers.internal:11434/api/generate",
+    "OLLAMA_TIMEOUT=240",
+    "PATH=/workdir/.venv/bin:/usr/local/bin:/usr/bin:/bin",
+    "REPLICANTA_LLM_BACKEND=ollama"
+  ]
+}

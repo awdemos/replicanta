@@ -22,7 +22,21 @@ from replicanta import activity, llmclient, narration
 from replicanta.llmclient import clean_candidate as _clean_candidate
 
 VOTE_PREFIX = "VOTE: "
-VOTE_RE = re.compile(r"VOTE:\s*([12])")
+VOTE_RE = re.compile(r"(?:^|\b)VOTE\s*[:=-]?\s*([12])\b", re.IGNORECASE)
+_LOOSE_VOTE_RE = re.compile(
+    r"(?:^|[^\w])(?:candidate|draft|option|choice|the)\s*(?:number\s*)?([12])"
+    r"(?:\s*(?:is\s+)?(?:better|stronger|best|wins|prefer\w*|good\w*))?"
+    r"(?:[^\w]|$)",
+    re.IGNORECASE,
+)
+_FIRST_SECOND_RE = re.compile(
+    r"\b(the\s+)?(?:(?:first|1st)\s+(?:one|candidate|draft)|the\s+first)\b",
+    re.IGNORECASE,
+)
+_SECOND_FIRST_RE = re.compile(
+    r"\b(the\s+)?(?:(?:second|2nd)\s+(?:one|candidate|draft)|the\s+second)\b",
+    re.IGNORECASE,
+)
 
 # chaos -> probability the second proposal is replaced by a rogue
 # thought of the organism's own devising. The highest chaos level at or
@@ -322,17 +336,35 @@ class ThoughtArena:
                 odds = p
         return odds
 
+    def _extract_vote(self, text):
+        """Return 1 or 2 if the text contains a clear preference, else None.
+
+        Tries the strict VOTE: contract first, then common prose forms
+        ("Candidate 1", "the first one", "draft 1 is better")."""
+        m = VOTE_RE.search(text)
+        if m:
+            return int(m.group(1))
+        m = _LOOSE_VOTE_RE.search(text)
+        if m:
+            return int(m.group(1))
+        if _FIRST_SECOND_RE.search(text):
+            return 1
+        if _SECOND_FIRST_RE.search(text):
+            return 2
+        return None
+
     def _pick(self, drafts, votes, critique):
         counts = {1: 0, 2: 0}
         for v in votes:
-            m = VOTE_RE.search(v)
-            if m and m.group(1) in ("1", "2"):
-                counts[int(m.group(1))] += 1
+            vote = self._extract_vote(v)
+            if vote in (1, 2):
+                counts[vote] += 1
         if counts[1] != counts[2]:
             return drafts[0] if counts[1] > counts[2] else drafts[1]
-        m = VOTE_RE.search(critique)
-        if m and m.group(1) in ("1", "2"):
-            return drafts[int(m.group(1)) - 1]
+        # No majority from voters: ask the critic which candidate it preferred.
+        crit = self._extract_vote(critique)
+        if crit in (1, 2):
+            return drafts[crit - 1]
         return self._rng.choice(drafts)
 
     # -- model -----------------------------------------------------------

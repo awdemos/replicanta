@@ -1026,9 +1026,9 @@ def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
     assert any("reverted" in line for line in logged)
 
 
-def test_tui_auto_apply_patches_default_on(monkeypatch, tmp_path):
+def test_tui_auto_apply_patches_default_off(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
-    assert app.org.store.auto_apply_patches is True
+    assert app.org.store.auto_apply_patches is False
 
 
 def test_tui_auto_apply_toggle(monkeypatch, tmp_path):
