@@ -23,6 +23,7 @@ from replicanta import (
     mud,
     nursery,
     speech,
+    telemetry,
     tui_commands,
     voice,
 )
@@ -868,57 +869,82 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         return self.server.glasshouse
 
     def do_GET(self):
-        if not self._host_ok():
-            return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
         path = urlparse(self.path).path
-        if path == "/api/state":
-            if not self.app.auth_ok(self):
-                return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
-            return self._json(HTTPStatus.OK, self.app.snapshot())
-        if path == "/api/commands":
-            return self._json(
-                HTTPStatus.OK,
-                [
-                    {"name": name, "usage": usage, "description": description}
-                    for name, usage, description, _category in tui_commands.COMMANDS
-                ],
-            )
-        assets = {
-            "/": ("text/html; charset=utf-8", APP_HTML),
-            "/app.css": ("text/css; charset=utf-8", APP_CSS),
-            "/app.js": ("text/javascript; charset=utf-8", APP_JS),
-        }
-        if path in assets:
-            kind, body = assets[path]
-            return self._send(HTTPStatus.OK, kind, body.encode())
-        return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        with telemetry.get_tracer(__name__).start_as_current_span("http.request") as span:
+            span.set_attribute("http.method", "GET")
+            span.set_attribute("http.route", path)
+            if not self._host_ok():
+                span.set_attribute("http.status_code", HTTPStatus.FORBIDDEN)
+                return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
+            if path == "/api/state":
+                if not self.app.auth_ok(self):
+                    span.set_attribute("http.status_code", HTTPStatus.UNAUTHORIZED)
+                    return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                span.set_attribute("http.status_code", HTTPStatus.OK)
+                return self._json(HTTPStatus.OK, self.app.snapshot())
+            if path == "/api/commands":
+                span.set_attribute("http.status_code", HTTPStatus.OK)
+                return self._json(
+                    HTTPStatus.OK,
+                    [
+                        {"name": name, "usage": usage, "description": description}
+                        for name, usage, description, _category in tui_commands.COMMANDS
+                    ],
+                )
+            assets = {
+                "/": ("text/html; charset=utf-8", APP_HTML),
+                "/app.css": ("text/css; charset=utf-8", APP_CSS),
+                "/app.js": ("text/javascript; charset=utf-8", APP_JS),
+            }
+            if path in assets:
+                kind, body = assets[path]
+                span.set_attribute("http.status_code", HTTPStatus.OK)
+                return self._send(HTTPStatus.OK, kind, body.encode())
+            span.set_attribute("http.status_code", HTTPStatus.NOT_FOUND)
+            return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
-        if not self._host_ok():
-            return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
         path = urlparse(self.path).path
-        if not self.app.auth_ok(self):
-            return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
-        try:
-            data = self._body()
-            routes = {
-                "/api/chat": lambda: self.app.chat(data.get("text", "")),
-                "/api/command": lambda: self.app.command(data.get("command", "")),
-                "/api/lifecycle": lambda: self.app.lifecycle(data.get("action")),
-                "/api/settings": lambda: self.app.settings(data),
-                "/api/mutation": lambda: self.app.mutation(data.get("action")),
-                "/api/organisms": lambda: self.app.create_organism(data.get("name", "")),
-                "/api/swap": lambda: self.app.swap(data.get("name", "")),
-                "/api/mud-act": lambda: self.app.mud_act(data.get("text", "")),
-                "/api/typing": lambda: self.app.typing(data),
-            }
-            if path not in routes:
-                return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
-            return self._json(HTTPStatus.OK, routes[path]())
-        except (WebError, ValueError, TypeError) as exc:
-            return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
-        except (OSError, RuntimeError):
-            return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"})
+        with telemetry.get_tracer(__name__).start_as_current_span("http.request") as span:
+            span.set_attribute("http.method", "POST")
+            span.set_attribute("http.route", path)
+            if not self._host_ok():
+                span.set_attribute("http.status_code", HTTPStatus.FORBIDDEN)
+                return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
+            if not self.app.auth_ok(self):
+                span.set_attribute("http.status_code", HTTPStatus.UNAUTHORIZED)
+                return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            try:
+                data = self._body()
+                routes = {
+                    "/api/chat": lambda: self.app.chat(data.get("text", "")),
+                    "/api/command": lambda: self.app.command(data.get("command", "")),
+                    "/api/lifecycle": lambda: self.app.lifecycle(data.get("action")),
+                    "/api/settings": lambda: self.app.settings(data),
+                    "/api/mutation": lambda: self.app.mutation(data.get("action")),
+                    "/api/organisms": lambda: self.app.create_organism(data.get("name", "")),
+                    "/api/swap": lambda: self.app.swap(data.get("name", "")),
+                    "/api/mud-act": lambda: self.app.mud_act(data.get("text", "")),
+                    "/api/typing": lambda: self.app.typing(data),
+                }
+                if path not in routes:
+                    span.set_attribute("http.status_code", HTTPStatus.NOT_FOUND)
+                    return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                with telemetry.get_tracer(__name__).start_as_current_span("http.route") as route_span:
+                    route_span.set_attribute("http.route", path)
+                    result = routes[path]()
+                span.set_attribute("http.status_code", HTTPStatus.OK)
+                return self._json(HTTPStatus.OK, result)
+            except (WebError, ValueError, TypeError) as exc:
+                span.record_exception(exc)
+                span.set_attribute("error", True)
+                span.set_attribute("http.status_code", HTTPStatus.BAD_REQUEST)
+                return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except (OSError, RuntimeError) as exc:
+                span.record_exception(exc)
+                span.set_attribute("error", True)
+                span.set_attribute("http.status_code", HTTPStatus.INTERNAL_SERVER_ERROR)
+                return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"})
 
     def _host_ok(self):
         """Reject DNS rebinding: the Host header must match the bind address.

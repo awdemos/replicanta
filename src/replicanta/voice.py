@@ -5,12 +5,13 @@ over narration.py's prompts and fallbacks. This module is the seam that
 keeps the dependency graph acyclic: arena imports narration (prompts),
 voice imports both, narration imports neither."""
 
-from replicanta import extensions, narration
+from replicanta import extensions, narration, telemetry
 from replicanta.arena import ThoughtArena
 from replicanta.narration import dedup_emerge, state_snapshot
 from replicanta.skills import Skill
 
 
+@telemetry.span("voice.emerge")
 def _emerge(
     org,
     task,
@@ -31,6 +32,10 @@ def _emerge(
     task-specific arguments instead of repeating the arena construction
     and emerge/quick_take dispatch.
     """
+    current_span = telemetry.get_current_span()
+    current_span.set_attribute("voice.task", task)
+    current_span.set_attribute("voice.quick", quick)
+    current_span.set_attribute("voice.structured", structured)
     arena = ThoughtArena(rng=rng, model=model, timeout=timeout)
     method = arena.quick_take if quick else arena.emerge
     return method(
@@ -44,6 +49,7 @@ def _emerge(
     )
 
 
+@telemetry.span("voice.narrate")
 def narrate(org, model=None, timeout=None, rng=None):
     """First-person idle thought; None when it would just repeat a recent line."""
     return dedup_emerge(
@@ -51,6 +57,7 @@ def narrate(org, model=None, timeout=None, rng=None):
     )
 
 
+@telemetry.span("voice.respond")
 def respond(
     org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True
 ):
@@ -87,6 +94,7 @@ def respond(
 # -- skills: reflection loop -------------------------------------------------
 
 
+@telemetry.span("voice.reflect")
 def reflect(org, model=None, timeout=None, rng=None):
     """One reflection cycle: distill, patch, or 'nothing'; structured."""
     text = _emerge(

@@ -14,7 +14,7 @@ from typing import ClassVar
 import scallopy
 
 from replicanta import config as project_config
-from replicanta import extensions, goals, learning, mud, sentiment
+from replicanta import extensions, goals, learning, mud, sentiment, telemetry
 from replicanta import memory as memory_module
 from replicanta.fileutil import atomic_write_text
 from replicanta.gitstate import CONDITION_TEXT as GIT_CONDITION_TEXT
@@ -1190,6 +1190,7 @@ class Organism:
         return True
 
     # -- real-time engine ---------------------------------------------------
+    @telemetry.span("organism.tick")
     def tick(self, dt=1.0):
         """Advance the organism by dt seconds of lived time (TUI scheduler
         entry). Senses the host every SENSE_INTERVAL, advances the lifecycle
@@ -1200,6 +1201,10 @@ class Organism:
         events = []
         if self.lifecycle.state == "dead":
             return events
+        current_span = telemetry.get_current_span()
+        current_span.set_attribute("organism", self.dir_path.name)
+        current_span.set_attribute("organism.cycle", self.store.cycle)
+        current_span.set_attribute("organism.state", self.lifecycle.state)
         self.store.surprise_this_tick = False
         was_insane = self.store.insane
         self.meter.tick(sleeping=(self.lifecycle.state == "sleep"), dt=dt)

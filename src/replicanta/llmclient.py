@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from replicanta import extensions
+from replicanta import extensions, telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +292,7 @@ def _generate_llama_cpp(prompt, model, timeout, temperature):
     return _strip_special(_strip_think(data.get("content", ""))), stats
 
 
+@telemetry.span("llm.generate")
 def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     """(text, stats) from the configured backend, non-streaming.
 
@@ -300,9 +301,18 @@ def generate_with_stats(prompt, model, timeout=None, temperature=0.95):
     """
     if timeout is None:
         timeout = default_timeout()
+    current_span = telemetry.get_current_span()
+    current_span.set_attribute("llm.backend", llm_backend())
+    current_span.set_attribute("llm.model", model)
+    current_span.set_attribute("llm.timeout", timeout)
+    current_span.set_attribute("llm.temperature", temperature)
     if llm_backend() == "llama_cpp":
-        return _generate_llama_cpp(prompt, model, timeout, temperature)
-    return _generate_ollama(prompt, model, timeout, temperature)
+        text, stats = _generate_llama_cpp(prompt, model, timeout, temperature)
+    else:
+        text, stats = _generate_ollama(prompt, model, timeout, temperature)
+    current_span.set_attribute("llm.prompt_tokens", stats.get("prompt_tokens", 0))
+    current_span.set_attribute("llm.gen_tokens", stats.get("gen_tokens", 0))
+    return text, stats
 
 
 def generate(prompt, model, timeout=None, temperature=0.95):
@@ -310,6 +320,7 @@ def generate(prompt, model, timeout=None, temperature=0.95):
     return generate_with_stats(prompt, model, timeout, temperature)[0]
 
 
+@telemetry.span("llm.vision")
 def describe_image(image_bytes, model=None, timeout=None):
     """JPEG bytes -> a short scene description from a local vision model.
 
@@ -322,6 +333,9 @@ def describe_image(image_bytes, model=None, timeout=None):
         model = vision_model()
     if timeout is None:
         timeout = vision_timeout()
+    current_span = telemetry.get_current_span()
+    current_span.set_attribute("llm.model", model)
+    current_span.set_attribute("llm.timeout", timeout)
     payload = json.dumps(
         {
             "model": model,

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "replicanta"
-version = "0.2.1"
+version = "0.3.0"
 description = "A neurosymbolic organism implementation coupling Scallop with an LLM backend"
 readme = "readme.md"
 requires-python = ">=3.14"
@@ -16,6 +16,9 @@ dependencies = [
     "rich",          # direct: tui_views.py imports it (textual pulls it too)
     "pyperclip>=1.8", # direct: tui.py clipboard integration
     "lupa>=2.0",     # core: hooks.py Lua runtime; exercised by the test suite
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.25",
 ]
 
 [project.optional-dependencies]

@@ -52,6 +52,7 @@ from replicanta import (
     mud,
     nursery,
     speech,
+    telemetry,
     tui_commands,
     tui_views,
     voice,
@@ -2327,11 +2328,15 @@ class OrganismApp(App):
         """Parse and dispatch a slash-command line from the chat input."""
         parts = cmd.split()
         name = parts[0]
-        try:
-            self._dispatch(name, parts)
-        except (ValueError, IndexError) as exc:
-            # a mistyped argument must never kill the input handler
-            self._append_log(f"{name}: {exc}", STYLE_WARN)
+        with telemetry.get_tracer(__name__).start_as_current_span("tui.command") as span:
+            span.set_attribute("command", name)
+            try:
+                self._dispatch(name, parts)
+            except (ValueError, IndexError) as exc:
+                # a mistyped argument must never kill the input handler
+                span.record_exception(exc)
+                span.set_status(telemetry.Status(telemetry.StatusCode.ERROR))
+                self._append_log(f"{name}: {exc}", STYLE_WARN)
 
     def _dispatch(self, name, parts):
         if name == "/chaos":
@@ -2796,6 +2801,8 @@ class OrganismApp(App):
 def main():
     """CLI entry point: parse args, prepare the nursery, and run TUI or web UI."""
     import argparse
+
+    telemetry.init_telemetry()
 
     parser = argparse.ArgumentParser(description="Replicanta TUI")
     parser.add_argument("--dir", default=str(Path(__file__).parent))

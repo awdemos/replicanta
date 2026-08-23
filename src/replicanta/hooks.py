@@ -30,7 +30,7 @@ to "lua"."""
 import threading
 from pathlib import Path
 
-from replicanta import lua_sandbox
+from replicanta import lua_sandbox, telemetry
 
 EVENTS = (
     "birth",
@@ -126,39 +126,42 @@ class HookEngine:
             self.hooks_service.emit(event, text)
         if not self.scripts or event not in EVENTS:
             return
-        with self._lock:
-            was_latched = self._available is False
-            disabled = self._ensure_runtime()
-            if disabled is not None:
-                if not was_latched:
-                    self.emit(disabled)
-                return
-            try:
-                ctx = (
-                    self._ctx(org, event, text)
-                    if org is not None
-                    else self._lua.table(event=event, text=text)
-                )
-            except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
-                self.emit(f"ctx: {exc}")
-                return
-            handlers = []
-            prev_hook = self._lua.globals()[f"on_{event}"]
-            same_hook = self._lua.eval("function(a, b) return a == b end")
-            for script in self.scripts:
+        with telemetry.get_tracer(__name__).start_as_current_span("hooks.fire") as span:
+            span.set_attribute("hook.event", event)
+            span.set_attribute("hook.script_count", len(self.scripts))
+            with self._lock:
+                was_latched = self._available is False
+                disabled = self._ensure_runtime()
+                if disabled is not None:
+                    if not was_latched:
+                        self.emit(disabled)
+                    return
                 try:
-                    lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=script.name)
-                    hook = self._lua.globals()[f"on_{event}"]
-                    if hook is not None and not same_hook(hook, prev_hook):
-                        handlers.append((script.name, hook))
-                        prev_hook = hook
-                except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
-                    self.emit(f"{script.name}: {exc}")
-            for name, hook in handlers:
-                try:
-                    hook(ctx)
-                except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
-                    self.emit(f"{name}: {exc}")
+                    ctx = (
+                        self._ctx(org, event, text)
+                        if org is not None
+                        else self._lua.table(event=event, text=text)
+                    )
+                except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
+                    self.emit(f"ctx: {exc}")
+                    return
+                handlers = []
+                prev_hook = self._lua.globals()[f"on_{event}"]
+                same_hook = self._lua.eval("function(a, b) return a == b end")
+                for script in self.scripts:
+                    try:
+                        lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=script.name)
+                        hook = self._lua.globals()[f"on_{event}"]
+                        if hook is not None and not same_hook(hook, prev_hook):
+                            handlers.append((script.name, hook))
+                            prev_hook = hook
+                    except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
+                        self.emit(f"{script.name}: {exc}")
+                for name, hook in handlers:
+                    try:
+                        hook(ctx)
+                    except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
+                        self.emit(f"{name}: {exc}")
 
     def run(self, name, org):
         """Run one named script on demand (the /lua command): execute it in

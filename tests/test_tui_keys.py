@@ -213,7 +213,7 @@ def test_command_palette_fills_input(monkeypatch, tmp_path):
         async with app.run_test() as pilot:
             app.action_command_palette()
             assert isinstance(pilot.app.screen, CommandPalette)
-            pilot.app.screen.dismiss("/chaos")
+            await pilot.app.screen.dismiss("/chaos")
             await asyncio.sleep(0.05)
             assert app.chat_input.value == "/chaos "
             assert app.chat_input.has_focus
