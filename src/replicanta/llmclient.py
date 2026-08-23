@@ -12,7 +12,9 @@ model output. narration.py builds prompts, arena.py debates them, mud.py
 plays games with them; none of them owns the transport."""
 
 import base64
+import ipaddress
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -20,6 +22,8 @@ import urllib.parse
 import urllib.request
 
 from replicanta import extensions
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "qwen3.8-ud-hf:q3_k_m"
 MAX_TOKENS = 180
@@ -62,7 +66,31 @@ def _validate_llm_url(url):
         raise ValueError("LLM URL must have a host")
     if hostname in {"169.254.169.254"}:
         raise ValueError(f"LLM URL host {hostname!r} is not allowed")
+    _warn_if_remote(hostname, url)
     return url
+
+
+_warned_hosts = set()
+
+
+def _warn_if_remote(hostname, url):
+    """Prompts include chat history, user facts, memories, and uname output —
+    flag (once) when they are about to leave this machine for a public host."""
+    if hostname in _warned_hosts:
+        return
+    try:
+        addr = ipaddress.ip_address(hostname)
+        local = addr.is_loopback or addr.is_private or addr.is_link_local
+    except ValueError:
+        # A hostname, not an IP literal: localhost/mDNS count as local.
+        local = hostname in ("localhost",) or hostname.endswith(".local")
+    if not local:
+        _warned_hosts.add(hostname)
+        logger.warning(
+            "LLM endpoint %s is a non-local host — prompts (chat history, "
+            "memories, system info) will be sent there in plaintext",
+            url,
+        )
 
 
 def llama_cpp_url():

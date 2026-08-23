@@ -122,6 +122,22 @@ def test_sandbox_blocks_python_rce_in_run(scripts, tmp_path):
     assert "python" in status.lower() or "nil" in status.lower()
 
 
+def test_sandbox_blocks_dunder_escape_via_ctx_lambda(scripts, tmp_path):
+    """Regression: ctx lambdas are Python callables; fn.__globals__ must be
+    unreachable or the sandbox is escapable via __builtins__.__import__."""
+    (scripts / "dunder.lua").write_text(
+        "function main(ctx)\n"
+        "  local ok, res = pcall(function() return ctx.log.__globals__ end)\n"
+        "  if ok and res ~= nil then ctx.log('ESCAPED') return end\n"
+        "  ctx.log('blocked')\n"
+        "end\n"
+    )
+    emitted = []
+    engine = HookEngine(scripts, emit=emitted.append)
+    engine.run("dunder.lua", _org(tmp_path))
+    assert emitted == ["blocked"]
+
+
 def test_reload_picks_up_new_scripts(scripts, tmp_path):
     engine = HookEngine(scripts)
     assert engine.scripts == []

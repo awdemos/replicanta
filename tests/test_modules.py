@@ -148,3 +148,23 @@ def test_lua_sandbox_blocks_python_rce_in_modules(tmp_path):
     loader.load_all()
     assert "rce" not in loader.modules
     assert any("python" in w.lower() or "nil" in w.lower() for w in loader.warnings)
+
+
+def test_lua_sandbox_blocks_dunder_escape_via_services(tmp_path):
+    """Regression: ctx.services is a live Python object; without dunder
+    blocking, obj.__class__.__base__.__subclasses__() escapes to Python."""
+    d = tmp_path / "dunder"
+    d.mkdir()
+    (d / "manifest.toml").write_text('name = "dunder"\nversion = "1.0.0"\n')
+    (d / "init.lua").write_text(
+        "function init(ctx)\n"
+        "  local ok, res = pcall(function() return ctx.services.__class__ end)\n"
+        "  if ok and res ~= nil then error('ESCAPED: __class__ reachable') end\n"
+        "  local ok2, res2 = pcall(function() return ctx.log.__globals__ end)\n"
+        "  if ok2 and res2 ~= nil then error('ESCAPED: __globals__ reachable') end\n"
+        "end\n"
+    )
+    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["dunder"]}})
+    loader.load_all()
+    assert "dunder" in loader.modules
+    assert not any("ESCAPED" in w for w in loader.warnings)

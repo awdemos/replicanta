@@ -38,7 +38,7 @@ cd replicanta
 uv venv --python 3.14
 uv pip install -e .
 uv pip install \
-    https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
+    "https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl#sha256=ddc8d190a55681281f50dffe9f12ef1e04b90a38e1196b786ac2ddb9d7ec51be"
 ollama pull qwen3.8:latest
 .venv/bin/replicanta
 ```
@@ -80,11 +80,12 @@ uv pip install -e .
 ### 2. Install Scallopy
 
 Scallopy is not on PyPI. Use the prebuilt wheel (Python 3.14 / x86_64 /
-glibc ≥ 2.39):
+glibc ≥ 2.39), pinned by sha256 so a swapped or corrupted artifact fails
+the install instead of executing:
 
 ```bash
 uv pip install \
-    https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl
+    "https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl#sha256=ddc8d190a55681281f50dffe9f12ef1e04b90a38e1196b786ac2ddb9d7ec51be"
 ```
 
 To build from source instead, see `ci/main.go` (~15 minutes).
@@ -113,6 +114,11 @@ llama-server \
 
 REPLICANTA_LLM_BACKEND=llama_cpp LLAMACPP_URL=http://localhost:8085 .venv/bin/replicanta
 ```
+
+> The GGUF in `models/` is a third-party fine-tune and is **not** tracked in
+> git — a fresh clone must obtain it separately. Verify its checksum against
+> the publisher's page before use; multi-GB model blobs of unknown provenance
+> are a supply-chain risk (llama.cpp parsers have had CVEs).
 
 Vision (`/look`) is only supported on the Ollama backend.
 
@@ -169,6 +175,10 @@ ollama serve
 # or, if it only binds to localhost, restart with:
 # OLLAMA_HOST=0.0.0.0 ollama serve
 ```
+
+> Warning: `OLLAMA_HOST=0.0.0.0` exposes the Ollama API (model pull/delete,
+> arbitrary prompt execution) to your whole LAN with no auth. Prefer binding
+> a specific interface or firewalling port 11434 to the container subnet.
 
 Start the Container Use MCP server and ask your agent to create an environment
 and run Replicanta in web mode. For example, with Claude Code:
@@ -360,5 +370,8 @@ CI skips the Rust build. To refresh the wheel from a local scallop checkout:
 dagger call build-scallopy --scallop=../scallop export --path=./wheels
 ```
 
-Then replace the release asset (`gh release upload --clobber v0.1.0
-wheels/scallopy-*.whl`).
+Never clobber a published release asset in place — the wheel is installed by
+URL with a pinned sha256, so a replaced asset breaks every install. Cut a
+**new** release tag instead, attach the wheel, compute `sha256sum
+wheels/scallopy-*.whl`, and update `wheelURL` + `wheelSHA256` in
+`ci/main.go` and the install command above together.

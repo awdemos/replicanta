@@ -85,7 +85,7 @@ def _render_key_value(key, val):
     if isinstance(val, bool):
         return f"{key} = {'true' if val else 'false'}"
     elif isinstance(val, str):
-        return f'{key} = "{val}"'
+        return f"{key} = {_toml_string(val)}"
     elif isinstance(val, dict):
         pairs = ", ".join(f"{k} = {_render_literal(v)}" for k, v in val.items())
         return f"{key} = {{ {pairs} }}"
@@ -96,5 +96,18 @@ def _render_literal(val):
     if isinstance(val, bool):
         return "true" if val else "false"
     elif isinstance(val, str):
-        return f'"{val}"'
+        return _toml_string(val)
     return str(val)
+
+
+def _toml_string(val):
+    """Render a TOML basic string with escaping — an unescaped quote or
+    newline would corrupt the config or inject extra keys on save."""
+    escaped = (
+        val.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'

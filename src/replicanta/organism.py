@@ -45,6 +45,23 @@ CHAT_LOG_LIMIT = 24
 MEMORY_LIMIT = 50
 
 
+def _loaded_belief_ok(parts):
+    """Re-validate a [obj, attr, val, conf] entry from state.json."""
+    return (
+        isinstance(parts, (list, tuple))
+        and len(parts) == 4
+        and all(isinstance(s, str) and VALID_VALUE_RE.match(s) for s in parts[:3])
+        and isinstance(parts[3], (int, float))
+        and not isinstance(parts[3], bool)
+    )
+
+
+def _loaded_rule_ok(text):
+    """Rule text is rendered as ``rel {text}`` in the genome; a rule must
+    never span lines, which is what would let it inject new statements."""
+    return isinstance(text, str) and "\n" not in text and "\r" not in text
+
+
 class BeliefStore:
     """In-memory belief dict + archived beliefs + chaos + cycle, persisted to
     state.json. `organism.scl` is rendered from this on every save."""
@@ -426,12 +443,27 @@ class BeliefStore:
         self.fade_streak = state.get("fade_streak", 0)
         self.cycle = state.get("cycle", 0)
         self.rule_counter = state.get("rule_counter", 0)
-        self.rules = [tuple(r) for r in state.get("rules", [])]
+        # state.json is app-owned (0600) but load() must re-validate anyway:
+        # beliefs/rules are rendered verbatim into the .scl genome, so a
+        # tampered state file would otherwise inject Scallop relations.
+        self.rules = [
+            (r[0], int(r[1]))
+            for r in state.get("rules", [])
+            if isinstance(r, (list, tuple))
+            and len(r) == 2
+            and _loaded_rule_ok(r[0])
+            and isinstance(r[1], (int, float))
+            and not isinstance(r[1], bool)
+        ]
         self.beliefs_map = {
-            (b[0], b[1], b[2]): float(b[3]) for b in state.get("beliefs", [])
+            (b[0], b[1], b[2]): float(b[3])
+            for b in state.get("beliefs", [])
+            if _loaded_belief_ok(b)
         }
         self.archived_map = {
-            (b[0], b[1], b[2]): float(b[3]) for b in state.get("archived", [])
+            (b[0], b[1], b[2]): float(b[3])
+            for b in state.get("archived", [])
+            if _loaded_belief_ok(b)
         }
         self.attention = {tuple(p) for p in state.get("attention", [])}
         self.chat_log = [list(c) for c in state.get("chat", [])]

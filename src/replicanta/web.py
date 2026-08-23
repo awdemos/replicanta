@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from replicanta import (
     activity,
@@ -38,7 +38,9 @@ class WebError(ValueError):
 class Glasshouse:
     """Thread-safe adapter between HTTP requests and one live organism."""
 
-    PUBLIC_API_GETS = ("/api/state", "/api/commands")
+    # GET routes served without the bearer token. /api/state is deliberately
+    # NOT here: it carries chat history, memories, and camera frames.
+    PUBLIC_API_GETS = ("/api/commands",)
 
     def __init__(self, root, organism, spawn=None, respond=voice.respond, token=None):
         self.root = Path(root)
@@ -59,8 +61,9 @@ class Glasshouse:
     def auth_ok(self, request):
         header = request.headers.get("Authorization", "")
         if header.startswith("Bearer "):
-            return header[7:] == self.token
-        return request.headers.get("X-Replicanta-Token") == self.token
+            return secrets.compare_digest(header[7:], self.token)
+        provided = request.headers.get("X-Replicanta-Token")
+        return provided is not None and secrets.compare_digest(provided, self.token)
 
     @property
     def name(self):
@@ -405,6 +408,11 @@ class Glasshouse:
                 try:
                     dest = self._export_chat(args[0] if args else None)
                     messages.append(f"chat exported to {dest}")
+                except fileutil.UnsafePathError:
+                    messages.append(
+                        "export failed: give a plain filename "
+                        "(exports land in ~/.replicanta/exports/)"
+                    )
                 except OSError as exc:
                     messages.append(f"export failed: {exc}")
             elif name == "/think":
@@ -541,13 +549,22 @@ class Glasshouse:
         return "/git [on|off|status]"
 
     def _export_chat(self, path=None):
-        """Write the full chat log to a markdown file. Returns the path."""
+        """Write the full chat log to a markdown file. Returns the path.
+
+        Exports are confined to ``~/.replicanta/exports/`` and the optional
+        argument is a bare filename (``safe_name``), never a path — the web
+        command surface must not become an arbitrary file write.
+        """
         org_name = self.name
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        export_dir = Path.home() / ".replicanta" / "exports"
         if path:
-            dest = fileutil.safe_path(Path.home(), path)
+            name = fileutil.safe_name(path)
+            if not name.endswith(".md"):
+                name += ".md"
         else:
-            dest = Path.home() / f"replicanta-chat-{org_name}-{timestamp}.md"
+            name = f"replicanta-chat-{org_name}-{timestamp}.md"
+        dest = fileutil.safe_path(export_dir, name)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         lines = [
@@ -565,7 +582,7 @@ class Glasshouse:
             lines.append(text)
             lines.append("")
 
-        fileutil.atomic_write_text(dest, "\n".join(lines))
+        fileutil.atomic_write_text(dest, "\n".join(lines), root=export_dir)
         return dest
 
     def _persona_command(self, args):
@@ -851,8 +868,12 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         return self.server.glasshouse
 
     def do_GET(self):
+        if not self._host_ok():
+            return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
         path = urlparse(self.path).path
         if path == "/api/state":
+            if not self.app.auth_ok(self):
+                return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return self._json(HTTPStatus.OK, self.app.snapshot())
         if path == "/api/commands":
             return self._json(
@@ -873,6 +894,8 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self):
+        if not self._host_ok():
+            return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
         path = urlparse(self.path).path
         if not self.app.auth_ok(self):
             return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
@@ -896,6 +919,26 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except (OSError, RuntimeError):
             return self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "request failed"})
+
+    def _host_ok(self):
+        """Reject DNS rebinding: the Host header must match the bind address.
+
+        Browsers on a rebinding-attacker page arrive with ``Host:
+        attacker.example`` while the socket is 127.0.0.1; stdlib HTTPServer
+        does not check this, so we do. Wildcard binds (``--host 0.0.0.0``)
+        have nothing stable to pin against and skip the check.
+        """
+        bind = self.server.server_address[0]
+        if bind in ("0.0.0.0", "::"):
+            return True
+        header = self.headers.get("Host")
+        if header is None:
+            return True  # HTTP/1.0 clients may omit it
+        host = (urlsplit(f"//{header}").hostname or "").lower()
+        allowed = {bind.lower()}
+        if bind in ("127.0.0.1", "::1"):
+            allowed |= {"localhost", "127.0.0.1", "::1"}
+        return host in allowed
 
     def _body(self):
         try:
@@ -943,6 +986,15 @@ def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=Tr
     server = make_server(app, host, port)
     url = f"http://{host}:{server.server_port}"
     print(f"Replicanta Glasshouse: {url}")
+    loopback = host in ("127.0.0.1", "::1", "localhost")
+    if not loopback:
+        # Plaintext HTTP + a bearer token: anyone on the network path can
+        # sniff it. Loudly flag that before handing the token out.
+        print(
+            f"WARNING: serving on {host} over plaintext HTTP — the bearer "
+            "token is sniffable on the network and /api/* is exposed. "
+            "Prefer the default 127.0.0.1 bind."
+        )
     print(f"Authorization token: {app.token}")
     if open_browser:
         threading.Timer(0.2, lambda: webbrowser.open(f"{url}/#token={app.token}")).start()

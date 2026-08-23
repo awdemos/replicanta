@@ -29,6 +29,26 @@ _ALLOWED_LUA_GLOBALS = frozenset(
     }
 )
 
+def _attribute_getter(obj, name):
+    """Lupa attribute handler: expose public attributes, hide privates.
+
+    Callers hand live Python objects (service registries, closures) to the
+    sandbox. Without this, Lua can reach ``__class__.__base__.__subclasses__()``
+    or ``fn.__globals__['__builtins__']`` from any injected object and escape
+    to arbitrary Python — blocking underscore access closes that path while
+    normal method calls (``services.get(...)``) keep working.
+    """
+    if isinstance(name, str) and name.startswith("_"):
+        raise AttributeError(name)
+    return getattr(obj, name)
+
+
+def _attribute_setter(obj, name, value):
+    if isinstance(name, str) and name.startswith("_"):
+        raise AttributeError(name)
+    setattr(obj, name, value)
+
+
 # Names that must be removed from the Lua global table, including aliases that
 # could be used to reconstruct blocked functionality.
 _BLOCKED_GLOBALS = (
@@ -59,9 +79,15 @@ def build_runtime():
     The returned runtime:
     - keeps only a small allow-list of Lua globals;
     - blocks access to Python via the ``python`` global;
+    - blocks underscore-prefixed attribute access on any Python object handed
+      into the sandbox (no ``__class__``/``__globals__`` introspection);
     - prevents scripts from creating new globals during sandboxed execution.
     """
-    lua = LuaRuntime(register_eval=False, register_builtins=False)
+    lua = LuaRuntime(
+        register_eval=False,
+        register_builtins=False,
+        attribute_handlers=(_attribute_getter, _attribute_setter),
+    )
 
     # Block known-dangerous globals and aliases.
     for name in _BLOCKED_GLOBALS:

@@ -132,6 +132,54 @@ def test_mutating_endpoints_require_token(live):
     assert result["error"] == "unauthorized"
 
 
+def test_state_requires_token(live):
+    # /api/state carries chat history, memory, and camera frames — it must
+    # not be readable without the bearer token.
+    status, _headers, result = request(live, "/api/state", token=None)
+    assert status == 401
+    assert result["error"] == "unauthorized"
+    status, _headers, result = request(live, "/api/state", token="wrong-token")
+    assert status == 401
+    status, _headers, result = request(live, "/api/state")
+    assert status == 200
+    # Command metadata stays public (no sensitive content).
+    status, _headers, result = request(live, "/api/commands", token=None)
+    assert status == 200
+
+
+def test_host_header_mismatch_is_rejected(live):
+    # DNS-rebinding guard: a page on attacker.example rebinds to 127.0.0.1
+    # but keeps its own Host header.
+    for method_path in ["/", "/api/state"]:
+        req = urllib.request.Request(
+            live + method_path, headers={"Host": "attacker.example"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(req)
+        assert caught.value.code == 403
+        with caught.value:
+            assert json.load(caught.value)["error"] == "forbidden host"
+
+
+def test_export_is_confined_to_exports_dir(live, monkeypatch, tmp_path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/export notes"}
+    )
+    assert status == 200
+    dest = tmp_path / ".replicanta" / "exports" / "notes.md"
+    assert dest.exists()
+    assert any(str(dest) in m for m in result["messages"])
+
+    status, _headers, result = request(
+        live, "/api/command", {"command": "/export ../../.bashrc"}
+    )
+    assert status == 200
+    assert any("plain filename" in m for m in result["messages"])
+    assert not (tmp_path / ".bashrc").exists()
+    assert not (tmp_path / ".replicanta" / "exports" / ".bashrc").exists()
+
+
 def test_state_includes_persona_snapshot(live):
     status, _headers, state = request(live, "/api/state")
     assert status == 200

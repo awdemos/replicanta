@@ -44,3 +44,14 @@ def test_save_config_preserves_unrelated_section(tmp_path):
     loaded = config.load_config(tmp_path)
     assert loaded["voice"]["model"] == "alan"
     assert loaded["git"]["enabled"] is True
+
+
+def test_save_config_escapes_strings(tmp_path):
+    # Quotes/newlines in a value must not corrupt the file or inject keys.
+    cfg = config.load_config(tmp_path)
+    cfg["persona"] = {"name": 'evil"\ninjected = true\nx = "'}
+    config.save_config(tmp_path, cfg)
+    loaded = config.load_config(tmp_path)
+    assert loaded["persona"]["name"] == 'evil"\ninjected = true\nx = "'
+    assert "injected" not in loaded
+    assert "x" not in loaded

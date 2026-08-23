@@ -25,13 +25,25 @@ _CONTROL = ("the weather is nice", "what do you think", "hello there")
 
 KINDS = ("pattern", "seed", "harsh_term", "kind_term")
 
+# Approved patterns run against every chat message on the (single-threaded)
+# server, so a pathological regex is a denial of service. Keep them small and
+# reject nested quantifiers — `(a+)+`-style ambiguity is the classic
+# catastrophic-backtracking shape.
+_MAX_PATTERN_LEN = 200
+_NESTED_QUANTIFIER = re.compile(r"\([^()]*[+*][^()]*\)\s*[+*{]")
+
 
 def validate(entry):
     """Check a proposed entry. Returns (ok, reason)."""
     kind = entry.get("kind")
     if kind == "pattern":
+        pattern = entry.get("regex", "")
+        if not (1 <= len(pattern) <= _MAX_PATTERN_LEN):
+            return False, f"regex must be 1-{_MAX_PATTERN_LEN} chars"
+        if _NESTED_QUANTIFIER.search(pattern):
+            return False, "nested quantifiers can backtrack catastrophically"
         try:
-            rx = re.compile(entry.get("regex", ""), re.IGNORECASE)
+            rx = re.compile(pattern, re.IGNORECASE)
         except re.error:
             return False, "regex does not compile"
         parts = entry.get("template", "").split(":")

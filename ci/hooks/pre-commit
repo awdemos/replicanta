@@ -13,7 +13,11 @@ if [ -z "${DOCKER_HOST:-}" ]; then
 fi
 
 if ! command -v dagger >/dev/null 2>&1; then
-    echo "pre-commit: dagger not installed — skipping ci (install: https://docs.dagger.io)" >&2
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+    echo "pre-commit: dagger not installed — CI DID NOT RUN on this commit." >&2
+    echo "  install: https://docs.dagger.io   or uninstall this hook with:" >&2
+    echo "  git config --unset core.hooksPath" >&2
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
     exit 0
 fi
 

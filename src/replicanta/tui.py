@@ -898,8 +898,12 @@ class OrganismApp(App):
                 return
             except Exception:  # noqa: BLE001,S110 # nosec — clipboard may fail in ssh/tmux; fall through to file
                 pass
-        path = Path(tempfile.gettempdir()) / f"replicanta-chat-{int(time.time())}.txt"
-        path.write_text(body, encoding="utf-8")
+        # mkstemp: unpredictable name, mode 0600 — the chat log must not be
+        # world-readable in a shared /tmp.
+        fd, tmp = tempfile.mkstemp(prefix="replicanta-chat-", suffix=".txt")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(body)
+        path = Path(tmp)
         self._append_log(f"— chat log saved to {path} —", STYLE_DIM, stamp=True)
 
     def _export_chat(self, path=None):

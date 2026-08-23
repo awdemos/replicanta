@@ -1261,6 +1261,37 @@ def test_load_tolerates_corrupt_state_json(tmp_path):
     assert store.cycle == 0
 
 
+def test_load_revalidates_beliefs_and_rules(tmp_path):
+    """Tampered state.json must not inject into the rendered .scl genome."""
+    import json as json_module
+
+    store = BeliefStore(tmp_path)
+    store.state_path.parent.mkdir(parents=True, exist_ok=True)
+    store.state_path.write_text(
+        json_module.dumps(
+            {
+                "beliefs": [
+                    ["apple", "color", "red", 0.9],  # valid
+                    ['evil"); rel 1.0::pwned("x', "color", "red", 0.9],  # injected
+                    ["apple", "color"],  # malformed
+                ],
+                "archived": [["good", "shape", "round", 0.5], ["bad val", "x", "y", 0.5]],
+                "rules": [
+                    ['bel(o, a, v) :- ok(o)', 1],  # valid single line
+                    ['x\nrel 1.0::injected("a", "b", "c")', 1],  # newline injection
+                ],
+            }
+        )
+    )
+    store.load()
+    assert store.beliefs_map == {("apple", "color", "red"): 0.9}
+    assert store.archived_map == {("good", "shape", "round"): 0.5}
+    assert store.rules == [("bel(o, a, v) :- ok(o)", 1)]
+    genome = store.render_scl()
+    assert "injected" not in genome
+    assert "pwned" not in genome
+
+
 def test_organism_git_probe_disabled_by_default(tmp_path):
     _seed_organism(tmp_path)
     org = Organism(tmp_path, probe=_dummy_probe())

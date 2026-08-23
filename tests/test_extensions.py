@@ -60,6 +60,22 @@ def test_validate_rejects_pattern_firing_on_controls():
     assert not ok and "unrelated" in reason
 
 
+def test_validate_rejects_nested_quantifiers():
+    # (a+)+-style ambiguity backtracks catastrophically on chat input.
+    entry = _good_pattern() | {
+        "regex": "i adore (([a-z]+)+)$",
+        "example": "i adore hiking",
+    }
+    ok, reason = extensions.validate(entry)
+    assert not ok and "nested quantifiers" in reason
+
+
+def test_validate_rejects_oversized_pattern():
+    entry = _good_pattern() | {"regex": "x" * 201}
+    ok, reason = extensions.validate(entry)
+    assert not ok and "chars" in reason
+
+
 def test_validate_seed_and_terms():
     assert extensions.validate({"kind": "seed", "text": "a quiet thought"})[0]
     assert not extensions.validate({"kind": "seed", "text": "x"})[0]

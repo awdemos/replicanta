@@ -1,11 +1,11 @@
 {
   "workdir": "/workdir",
-  "base_image": "ghcr.io/astral-sh/uv:python3.14-bookworm-slim",
+  "base_image": "ghcr.io/astral-sh/uv:python3.14-bookworm-slim@sha256:7cf77f594be8042dab6daa9fe326f90962252268b4f120a7f5dccce4d947e6c1",
   "setup_commands": [
     "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git procps && rm -rf /var/lib/apt/lists/*"
   ],
-"install_commands": [
-    "uv venv --python 3.14 /workdir/.venv \u0026\u0026 uv pip install --python /workdir/.venv/bin/python3 -e /workdir \u0026\u0026 uv pip install --python /workdir/.venv/bin/python3 https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl"
+  "install_commands": [
+    "uv venv --python 3.14 /workdir/.venv && uv pip install --python /workdir/.venv/bin/python3 -e /workdir && uv pip install --python /workdir/.venv/bin/python3 'https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl#sha256=ddc8d190a55681281f50dffe9f12ef1e04b90a38e1196b786ac2ddb9d7ec51be'"
   ],
   "env": [
     "OLLAMA_URL=http://host.containers.internal:11434/api/generate",
