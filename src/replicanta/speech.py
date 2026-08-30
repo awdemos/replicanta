@@ -18,7 +18,9 @@ seams), speech is a module-level singleton — one sound server, one
 voice, one queue per process. reset() is the test hook.
 """
 
+import hashlib
 import io
+import json
 import os
 import queue
 import re
@@ -83,7 +85,20 @@ HF_VOICE_URL = (
     "https://huggingface.co/rhasspy/piper-voices/resolve/"
     "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}"
 )
+HF_TREE_API_URL = (
+    "https://huggingface.co/api/models/rhasspy/piper-voices/"
+    "tree/v1.0.0/{lang}/{locale}/{name}/{quality}"
+)
 _VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-([a-z0-9_]+)-([a-z]+)$")
+
+# SHA-256 of the .onnx for voices shipped in voices/. These pins anchor the
+# out-of-the-box voices against even a fully compromised HuggingFace repo;
+# any other voice is verified against the repo's LFS oid (see
+# _metadata_sha256). Verified against the upstream v1.0.0 tree.
+_PINNED_VOICE_SHA256 = {
+    "en_US-lessac-medium": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+    "en_GB-alan-low": "a1f60584620a2bed203de823d08f5abb336fb15f3d6f33f8c341e3e2cabf5dde",
+}
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
 # Long model replies can take ages to synthesize and occasionally hang the
@@ -174,22 +189,71 @@ def voice_urls(spec):
     )
 
 
+def _metadata_sha256(spec):
+    """Expected SHA-256 of a voice's .onnx, from the HuggingFace repo tree
+    API (the LFS oid is the file's SHA-256), or None when the lookup
+    fails. Only the model is covered: the small .onnx.json config is a
+    plain git blob upstream, which carries no content hash we can check.
+    Uses curl for the same ssl reason as download_voice."""
+    m = _VOICE_NAME_RE.match(spec)
+    if not m:
+        return None
+    locale, name, quality = m.groups()
+    url = HF_TREE_API_URL.format(
+        lang=locale.split("_")[0], locale=locale, name=name, quality=quality
+    )
+    try:
+        out = subprocess.run(  # nosec
+            ["curl", "-sfSL", url],
+            check=True,
+            timeout=60,
+            capture_output=True,
+            text=True,
+        ).stdout
+        for entry in json.loads(out):
+            if entry.get("path", "").endswith(f"/{spec}.onnx"):
+                return entry.get("lfs", {}).get("oid")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError):
+        return None
+    return None
+
+
+def _expected_sha256(spec):
+    """SHA-256 a downloaded model must match: a hard pin for the voices
+    shipped in voices/, otherwise the repo's LFS oid from the HF API."""
+    return _PINNED_VOICE_SHA256.get(spec) or _metadata_sha256(spec)
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_voice(spec):
     """Fetch a piper voice (model + config) into voices/ from the
     rhasspy/piper-voices HuggingFace repo. Returns the model path, or
-    None when the name is invalid or the download fails. Uses curl —
-    the container's python ssl can't verify huggingface certs."""
+    None when the name is invalid or the download fails. The model's
+    SHA-256 is verified before it is kept — an unverifiable or mismatching
+    download is deleted, never returned. Uses curl — the container's
+    python ssl can't verify huggingface certs."""
     urls = voice_urls(spec)
     if urls is None:
         return None
     vdir = voices_dir()
     vdir.mkdir(exist_ok=True)
     model = vdir / f"{spec}.onnx"
+    config = vdir / f"{spec}.onnx.json"
     vdir_resolved = vdir.resolve()
-    for dest in (model, vdir / f"{spec}.onnx.json"):
+    for dest in (model, config):
         if not dest.resolve().is_relative_to(vdir_resolved):
             return None
-    for url, dest in zip(urls, (model, vdir / f"{spec}.onnx.json")):
+    expected = _expected_sha256(spec)
+    if expected is None:
+        return None  # no integrity anchor — refuse the download
+    for url, dest in zip(urls, (model, config)):
         try:
             subprocess.run(  # nosec
                 ["curl", "-sfSL", "-o", str(dest), url], check=True, timeout=300
@@ -197,6 +261,10 @@ def download_voice(spec):
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
             model.unlink(missing_ok=True)  # don't leave half a voice
             return None
+    if _sha256(model) != expected:
+        model.unlink(missing_ok=True)  # tampered or truncated — keep neither
+        config.unlink(missing_ok=True)
+        return None
     return model
 
 

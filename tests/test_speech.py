@@ -4,6 +4,8 @@ daemon thread, and swallows synthesis/playback failures so speech can
 never take the organism down. Piper and soundcard are never imported in
 these tests: _speak is patched out."""
 
+import hashlib
+import json
 import sys
 import threading
 import time
@@ -288,6 +290,11 @@ def test_download_voice_success(tmp_path, monkeypatch):
         Path(written[-1]).write_text("fake")
 
     monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        speech,
+        "_expected_sha256",
+        lambda spec: hashlib.sha256(b"fake").hexdigest(),
+    )
     model = speech.download_voice("en_GB-alan-low")
     assert model == tmp_path / "voices" / "en_GB-alan-low.onnx"
     assert len(written) == 2  # model + config
@@ -302,8 +309,76 @@ def test_download_voice_curl_failure_cleans_up(tmp_path, monkeypatch):
         raise subprocess.CalledProcessError(22, cmd)
 
     monkeypatch.setattr(speech.subprocess, "run", failing)
+    # en_GB-alan-low is pinned, so no metadata lookup precedes the download.
     assert speech.download_voice("en_GB-alan-low") is None
     assert list(vdir.glob("*.onnx")) == []  # no half-downloaded voice
+
+
+def test_download_voice_hash_mismatch_removes_both_files(tmp_path, monkeypatch):
+    """A model whose SHA-256 doesn't match the expected value (pin or repo
+    metadata) is deleted along with its config — never kept, never returned."""
+    vdir = _fake_voices_dir(tmp_path, monkeypatch, ())
+
+    def fake_run(cmd, check, timeout):
+        Path(cmd[cmd.index("-o") + 1]).write_text("tampered")
+
+    monkeypatch.setattr(speech.subprocess, "run", fake_run)
+    monkeypatch.setattr(speech, "_expected_sha256", lambda spec: "0" * 64)
+    assert speech.download_voice("en_GB-alan-low") is None
+    assert list(vdir.glob("*.onnx*")) == []
+
+
+def test_download_voice_refuses_when_unverifiable(tmp_path, monkeypatch):
+    """Without a pin or repo metadata there is no integrity anchor: the
+    download is refused before curl runs."""
+    _fake_voices_dir(tmp_path, monkeypatch, ())
+
+    def boom(*a, **k):
+        raise AssertionError("curl must not run when the hash is unknown")
+
+    monkeypatch.setattr(speech.subprocess, "run", boom)
+    monkeypatch.setattr(speech, "_expected_sha256", lambda spec: None)
+    assert speech.download_voice("en_GB-alan-low") is None
+
+
+def test_expected_sha256_prefers_pin_over_metadata(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("metadata lookup must not run for a pinned voice")
+
+    monkeypatch.setattr(speech, "_metadata_sha256", boom)
+    assert (
+        speech._expected_sha256("en_US-lessac-medium")
+        == speech._PINNED_VOICE_SHA256["en_US-lessac-medium"]
+    )
+
+
+def test_metadata_sha256_reads_lfs_oid(monkeypatch):
+    payload = json.dumps(
+        [
+            {"path": "en/en_GB/alan/low/samples"},
+            {
+                "path": "en/en_GB/alan/low/en_GB-alan-low.onnx",
+                "lfs": {"oid": "abc123"},
+            },
+            {"path": "en/en_GB/alan/low/en_GB-alan-low.onnx.json"},
+        ]
+    )
+
+    class Result:
+        stdout = payload
+
+    monkeypatch.setattr(speech.subprocess, "run", lambda *a, **k: Result())
+    assert speech._metadata_sha256("en_GB-alan-low") == "abc123"
+
+
+def test_metadata_sha256_failure_returns_none(monkeypatch):
+    import subprocess
+
+    def failing(*a, **k):
+        raise subprocess.CalledProcessError(22, "curl")
+
+    monkeypatch.setattr(speech.subprocess, "run", failing)
+    assert speech._metadata_sha256("en_GB-alan-low") is None
 
 
 # -- voices directory resolution ---------------------------------------------

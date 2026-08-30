@@ -1,6 +1,7 @@
 """Integration coverage for the buildless Glasshouse web interface."""
 
 import json
+import logging
 import shutil
 import threading
 import urllib.error
@@ -130,6 +131,21 @@ def test_mutating_endpoints_require_token(live):
     )
     assert status == 401
     assert result["error"] == "unauthorized"
+
+
+def test_failed_auth_is_logged_without_token(live, caplog):
+    """Rejected requests are logged (method, path, client IP) — but the
+    presented credential never is: a typo'd real token must not land in logs."""
+    with caplog.at_level(logging.WARNING, logger="replicanta.web"):
+        status, _headers, _ = request(
+            live, "/api/chat", {"text": "hello"}, token="wrong-token"
+        )
+    assert status == 401
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        "rejected unauthorized POST /api/chat from 127.0.0.1" in m for m in messages
+    )
+    assert not any("wrong-token" in m for m in messages)
 
 
 def test_state_requires_token(live):

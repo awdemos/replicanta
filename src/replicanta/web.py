@@ -7,6 +7,7 @@ change to the same public organism/nursery APIs used by the TUI.
 
 import base64
 import json
+import logging
 import secrets
 import threading
 import webbrowser
@@ -30,6 +31,8 @@ from replicanta import (
 from replicanta import memory as memory_module
 from replicanta.organism import Organism
 from replicanta.web_static import APP_CSS, APP_HTML, APP_JS
+
+logger = logging.getLogger(__name__)
 
 
 class WebError(ValueError):
@@ -62,9 +65,20 @@ class Glasshouse:
     def auth_ok(self, request):
         header = request.headers.get("Authorization", "")
         if header.startswith("Bearer "):
-            return secrets.compare_digest(header[7:], self.token)
-        provided = request.headers.get("X-Replicanta-Token")
-        return provided is not None and secrets.compare_digest(provided, self.token)
+            ok = secrets.compare_digest(header[7:], self.token)
+        else:
+            provided = request.headers.get("X-Replicanta-Token")
+            ok = provided is not None and secrets.compare_digest(provided, self.token)
+        if not ok:
+            # Never log the presented credential — a typo'd real token must
+            # not end up in a log file.
+            logger.warning(
+                "rejected unauthorized %s %s from %s",
+                request.command,
+                request.path,
+                request.client_address[0],
+            )
+        return ok
 
     @property
     def name(self):
