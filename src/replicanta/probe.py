@@ -8,9 +8,9 @@ beliefs the reasoner can use (e.g. cpu:load=high, mem:usage=mid,
 temp:cpu=hot, time:hour=fourteen)."""
 
 import os
-import subprocess  # nosec
 from datetime import UTC, datetime
 from pathlib import Path
+
 
 LOAD_LOW = 0.5  # load1/ncpu below this -> "low"
 LOAD_MID = 1.0  # load1/ncpu below this -> "mid", else "high"
@@ -73,16 +73,17 @@ def _read_float(path):
 
 def _host_uname():
     """`uname -snrm` — the host's identity as one line (e.g.
-    'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable."""
+    'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable.
+
+    Uses the standard library `platform` module instead of shelling out.
+    """
+    import platform
+
     try:
-        out = subprocess.run(  # nosec
-            ["uname", "-snrm"], capture_output=True, text=True, timeout=2, check=False
-        )
-    except (OSError, subprocess.SubprocessError):
+        u = platform.uname()
+        return f"{u.system} {u.node} {u.release} {u.machine}"
+    except (OSError, AttributeError):
         return None
-    if out.returncode != 0:
-        return None
-    return out.stdout.strip() or None
 
 
 class SystemProbe:
@@ -164,13 +165,13 @@ class SystemProbe:
         try:
             info = (self.proc / "meminfo").read_text()
             total = int(
-                next(l for l in info.splitlines() if l.startswith("MemTotal:")).split()[
+                next(line for line in info.splitlines() if line.startswith("MemTotal:")).split()[
                     1
                 ]
             )
             avail = int(
                 next(
-                    l for l in info.splitlines() if l.startswith("MemAvailable:")
+                    line for line in info.splitlines() if line.startswith("MemAvailable:")
                 ).split()[1]
             )
         except (OSError, ValueError, IndexError, StopIteration):

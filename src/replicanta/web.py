@@ -23,6 +23,7 @@ from replicanta import (
     fileutil,
     mud,
     nursery,
+    rdd,
     speech,
     telemetry,
     tui_commands,
@@ -99,9 +100,7 @@ class Glasshouse:
                     "value": v,
                     "confidence": round(c, 3),
                 }
-                for (o, a, v), c in sorted(
-                    store.beliefs().items(), key=lambda item: -item[1]
-                )
+                for (o, a, v), c in sorted(store.beliefs().items(), key=lambda item: -item[1])
             ]
             skills = [
                 {
@@ -169,12 +168,29 @@ class Glasshouse:
                     "pending": registry.get("pending"),
                     "applied": registry.get("entries", []),
                 },
+                "visual_state": self._latest_visual_state(),
                 "nursery": {
                     "current": self.name,
                     "organisms": nursery.list_organisms(self.root),
                     "groups": nursery.load_groups(self.root),
                 },
             }
+
+    def _latest_visual_state(self):
+        """Return paths to the most recent SVG charts, or None."""
+        artifacts = self.org.store.dir_path / "artifacts" / "visual-state"
+        if not artifacts.is_dir():
+            return None
+        out = {}
+        for kind in ("beliefs", "activity", "memories"):
+            chart = artifacts / f"{kind}-chart.svg"
+            lineage = artifacts / f"{kind}-lineage.svg"
+            if chart.exists():
+                out[kind] = {
+                    "chart": str(chart),
+                    "lineage": str(lineage) if lineage.exists() else None,
+                }
+        return out or None
 
     def _mud_snapshot(self):
         """Build the MUD payload for the web client, or None when no game."""
@@ -224,13 +240,9 @@ class Glasshouse:
     def _ranked_memory_snapshot(self):
         """Return the top-ranked memories for the web client."""
         store = self.org.store
-        query = " ".join(
-            text for _role, text in store.chat_log[-4:]
-        ) or "current situation"
+        query = " ".join(text for _role, text in store.chat_log[-4:]) or "current situation"
         scorer = memory_module.MemoryScorer()
-        ranked = scorer.rank(
-            store.memory, query, top_k=8, current_cycle=store.cycle
-        )
+        ranked = scorer.rank(store.memory, query, top_k=8, current_cycle=store.cycle)
         return [
             {
                 "cycle": m["cycle"],
@@ -349,6 +361,28 @@ class Glasshouse:
                 self.org.flush(force=True)
             return {"entry": entry, "state": self.snapshot()}
 
+    def visualize(self, kind="summary"):
+        """Render an RDD chart for the organism and return SVG/text payload."""
+        with self.lock:
+            kinds = set(rdd.supported_kinds())
+            kind = kind if kind in kinds else "summary"
+            result = rdd.build_chart(kind, self.org.store)
+            artifacts = self.org.store.dir_path / "artifacts" / "visual-state"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            kind = result["kind"]
+            chart_path = artifacts / f"{kind}-chart.svg"
+            lineage_path = artifacts / f"{kind}-lineage.svg"
+            fileutil.atomic_write_text(chart_path, result["chart_svg"])
+            fileutil.atomic_write_text(lineage_path, result["lineage_svg"])
+            return {
+                "kind": kind,
+                "caption": result.get("caption", ""),
+                "text_chart": result["text_chart"],
+                "chart_path": str(chart_path),
+                "lineage_path": str(lineage_path),
+                "state": self.snapshot(),
+            }
+
     def create_organism(self, name):
         with self.lock:
             name = str(name).strip()
@@ -399,15 +433,12 @@ class Glasshouse:
                 if self.org.revive():
                     messages.append("revived: the organism stirs back into existence.")
                 else:
-                    messages.append(
-                        f"/revive: it is not faded (state {self.org.lifecycle.state})."
-                    )
+                    messages.append(f"/revive: it is not faded (state {self.org.lifecycle.state}).")
             elif name == "/stats":
                 m = self.org.metrics()
                 s = self.org.store
                 messages.append(
-                    f"stats: beliefs={m.belief_count} rules={m.rule_count} "
-                    f"depth={m.total_depth} score={m.score():.1f}"
+                    f"stats: beliefs={m.belief_count} rules={m.rule_count} depth={m.total_depth} score={m.score():.1f}"
                 )
                 messages.append(
                     f"mental: arousal={s.arousal:.2f} "
@@ -424,10 +455,7 @@ class Glasshouse:
                     dest = self._export_chat(args[0] if args else None)
                     messages.append(f"chat exported to {dest}")
                 except fileutil.UnsafePathError:
-                    messages.append(
-                        "export failed: give a plain filename "
-                        "(exports land in ~/.replicanta/exports/)"
-                    )
+                    messages.append("export failed: give a plain filename (exports land in ~/.replicanta/exports/)")
                 except OSError as exc:
                     messages.append(f"export failed: {exc}")
             elif name == "/think":
@@ -607,9 +635,7 @@ class Glasshouse:
         if not args or args[0] == "list":
             active = svc.active()
             names = svc.list()
-            line = "personas: " + ", ".join(
-                f"*{n}" if active and active["name"] == n else n for n in names
-            )
+            line = "personas: " + ", ".join(f"*{n}" if active and active["name"] == n else n for n in names)
             return line
         if args[0] == "off":
             svc.deactivate()
@@ -702,9 +728,7 @@ class Glasshouse:
             directory = self.org.dir_path / "artifacts" / "mud" / "scenarios"
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / f"{fileutil.slug(scenario.title)}.json"
-            fileutil.atomic_write_text(
-                path, json.dumps(mud.scenario_to_json(scenario), indent=1)
-            )
+            fileutil.atomic_write_text(path, json.dumps(mud.scenario_to_json(scenario), indent=1))
         except OSError:
             pass
 
@@ -865,9 +889,7 @@ class Glasshouse:
                     org = self._mud_organism_for(next_actor.name)
                     if org is not None:
                         choice = mud.choose_action(game, org=org, actor_name=next_actor.name)
-                        next_result = game.act_event(
-                            choice.command or "look", actor_name=next_actor.name
-                        )
+                        next_result = game.act_event(choice.command or "look", actor_name=next_actor.name)
                         messages.append(f"{next_actor.name}: {next_result.text}")
                         if host and host in self._mud_games:
                             self._mud_games[host].session = game.session
@@ -940,6 +962,7 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
                     "/api/swap": lambda: self.app.swap(data.get("name", "")),
                     "/api/mud-act": lambda: self.app.mud_act(data.get("text", "")),
                     "/api/typing": lambda: self.app.typing(data),
+                    "/api/visualize": lambda: self.app.visualize(data.get("kind", "summary")),
                 }
                 if path not in routes:
                     span.set_attribute("http.status_code", HTTPStatus.NOT_FOUND)
@@ -1013,9 +1036,11 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
 
 
 def make_server(glasshouse, host="127.0.0.1", port=8765):
-    # Scallop contexts are deliberately thread-affine. A single-threaded
-    # server keeps every reasoner operation on the thread that created the
-    # organism; long LLM replies simply serialize local requests.
+    # Scallop contexts are thread-affine: they must be created, used, and
+    # destroyed on a single thread. A multi-threaded server would require a
+    # dedicated reasoning thread and request marshalling; keep the server
+    # single-threaded so every organism/Scallop interaction stays on the
+    # thread that created the organism.
     server = HTTPServer((host, port), GlasshouseHandler)
     server.glasshouse = glasshouse
     return server

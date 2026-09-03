@@ -2,7 +2,7 @@
 
 Tracing is controlled through the standard OTel environment variables:
 
-    OTEL_TRACES_EXPORTER=console          # console, otlp, or none (default: console)
+    OTEL_TRACES_EXPORTER=none            # none (default), console, or otlp
     OTEL_SERVICE_NAME=replicanta
     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
     OTEL_EXPORTER_OTLP_HEADERS=key=value,key2=value2
@@ -89,7 +89,7 @@ def init_telemetry(service_name: str = "replicanta") -> bool:
     if _provider is not None:
         return _enabled
 
-    exporter_name = os.environ.get("OTEL_TRACES_EXPORTER", "console").lower()
+    exporter_name = os.environ.get("OTEL_TRACES_EXPORTER", "none").lower()
     if exporter_name == "none":
         _provider = TracerProvider(resource=Resource.create({}))
         trace.set_tracer_provider(_provider)
@@ -109,9 +109,7 @@ def init_telemetry(service_name: str = "replicanta") -> bool:
     elif exporter_name == "console":
         exporter = ConsoleSpanExporter()
     else:
-        logger.warning(
-            "unknown OTEL_TRACES_EXPORTER=%r, falling back to console", exporter_name
-        )
+        logger.warning("unknown OTEL_TRACES_EXPORTER=%r, falling back to console", exporter_name)
         exporter = ConsoleSpanExporter()
 
     if exporter_name == "otlp":
@@ -155,9 +153,7 @@ def span(name: str | None = None, **attrs):
                     return func(*args, **kwargs)
                 except Exception as exc:
                     current_span.record_exception(exc)
-                    current_span.set_status(
-                        Status(StatusCode.ERROR, description=str(exc))
-                    )
+                    current_span.set_status(Status(StatusCode.ERROR, description=str(exc)))
                     raise
 
         return wrapper

@@ -10,13 +10,12 @@ startup and after every approve/reject/revert. Pure module: no textual."""
 
 import json
 import re
+import threading
 from pathlib import Path
 
 from replicanta.fileutil import atomic_write_text
 
 _EMPTY = {"version": 0, "entries": [], "pending": None}
-
-_REGISTRY = None
 
 
 # -- validation ---------------------------------------------------------------
@@ -86,86 +85,148 @@ def _write(path, registry):
     atomic_write_text(path, json.dumps(registry, indent=2))
 
 
+# -- thread-local module-level registry ---------------------------------------
+#
+# Global mutable state leaks between organisms and tests. Each thread gets its
+# own default ExtensionRegistry; module-level helpers delegate to the current
+# thread's default.
+
+class ExtensionRegistry:
+    """Per-thread (or per-instance) validated extension registry."""
+
+    def __init__(self):
+        self._data = None
+
+    def load_global(self, path):
+        """(Re)load this registry from ``path``."""
+        self._data = _read(path)
+
+    def reset(self):
+        """Forget the in-memory registry state."""
+        self._data = None
+
+    def registry(self):
+        """Return the loaded registry dict, or the empty default."""
+        return self._data if self._data is not None else dict(_EMPTY)
+
+    def active_entries(self, kind):
+        return [e for e in self.registry()["entries"] if e.get("kind") == kind]
+
+    def pending(self):
+        return self.registry().get("pending")
+
+    def entries(self):
+        return self.registry()["entries"]
+
+    def propose(self, path, entry, auto_apply=False):
+        """Stage an entry as pending, or apply it immediately if auto_apply is True.
+
+        Returns the applied entry when auto_apply=True, otherwise None.
+        """
+        ok, reason = validate(entry)
+        if not ok:
+            raise ValueError(f"invalid extension: {reason}")
+        reg = _read(path)
+        reg["pending"] = entry
+        _write(path, reg)
+        self.load_global(path)
+        if auto_apply:
+            return self.approve(path)
+        return None
+
+    def approve(self, path):
+        """Apply the pending entry: append to entries, bump version, reload.
+
+        Returns the applied entry, or None when nothing is pending or the
+        pending entry fails validation. Invalid pending entries are cleared.
+        """
+        reg = _read(path)
+        entry = reg.get("pending")
+        if entry is None:
+            return None
+        ok, _reason = validate(entry)
+        if not ok:
+            reg["pending"] = None
+            _write(path, reg)
+            self.load_global(path)
+            return None
+        reg["entries"].append(entry)
+        reg["pending"] = None
+        reg["version"] += 1
+        _write(path, reg)
+        self.load_global(path)
+        return entry
+
+    def reject(self, path):
+        """Discard the pending entry. Returns it, or None."""
+        reg = _read(path)
+        entry = reg.get("pending")
+        reg["pending"] = None
+        _write(path, reg)
+        self.load_global(path)
+        return entry
+
+    def revert_last(self, path):
+        """Remove the most recently applied entry. Returns it, or None."""
+        reg = _read(path)
+        if not reg["entries"]:
+            return None
+        entry = reg["entries"].pop()
+        reg["version"] += 1
+        _write(path, reg)
+        self.load_global(path)
+        return entry
+
+
+_REGISTRY_LOCAL = threading.local()
+
+
+def _default_registry() -> ExtensionRegistry:
+    try:
+        return _REGISTRY_LOCAL.registry
+    except AttributeError:
+        reg = ExtensionRegistry()
+        _REGISTRY_LOCAL.registry = reg
+        return reg
+
+
 def load_global(path):
     """(Re)load the module-level registry consumers read."""
-    global _REGISTRY
-    _REGISTRY = _read(path)
+    _default_registry().load_global(path)
 
 
 def reset():
     """Forget the module-level registry (test isolation)."""
-    global _REGISTRY
-    _REGISTRY = None
+    _default_registry().reset()
 
 
 def registry():
-    return _REGISTRY if _REGISTRY is not None else dict(_EMPTY)
+    return _default_registry().registry()
 
 
 def active_entries(kind):
-    return [e for e in registry()["entries"] if e.get("kind") == kind]
+    return _default_registry().active_entries(kind)
 
 
 def pending():
-    return registry().get("pending")
+    return _default_registry().pending()
 
 
-# -- proposal lifecycle -----------------------------------------------------------
+def entries():
+    return _default_registry().entries()
 
 
 def propose(path, entry, auto_apply=False):
-    """Stage an entry as pending, or apply it immediately if auto_apply is True.
-
-    Returns the applied entry when auto_apply=True, otherwise None.
-    """
-    reg = _read(path)
-    reg["pending"] = entry
-    _write(path, reg)
-    load_global(path)
-    if auto_apply:
-        return approve(path)
-    return None
+    return _default_registry().propose(path, entry, auto_apply=auto_apply)
 
 
 def approve(path):
-    """Apply the pending entry: append to entries, bump version, reload.
-    Returns the applied entry, or None when nothing is pending or the
-    pending entry fails validation."""
-    reg = _read(path)
-    entry = reg.get("pending")
-    if entry is None:
-        return None
-    ok, _reason = validate(entry)
-    if not ok:
-        reg["pending"] = None
-        _write(path, reg)
-        load_global(path)
-        return None
-    reg["entries"].append(entry)
-    reg["pending"] = None
-    reg["version"] += 1
-    _write(path, reg)
-    load_global(path)
-    return entry
+    return _default_registry().approve(path)
 
 
 def reject(path):
-    """Discard the pending entry. Returns it, or None."""
-    reg = _read(path)
-    entry = reg.get("pending")
-    reg["pending"] = None
-    _write(path, reg)
-    load_global(path)
-    return entry
+    return _default_registry().reject(path)
 
 
 def revert_last(path):
-    """Remove the most recently applied entry. Returns it, or None."""
-    reg = _read(path)
-    if not reg["entries"]:
-        return None
-    entry = reg["entries"].pop()
-    reg["version"] += 1
-    _write(path, reg)
-    load_global(path)
-    return entry
+    return _default_registry().revert_last(path)

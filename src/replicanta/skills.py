@@ -53,6 +53,18 @@ class SkillStore:
 
     def __init__(self, dir_path):
         self.dir_path = Path(dir_path)
+        self._list_cache: tuple[tuple[int, float], list[Skill]] | None = None
+
+    def _cache_key(self):
+        """Directory mtime + inode; cheap and stable enough for cache validity."""
+        try:
+            st = self.dir_path.stat()
+            return (st.st_ino, st.st_mtime)
+        except OSError:
+            return None
+
+    def _invalidate_list_cache(self):
+        self._list_cache = None
 
     def _path(self, name):
         return self.dir_path / f"{slug(name)}.md"
@@ -99,6 +111,7 @@ class SkillStore:
             skill.uses = max(skill.uses, existing.uses)
             skill.created_cycle = existing.created_cycle
         atomic_write_text(self._path(skill.name), self._render(skill))
+        self._invalidate_list_cache()
 
     def get(self, name):
         path = self._path(name)
@@ -109,11 +122,16 @@ class SkillStore:
     def list(self):
         if not self.dir_path.is_dir():
             return []
+        key = self._cache_key()
+        if self._list_cache is not None and self._list_cache[0] == key:
+            return self._list_cache[1]
         out = []
         for path in sorted(self.dir_path.glob("*.md")):
             skill = self._parse(path.read_text())
             if skill is not None:
                 out.append(skill)
+        if key is not None:
+            self._list_cache = (key, out)
         return out
 
     def record_use(self, name, cycle=0, outcome=None):
@@ -147,6 +165,7 @@ class SkillStore:
         archive = self.dir_path / "archive"
         archive.mkdir(parents=True, exist_ok=True)
         self._path(skill.name).rename(archive / self._path(skill.name).name)
+        self._invalidate_list_cache()
         return skill.name
 
     def archive_stale(self, cycle, limit=100):

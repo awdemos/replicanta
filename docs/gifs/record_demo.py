@@ -1,4 +1,5 @@
 """Drive the Replicanta TUI for an asciinema/agg GIF recording."""
+import contextlib
 import os
 import sys
 import time
@@ -20,11 +21,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 def wait_for(child, needle, timeout=10):
-    try:
+    with contextlib.suppress(pexpect.TIMEOUT, pexpect.EOF):
         child.expect(needle, timeout=timeout)
-    except (pexpect.TIMEOUT, pexpect.EOF):
-        # Keep going rather than crashing the recording.
-        pass
 
 
 def main():

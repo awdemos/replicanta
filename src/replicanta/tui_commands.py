@@ -12,8 +12,24 @@ COMMANDS = [
     ("/stats", "/stats", "show growth metrics", "State"),
     ("/think", "/think", "narrate thoughts now", "State"),
     ("/self-talk", "/self-talk", "let the organism speak to itself", "State"),
-    ("/persona", "/persona [name|off|list]", "activate, clear, or list personas", "State"),
-    ("/auto-apply", "/auto-apply [on|off]", "toggle automatic self-patch application", "State"),
+    (
+        "/persona",
+        "/persona [name|off|list]",
+        "activate, clear, or list personas",
+        "State",
+    ),
+    (
+        "/auto-apply",
+        "/auto-apply [on|off]",
+        "toggle automatic self-patch application",
+        "State",
+    ),
+    (
+        "/visualize",
+        "/visualize [beliefs|attributes|activity|memories|recent|mood|sentiment|stress|summary]",
+        "render an RDD chart of organism state",
+        "State",
+    ),
     # Voice
     (
         "/voice",
@@ -22,7 +38,12 @@ COMMANDS = [
         "Voice",
     ),
     # Senses
-    ("/listen", "/listen", "push-to-talk: start/stop the mic, speak to it (F5)", "Senses"),
+    (
+        "/listen",
+        "/listen",
+        "push-to-talk: start/stop the mic, speak to it (F5)",
+        "Senses",
+    ),
     (
         "/microphone",
         "/microphone [list|use dev]",
@@ -30,7 +51,12 @@ COMMANDS = [
         "Senses",
     ),
     ("/look", "/look", "grab a camera frame and see it (F6)", "Senses"),
-    ("/camera", "/camera [list|use dev]", "camera status, list devices, choose one", "Senses"),
+    (
+        "/camera",
+        "/camera [list|use dev]",
+        "camera status, list devices, choose one",
+        "Senses",
+    ),
     # MUD
     (
         "/mud",
@@ -49,10 +75,25 @@ COMMANDS = [
         "Organisms",
     ),
     # System
-    ("/export", "/export [name]", "save chat log to ~/.replicanta/exports/ (web) or a path (TUI)", "System"),
+    (
+        "/export",
+        "/export [name]",
+        "save chat log to ~/.replicanta/exports/ (web) or a path (TUI)",
+        "System",
+    ),
     ("/save", "/save", "persist state + genome", "System"),
-    ("/modules", "/modules [manage]", "open module manager (or list via /modules)", "System"),
-    ("/approve", "/approve", "apply the organism's pending genome patch (manual mode)", "System"),
+    (
+        "/modules",
+        "/modules [manage]",
+        "open module manager (or list via /modules)",
+        "System",
+    ),
+    (
+        "/approve",
+        "/approve",
+        "apply the organism's pending genome patch (manual mode)",
+        "System",
+    ),
     ("/reject", "/reject", "discard the pending genome patch (manual mode)", "System"),
     ("/revert", "/revert", "undo the last applied genome patch", "System"),
     ("/reload", "/reload", "re-read the lua hook scripts", "System"),
@@ -139,10 +180,7 @@ def sparkline(values):
     lo, hi = min(values), max(values)
     if hi == lo:
         return _SPARK_BARS[0] * len(values)
-    return "".join(
-        _SPARK_BARS[int((v - lo) / (hi - lo) * (len(_SPARK_BARS) - 1) + 0.5)]
-        for v in values
-    )
+    return "".join(_SPARK_BARS[int((v - lo) / (hi - lo) * (len(_SPARK_BARS) - 1) + 0.5)] for v in values)
 
 
 def help_text():

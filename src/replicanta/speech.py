@@ -18,6 +18,7 @@ seams), speech is a module-level singleton — one sound server, one
 voice, one queue per process. reset() is the test hook.
 """
 
+import contextlib
 import hashlib
 import io
 import json
@@ -253,7 +254,7 @@ def download_voice(spec):
     expected = _expected_sha256(spec)
     if expected is None:
         return None  # no integrity anchor — refuse the download
-    for url, dest in zip(urls, (model, config)):
+    for url, dest in zip(urls, (model, config), strict=True):
         try:
             subprocess.run(  # nosec
                 ["curl", "-sfSL", "-o", str(dest), url], check=True, timeout=300
@@ -314,10 +315,8 @@ def _speak_with_timeout(text, timeout=30):
     done = []
 
     def target():
-        try:
+        with contextlib.suppress(Exception):  # nosec — speech must never kill anything
             _speak(text)
-        except Exception:  # noqa: BLE001, S110 # nosec — speech must never kill anything
-            pass
         done.append(True)
 
     t = threading.Thread(target=target, daemon=True, name="speech-utterance")

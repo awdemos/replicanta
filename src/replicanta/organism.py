@@ -9,7 +9,7 @@ import re
 import time
 from collections import deque
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import scallopy
 
@@ -70,8 +70,10 @@ class BeliefStore:
         self.dir_path = dir_path
         self.scl_path = dir_path / "organism.scl"
         self.state_path = dir_path / "state.json"
-        self.beliefs_map = {}
-        self.archived_map = {}
+        self.beliefs_map: dict[tuple[str, str, str], float] = {}
+        self.archived_map: dict[tuple[str, str, str], float] = {}
+        self._by_obj_attr: dict[tuple[str, str], dict[str, float]] = {}
+        self._derived_cache: dict[str, Any] | None = None
         self.chaos = 0.5
         self.stress = 0.05
         self.arousal = 0.3  # activation/energy (see MentalState)
@@ -98,6 +100,22 @@ class BeliefStore:
         self.dirty = False  # any state changed since last save()
         self.genome_dirty = False  # beliefs/rules changed -> .scl needs rewrite
         self.auto_apply_patches = False  # organism self-patches require approval
+
+    def _index_belief(self, belief, conf):
+        """Update the (obj, attr) index for quick contradiction lookup."""
+        obj, attr, val = belief
+        self._by_obj_attr.setdefault((obj, attr), {})[val] = conf
+
+    def _unindex_belief(self, belief):
+        obj, attr, val = belief
+        key = (obj, attr)
+        if key in self._by_obj_attr and val in self._by_obj_attr[key]:
+            del self._by_obj_attr[key][val]
+            if not self._by_obj_attr[key]:
+                del self._by_obj_attr[key]
+
+    def _invalidate_derived(self):
+        self._derived_cache = None
 
     # -- belief operations -------------------------------------------------
     def note_activity(self, key, n=1):
@@ -141,6 +159,8 @@ class BeliefStore:
     def derived(self):
         """Scallop-derived conditions visible to prompts and behavior code.
         Returns dict with 'needs_user', 'contradictions', and 'stress_mood'."""
+        if self._derived_cache is not None:
+            return self._derived_cache
         contradicts_rule = (
             "contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2"
         )
@@ -159,11 +179,12 @@ class BeliefStore:
             for tag, _ in self._derive_from_beliefs(needs_user_rule, "needs_user")
         )
         mood = self.belief_value("self", "mood", "calm")
-        return {
+        self._derived_cache = {
             "needs_user": needs_user,
             "contradictions": contradictions,
             "stress_mood": mood in {"tired", "scared", "angry"},
         }
+        return self._derived_cache
 
     def _note_scallop_contradictions(self):
         """Log reasoner-detected contradictions as activity and memory."""
@@ -201,6 +222,7 @@ class BeliefStore:
                 if conf > c:
                     self.archived_map[(o, a, v)] = c
                     del self.beliefs_map[(o, a, v)]
+                    self._unindex_belief((o, a, v))
                     self.note_activity("beliefs_archived")
                     self._record_surprise((o, a, v), belief)
                     break
@@ -209,20 +231,25 @@ class BeliefStore:
                 self._record_surprise(belief, (o, a, v))
                 self.dirty = True
                 self.genome_dirty = True
+                self._invalidate_derived()
                 return
         if not contradiction_seen:
             self._note_scallop_contradictions()
         if key in self.beliefs_map:
             if conf > self.beliefs_map[key]:
                 self.beliefs_map[key] = conf
+                self._index_belief(key, conf)
                 self.note_activity("beliefs_strengthened")
                 self.dirty = True
                 self.genome_dirty = True
+                self._invalidate_derived()
         else:
             self.beliefs_map[key] = conf
+            self._index_belief(key, conf)
             self.note_activity("beliefs_new")
             self.dirty = True
             self.genome_dirty = True
+            self._invalidate_derived()
 
     def conf(self, belief):
         """Confidence for ``belief``, or None when it is not held."""
@@ -246,9 +273,12 @@ class BeliefStore:
                 if v == val and self.beliefs_map[(o, a, v)] == conf:
                     return  # unchanged reading: nothing to persist
                 del self.beliefs_map[(o, a, v)]
+                self._unindex_belief((o, a, v))
         self.beliefs_map[key] = conf
+        self._index_belief(key, conf)
         self.dirty = True
         self.genome_dirty = True
+        self._invalidate_derived()
 
     def beliefs(self):
         """Return a shallow copy of the live belief map."""
@@ -489,12 +519,39 @@ class BeliefStore:
 
 class Mind:
     """The Scallop program. Rebuilds the context from the .scl genome, runs it,
-    and exposes belief facts with their minmaxprob confidences."""
+    and exposes belief facts with their minmaxprob confidences.
+
+    Scallop contexts are thread-affine. ``Mind`` keeps the context created by
+    the owning thread in ``self.ctx`` and rebuilds a fresh context on any
+    other thread so reasoning stays safe under ``ThreadingHTTPServer``.
+    """
 
     def __init__(self, scl_path):
         """Build a Mind for the .scl genome at ``scl_path``."""
+        import threading
+
         self.scl_path = scl_path
         self.ctx = None
+        self._owner_thread = threading.current_thread().ident
+
+    def _thread_context(self):
+        """Return a ScallopContext usable on the current thread.
+
+        On the owning thread, reuse ``self.ctx`` (rebuilding if needed). On
+        any other thread, build a fresh context from the .scl file without
+        touching ``self.ctx``.
+        """
+        import threading
+
+        if threading.current_thread().ident == self._owner_thread:
+            if self.ctx is None:
+                self.rebuild()
+            return self.ctx
+        ctx = scallopy.ScallopContext(provenance=PROVENANCE)
+        if self.scl_path.exists():
+            ctx.import_file(str(self.scl_path))
+        ctx.run()
+        return ctx
 
     def rebuild(self):
         """Re-import the .scl genome and run the Scallop program."""
@@ -506,14 +563,16 @@ class Mind:
     def beliefs(self):
         """Return the current genome beliefs as ``(obj, attr, val): conf`` dict."""
         out = {}
-        for tag, tup in self.ctx.relation(BEL):
+        for tag, tup in self._thread_context().relation(BEL):
             out[tuple(tup)] = float(tag)
         return out
 
     def query_rule(self, rule, head_relation):
         """Run a candidate rule against a fork of the current program without
         committing. Returns list of (tag, tuple)."""
-        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self.ctx)
+        ctx = scallopy.ScallopContext(
+            provenance=PROVENANCE, fork_from=self._thread_context()
+        )
         ctx.add_rule(rule)
         ctx.run()
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
@@ -522,10 +581,19 @@ class Mind:
         """Run a transient derived rule against a fresh fork and return the
         derived tuples with their minmaxprob tags. Safe for read-only
         inference queries."""
-        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self.ctx)
+        ctx = scallopy.ScallopContext(
+            provenance=PROVENANCE, fork_from=self._thread_context()
+        )
         ctx.add_rule(rule)
         ctx.run()
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
+
+    def close(self):
+        """Release the owning-thread context safely. Called from the owner."""
+        import threading
+
+        if threading.current_thread().ident == self._owner_thread:
+            self.ctx = None
 
 
 class ChaosKnob:

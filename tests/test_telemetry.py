@@ -1,6 +1,5 @@
 """Tests for the OpenTelemetry telemetry bootstrap."""
 
-
 import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -91,7 +90,10 @@ def test_exporter_none_does_not_crash(monkeypatch):
     assert telemetry.get_tracer("test").start_span("noop").end() is None
 
 
-def test_init_is_idempotent(monkeypatch):
+def test_default_exporter_is_none(monkeypatch):
+    _reset_telemetry(monkeypatch)
+    assert telemetry.init_telemetry() is False
+    assert telemetry._enabled is False
     _reset_telemetry(monkeypatch)
     monkeypatch.setenv("OTEL_TRACES_EXPORTER", "console")
     first = telemetry.init_telemetry()

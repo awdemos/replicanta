@@ -1,9 +1,25 @@
+import random
 import shutil
 import subprocess
 from pathlib import Path
 
-from replicanta.organism import Mind, Organism
+import pytest
+from replicanta import extensions as ext_mod
+from replicanta import speech
+from replicanta.organism import (
+    CHAT_LOG_LIMIT,
+    AttentionWindow,
+    BeliefStore,
+    ChaosKnob,
+    DreamEngine,
+    Lifecycle,
+    Metrics,
+    Mind,
+    Organism,
+    SelfQuestioner,
+)
 from replicanta.probe import SystemProbe
+from replicanta.tui import OrganismApp
 
 SCL = Path(__file__).parent.parent / "organism.scl"
 
@@ -32,13 +48,6 @@ def test_mind_beliefs_returns_float_confidences():
         assert 0.0 <= conf <= 1.0
 
 
-import pytest
-
-from replicanta.organism import (  # noqa: F401
-    CHAT_LOG_LIMIT,
-    VALID_VALUE_RE,
-    BeliefStore,
-)
 
 
 @pytest.fixture
@@ -74,6 +83,56 @@ def test_render_scl_matches_import_file_format(store):
     store.add(("apple", "color", "red"), 0.9)
     scl = store.render_scl()
     assert 'rel 0.9::bel("apple", "color", "red")' in scl
+
+
+def test_add_many_beliefs_scales(store):
+    for i in range(500):
+        letter = chr(ord("a") + (i % 26))
+        suffix = "x" * (i // 26)
+        store.add((f"obj_{letter}_{suffix}", "attr", "val"), 0.9)
+    assert len(store.beliefs()) == 500
+
+
+def test_derived_contradictions_cached(store):
+    store.add(("self", "is_a", "organism"), 0.9)
+    store.beliefs_map[("apple", "color", "red")] = 0.9
+    store.beliefs_map[("apple", "color", "green")] = 0.9
+    d1 = store.derived()
+    d2 = store.derived()
+    assert d1 is not None
+    assert d2 is not None
+    assert len(d1["contradictions"]) == 1
+
+
+def test_add_reindexes_and_invaliates_derived(store):
+    store.add(("self", "is_a", "organism"), 0.9)
+    d1 = store.derived()
+    assert d1["needs_user"] is True
+    store.add(("user", "name", "sam"), 0.9)
+    d2 = store.derived()
+    assert d2["needs_user"] is False
+
+
+def test_observe_replaces_existing_value(store):
+    store.observe(("sensor", "temp", "warm"), 0.8)
+    assert store.conf(("sensor", "temp", "warm")) == 0.8
+    store.observe(("sensor", "temp", "hot"), 0.9)
+    assert store.conf(("sensor", "temp", "hot")) == 0.9
+    assert store.conf(("sensor", "temp", "warm")) is None
+
+
+def test_add_detects_contradiction_via_index(store):
+    store.add(("sky", "color", "blue"), 0.9)
+    store.add(("sky", "color", "green"), 0.6)
+    assert store.conf(("sky", "color", "blue")) == 0.9
+    assert ("sky", "color", "green") in store.archived()
+
+
+def test_belief_value_after_observe(store):
+    store.observe(("self", "mood", "calm"), 0.9)
+    assert store.belief_value("self", "mood") == "calm"
+    store.observe(("self", "mood", "tired"), 0.8)
+    assert store.belief_value("self", "mood") == "tired"
 
 
 def test_save_load_roundtrip(store):
@@ -166,9 +225,6 @@ def test_chat_log_roundtrips_via_save_load(store):
     assert loaded.chat_log == [["user", "hello"], ["org", "hi back"]]
 
 
-from replicanta.organism import AttentionWindow, ChaosKnob
-
-
 def test_chaos_knob_clamps():
     knob = ChaosKnob()
     knob.set(1.5)
@@ -214,9 +270,6 @@ def test_focus_clears():
     assert ("color", "red") in win.pairs
 
 
-from replicanta.organism import SelfQuestioner
-
-
 def _make_questioner(tmp_path):
     scl = tmp_path / "organism.scl"
     scl.write_text(
@@ -224,8 +277,6 @@ def _make_questioner(tmp_path):
         'rel 0.8::bel("apple", "shape", "round")\n'
         'rel 0.7::bel("ball", "color", "red")\n'
     )
-    from replicanta.organism import BeliefStore
-
     store = BeliefStore(tmp_path)
     store.load()
     store.beliefs_map = {
@@ -272,11 +323,6 @@ def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
     assert rule.startswith("q1(x)")
 
 
-import random
-
-from replicanta.organism import DreamEngine
-
-
 def _make_dreamer(tmp_path):
     scl = tmp_path / "organism.scl"
     scl.write_text(
@@ -285,8 +331,6 @@ def _make_dreamer(tmp_path):
         'rel 0.7::bel("ball", "color", "red")\n'
         'rel 0.9::bel("ball", "shape", "round")\n'
     )
-    from replicanta.organism import BeliefStore
-
     store = BeliefStore(tmp_path)
     store.load()
     store.beliefs_map = {
@@ -330,9 +374,6 @@ def test_dream_discards_unsupported(tmp_path):
     ]
     promoted = engine.promote(unsupported)
     assert promoted == []
-
-
-from replicanta.organism import Lifecycle, Metrics
 
 
 def test_lifecycle_advances_cycle(monkeypatch, tmp_path):
@@ -467,12 +508,7 @@ def test_organism_death_persists_across_reload(tmp_path):
     assert org2.lifecycle.state == "dead"
 
 
-from replicanta.tui import OrganismApp
-
-
 def test_tui_app_constructs(tmp_path):
-    from replicanta.organism import Organism
-
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -480,8 +516,6 @@ def test_tui_app_constructs(tmp_path):
 
 
 def test_tui_command_chaos(tmp_path):
-    from replicanta.organism import Organism
-
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -490,8 +524,6 @@ def test_tui_command_chaos(tmp_path):
 
 
 def test_tui_command_focus(tmp_path):
-    from replicanta.organism import Organism
-
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
@@ -630,6 +662,7 @@ def test_tui_has_four_tabs(monkeypatch, tmp_path):
                 "memory-pane",
                 "inner-pane",
                 "cells-pane",
+                "visual-pane",
                 "mud-pane",
             }
 
@@ -920,11 +953,7 @@ def test_tui_set_reflection_nothing_is_quiet(monkeypatch, tmp_path):
     app._set_reflection({"action": "none"})
     assert logged == []
 
-
 # -- tier B: approval commands ---------------------------------------------------
-
-from replicanta import extensions as ext_mod
-
 
 def _proposal_entry():
     return {
@@ -1141,9 +1170,6 @@ def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
     assert app.org.dir_path.name == "fern"  # swapped anyway
     assert (root / "organisms" / "fern").exists()
     assert app._responding is False  # flags reset for the new org
-
-
-from replicanta import speech
 
 
 def test_tui_voice_toggles_speech(monkeypatch, tmp_path):

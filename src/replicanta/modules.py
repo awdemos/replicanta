@@ -5,7 +5,8 @@ import tomllib
 from pathlib import Path
 
 from replicanta import config as project_config
-from replicanta import lua_sandbox
+from replicanta import lua_sandbox, rdd
+from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -151,9 +152,7 @@ class ModuleLoader:
 
         def visit(name, path):
             if name in temp:
-                self.warnings.append(
-                    f"circular dependency detected: {' -> '.join(path + [name])}"
-                )
+                self.warnings.append(f"circular dependency detected: {' -> '.join(path + [name])}")
                 return False
             if name in visited:
                 return True
@@ -187,7 +186,13 @@ class ModuleLoader:
         discovered = self._discover()
         enabled = self.modules_config.get("enabled")
         if enabled is None:
-            enabled = ["base", "software-engineer", "creative-writer", "socratic-philosopher"]
+            enabled = [
+                "base",
+                "software-engineer",
+                "creative-writer",
+                "socratic-philosopher",
+                "visual-state",
+            ]
         enabled = set(enabled)
         if enabled is not None:
             discovered = [m for m in discovered if m.get("name") in enabled]
@@ -210,6 +215,10 @@ class ModuleLoader:
                 persona_config=self.persona_config,
                 root=self.root,
             ),
+        )
+        self.registry.register(
+            "visual",
+            VisualService(self.organism),
         )
 
     def _init_module(self, manifest):
@@ -252,6 +261,47 @@ class _StoreService:
 
     def observe(self, belief, conf):
         self.store.observe(belief, conf)
+
+
+class VisualService:
+    """Render RDD lineage and charts for the organism's state.
+
+    Exposed to Lua modules as services.get('visual').build(kind) returns a
+    table with text_chart, path, and SVG files written to artifacts/.
+    """
+
+    def __init__(self, organism):
+        self.organism = organism
+
+    def build(self, kind="beliefs"):
+        if self.organism is None:
+            raise RuntimeError("no organism")
+        result = rdd.build_chart(kind, self.organism.store)
+        artifacts = self.organism.store.dir_path / "artifacts" / "visual-state"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        lineage_path = artifacts / f"{kind}-lineage.svg"
+        chart_path = artifacts / f"{kind}-chart.svg"
+        atomic_write_text(lineage_path, result["lineage_svg"])
+        atomic_write_text(chart_path, result["chart_svg"])
+
+        # Return a plain object whose attributes Lua can access via attribute
+        # handlers; lupa does not expose Python dict keys as table pairs.
+        class Result:
+            text_chart: str
+            path: str
+            lineage_path: str
+            kind: str
+            caption: str
+            records: list
+
+        out = Result()
+        out.text_chart = result["text_chart"]
+        out.path = str(chart_path)
+        out.lineage_path = str(lineage_path)
+        out.kind = result["kind"]
+        out.caption = result.get("caption", "")
+        out.records = result["records"]
+        return out
 
 
 def _lua_to_py(obj, seen=None):

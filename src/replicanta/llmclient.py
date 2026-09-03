@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -132,13 +133,21 @@ class _Voice:
         self.failures = 0
 
 
-_voice = _Voice()
+_VOICE_LOCAL = threading.local()
+
+
+def _voice():
+    try:
+        return _VOICE_LOCAL.voice
+    except AttributeError:
+        v = _Voice()
+        _VOICE_LOCAL.voice = v
+        return v
 
 
 def reset_voice():
-    """Forget the cached voice state (test isolation)."""
-    global _voice
-    _voice = _Voice()
+    """Forget the cached voice state for the current thread (test isolation)."""
+    _VOICE_LOCAL.voice = _Voice()
 
 
 def _tags_url():
@@ -157,11 +166,11 @@ def probe_voice(model=None):
         try:
             req = urllib.request.Request(_llama_cpp_health_url())
             with urllib.request.urlopen(req, timeout=VOICE_PROBE_TIMEOUT) as resp:  # nosec B310 - local llama-server endpoint
-                _voice.online = resp.status == 200
+                _voice().online = resp.status == 200
         except (urllib.error.URLError, OSError, ValueError):
-            _voice.online = False
-        _voice.failures = 0
-        return _voice.online
+            _voice().online = False
+        _voice().failures = 0
+        return _voice().online
 
     model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
     try:
@@ -170,36 +179,36 @@ def probe_voice(model=None):
             data = json.loads(resp.read().decode())
         names = [m.get("name", "") for m in data.get("models", [])]
         bases = [n.split(":")[0] for n in names]
-        _voice.online = bool(model in names or model.split(":")[0] in bases)
+        _voice().online = bool(model in names or model.split(":")[0] in bases)
     except (urllib.error.URLError, OSError, ValueError):
-        _voice.online = False
-    _voice.failures = 0
-    return _voice.online
+        _voice().online = False
+    _voice().failures = 0
+    return _voice().online
 
 
 def voice_online():
     """Cached reachability: True/False, or None when never probed."""
-    return _voice.online
+    return _voice().online
 
 
 def voice_status():
     """Human label for the status bar: online / offline / ? (unknown)."""
-    if _voice.online is None:
+    if _voice().online is None:
         return "?"
-    return "online" if _voice.online else "offline"
+    return "online" if _voice().online else "offline"
 
 
 def note_voice_success():
-    _voice.failures = 0
-    _voice.online = True
+    _voice().failures = 0
+    _voice().online = True
 
 
 def note_voice_failure():
     """A debate call failed; a streak marks the voice offline so the arena
     stops paying the timeout cost on every utterance."""
-    _voice.failures += 1
-    if _voice.failures >= VOICE_FAILURE_STREAK:
-        _voice.online = False
+    _voice().failures += 1
+    if _voice().failures >= VOICE_FAILURE_STREAK:
+        _voice().online = False
 
 
 # -- transport ---------------------------------------------------------------

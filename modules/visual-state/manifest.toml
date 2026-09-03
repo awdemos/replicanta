@@ -1,0 +1,5 @@
+name = "visual-state"
+description = "Lazy RDD lineage and SVG charts of organism state"
+version = "0.1.0"
+provides = ["visual"]
+depends = ["base"]

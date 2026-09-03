@@ -4,6 +4,7 @@ Mind and Memory are plain strings; Inner also has a rich-renderable
 version with gauges and panels. No textual imports — unit testable
 without a terminal."""
 
+import hashlib
 import json
 
 from rich.panel import Panel
@@ -644,8 +645,6 @@ def inner_view(org):
 # ---------------------------------------------------------------------------
 # Neural memory grid (cells tab)
 # ---------------------------------------------------------------------------
-
-import hashlib
 
 CELLS_COLS = 48
 CELLS_ROWS = 20

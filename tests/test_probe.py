@@ -391,11 +391,24 @@ def test_fresh_boot_seeds_self_core_not_objects(tmp_path):
 # -- uname: the host's identity --------------------------------------------
 
 
-def test_uname_default_runs_the_shell_command(tmp_path):
+def test_uname_default_uses_platform_not_subprocess(tmp_path, monkeypatch):
     import platform
 
+    monkeypatch.setattr(platform, "uname", lambda: platform.uname_result(
+        system="Linux", node="testhost", release="6.1", version="#1", machine="x86_64"
+    ))
     probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys")
-    assert probe.uname().startswith(platform.system())
+    assert probe.uname() == "Linux testhost 6.1 x86_64"
+
+
+def test_uname_default_avoids_subprocess(tmp_path, monkeypatch):
+    import subprocess
+
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ran.append(True))
+    probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys")
+    probe.uname()
+    assert not ran
 
 
 def test_uname_injectable(tmp_path):

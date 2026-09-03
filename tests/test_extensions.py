@@ -25,6 +25,45 @@ def _good_pattern():
     }
 
 
+def test_global_registry_isolation(tmp_path):
+    from replicanta import extensions
+
+    extensions.reset()
+    path_a = tmp_path / "a" / "extensions.json"
+    path_b = tmp_path / "b" / "extensions.json"
+    extensions.propose(path_a, {"kind": "seed", "text": "a quiet thought"}, auto_apply=True)
+    assert path_b.parent.exists() is False
+    # A second thread/registry must not see the first registry's entries.
+    other_reg = extensions.ExtensionRegistry()
+    assert other_reg.active_entries("seed") == []
+
+
+def test_voice_state_is_per_thread(monkeypatch):
+    from replicanta import llmclient
+
+    llmclient.reset_voice()
+
+    def other():
+        return llmclient.voice_online()
+
+    import threading
+
+    result = []
+    t = threading.Thread(target=lambda: result.append(other()))
+    t.start()
+    t.join()
+    # Each thread starts with an unknown voice state.
+    assert result[0] is None
+
+
+def test_reset_voice_clears_current_thread():
+    from replicanta import llmclient
+
+    llmclient._voice().online = True
+    llmclient.reset_voice()
+    assert llmclient.voice_online() is None
+
+
 # -- validation ---------------------------------------------------------------
 
 

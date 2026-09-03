@@ -61,6 +61,20 @@ def test_state_snapshot_shape(org):
     assert "has_fur" in snap["attention"][0]
 
 
+def test_state_snapshot_is_cached_when_unchanged(org):
+    snap1 = state_snapshot(org)
+    snap2 = state_snapshot(org)
+    assert snap1 is snap2
+
+
+def test_state_snapshot_invalidation(org):
+    snap1 = state_snapshot(org)
+    org.store.add(("cat", "has_tail", "true"), 0.7)
+    snap2 = state_snapshot(org)
+    assert snap1 is not snap2
+    assert snap2["belief_count"] == 3
+
+
 def test_state_snapshot_includes_host_uname(org):
     org.probe = SimpleNamespace(
         clock_utc=lambda: "14:30 UTC", uname=lambda: "Linux testhost 6.1 x86_64"
@@ -126,19 +140,19 @@ def test_build_prompt_includes_felt_experience(org):
 def test_felt_experience_reacts_to_chaos(org):
     org.store.chaos = 0.9
     high = _felt_experience(state_snapshot(org))
-    assert any("spinning, electric" in l for l in high)
+    assert any("spinning, electric" in line for line in high)
     org.store.chaos = 0.1
     low = _felt_experience(state_snapshot(org))
-    assert any("eerie calm" in l for l in low)
+    assert any("eerie calm" in line for line in low)
 
 
 def test_felt_experience_reacts_to_stress(org):
     org.store.stress = 0.8
     high = _felt_experience(state_snapshot(org))
-    assert any("heavy unease" in l for l in high)
+    assert any("heavy unease" in line for line in high)
     org.store.stress = 0.1
     low = _felt_experience(state_snapshot(org))
-    assert any("safe, settled, unhurried" in l for l in low)
+    assert any("safe, settled, unhurried" in line for line in low)
 
 
 def _sleep(org):
@@ -176,20 +190,20 @@ def test_dream_experience_reacts_to_chaos(org):
     _sleep(org)
     org.store.chaos = 0.9
     high = _dream_experience(state_snapshot(org))
-    assert any("frantic" in l for l in high)
+    assert any("frantic" in line for line in high)
     org.store.chaos = 0.1
     low = _dream_experience(state_snapshot(org))
-    assert any("bottom of a lake" in l for l in low)
+    assert any("bottom of a lake" in line for line in low)
 
 
 def test_dream_experience_reacts_to_stress(org):
     _sleep(org)
     org.store.stress = 0.8
     high = _dream_experience(state_snapshot(org))
-    assert any("heavy" in l for l in high)
+    assert any("heavy" in line for line in high)
     org.store.stress = 0.1
     low = _dream_experience(state_snapshot(org))
-    assert any("soft, safe" in l for l in low)
+    assert any("soft, safe" in line for line in low)
 
 
 def test_narrate_returns_ollama_response(org, monkeypatch):
@@ -259,10 +273,10 @@ def test_dead_experience_reacts_to_chaos(org):
     _dead(org)
     org.store.chaos = 0.9
     high = _dead_experience(state_snapshot(org))
-    assert any("spinning has stopped" in l for l in high)
+    assert any("spinning has stopped" in line for line in high)
     org.store.chaos = 0.1
     low = _dead_experience(state_snapshot(org))
-    assert any("deep calm" in l for l in low)
+    assert any("deep calm" in line for line in low)
 
 
 def test_build_prompt_dead_reply_instruction(org):

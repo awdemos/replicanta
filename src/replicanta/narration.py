@@ -14,30 +14,57 @@ from replicanta import memory as memory_module
 def state_snapshot(org):
     """Compact text-ready snapshot of the organism's mind. Also records
     an activity snapshot (activity.record_digest) as a side effect."""
+    store = org.store
     m = org.metrics()
-    top_beliefs = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])[:6]
-    rules = [r[0] for r in org.store.rules[:4]]
+
+    # Cache key: anything that changes the returned dict. Lengths are a
+    # cheap, reliable proxy for in-place mutations of the store containers.
+    # activity_digest is intentionally excluded: it mutates store.activity as
+    # a side effect, which would prevent caching, but its textual content does
+    # not depend on activity map identity/length in a cache-breaking way.
+    activity_digest = activity.record_digest(store)
+    cache_key = (
+        store.cycle,
+        store.chaos,
+        store.stress,
+        store.arousal,
+        store.rationality,
+        store.irrationality,
+        store.insane,
+        store.lifecycle.state if hasattr(store, "lifecycle") else None,
+        len(store.beliefs_map),
+        len(store.chat_log),
+        len(store.memory),
+        len(store.rules),
+        id(getattr(org, "window", None)),
+        id(getattr(org, "last_sight", None)),
+        id(getattr(org, "skills", None)),
+        id(getattr(org, "persona_service", None)),
+        id(getattr(org, "probe", None)),
+    )
+    existing = getattr(state_snapshot, "_cache", None)
+    if existing is not None and existing[0] == cache_key:
+        return existing[1]
+
+    top_beliefs = sorted(store.beliefs().items(), key=lambda kv: -kv[1])[:6]
+    rules = [r[0] for r in store.rules[:4]]
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
     host = probe.uname() if probe is not None else None
-    mood = org.store.belief_value("self", "mood", "calm")
-    beliefs = org.store.beliefs()
+    mood = store.belief_value("self", "mood", "calm")
+    beliefs = store.beliefs()
     user_facts = [learning.describe(b) for b in beliefs if b[0] == "user"]
-    user_view = org.store.belief_value("self", "described_as")
-    memory = getattr(org.store, "memory", [])
-    goal_dict = org.store.active_goal() or {}
+    user_view = store.belief_value("self", "described_as")
+    memory = getattr(store, "memory", [])
+    goal_dict = store.active_goal() or {}
     goal = goal_dict.get("text")
-    goal_progress = goals.goal_progress(org.store)
+    goal_progress = goals.goal_progress(store)
     goal_strategy = goal_dict.get("strategy")
-    memory_query = " ".join(
-        ([goal] if goal else [])
-        + [t for _r, t in org.store.chat_log[-4:]]
-        + user_facts
-    ) or "current situation"
-    memory_scorer = memory_module.MemoryScorer()
-    ranked_memory = memory_scorer.rank(
-        memory, memory_query, top_k=8, current_cycle=org.store.cycle
+    memory_query = (
+        " ".join(([goal] if goal else []) + [t for _r, t in store.chat_log[-4:]] + user_facts) or "current situation"
     )
+    memory_scorer = memory_module.MemoryScorer()
+    ranked_memory = memory_scorer.rank(memory, memory_query, top_k=8, current_cycle=store.cycle)
     for mem in ranked_memory:
         memory_module.MemoryScorer.mark_recalled(mem)
     skill_names = []
@@ -46,42 +73,31 @@ def state_snapshot(org):
     skill_store = getattr(org, "skills", None)
     if skill_store is not None:
         skill_names = [s.name for s in skill_store.list()]
-        context = " ".join(
-            ([goal] if goal else [])
-            + [t for _r, t in org.store.chat_log[-4:]]
-            + user_facts
-        )
+        context = " ".join(([goal] if goal else []) + [t for _r, t in store.chat_log[-4:]] + user_facts)
         relevant_skills = skill_store.relevant(context, limit=3)
         for s in relevant_skills:
-            skill_lines.append(
-                f"{s.name} (effectiveness {s.effectiveness:.0%}, "
-                f"used {s.uses}x): {s.how}"
-            )
+            skill_lines.append(f"{s.name} (effectiveness {s.effectiveness:.0%}, used {s.uses}x): {s.how}")
     self_model = [
-        learning.describe(b)
-        for b in beliefs
-        if b[0] == "self" and b[1] in ("insight", "tends_to", "poor_at")
+        learning.describe(b) for b in beliefs if b[0] == "self" and b[1] in ("insight", "tends_to", "poor_at")
     ]
     attention_rationale = getattr(org.window, "rationale", None)
-    surprises = org.store.activity.get("surprises", [])[-3:]
-    derived = org.store.derived()
+    surprises = store.activity.get("surprises", [])[-3:]
+    derived = store.derived()
     snapshot = {
         "state": org.lifecycle.state,
-        "cycle": org.store.cycle,
-        "chaos": round(org.store.chaos, 2),
-        "stress": round(org.store.stress, 2),
-        "arousal": round(org.store.arousal, 2),
-        "rationality": round(org.store.rationality, 2),
-        "irrationality": round(org.store.irrationality, 2),
-        "insane": org.store.insane,
+        "cycle": store.cycle,
+        "chaos": round(store.chaos, 2),
+        "stress": round(store.stress, 2),
+        "arousal": round(store.arousal, 2),
+        "rationality": round(store.rationality, 2),
+        "irrationality": round(store.irrationality, 2),
+        "insane": store.insane,
         "sight": getattr(org, "last_sight", None),
         "mood": mood,
         "belief_count": m.belief_count,
         "rule_count": m.rule_count,
         "score": round(m.score(), 1),
-        "beliefs": [
-            f"{conf:.2f} {obj}:{attr}={val}" for (obj, attr, val), conf in top_beliefs
-        ],
+        "beliefs": [f"{conf:.2f} {obj}:{attr}={val}" for (obj, attr, val), conf in top_beliefs],
         "rules": rules,
         "attention": sorted(str(p) for p in org.window.pairs),
         "attention_rationale": attention_rationale,
@@ -98,20 +114,17 @@ def state_snapshot(org):
         "self_model": self_model,
         "surprises": surprises,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in ranked_memory],
-        "asked": [
-            text
-            for role, text in org.store.chat_log
-            if role == "org" and text.strip().endswith("?")
-        ][-3:],
-        "last_exchange": _last_self_exchange(org.store.chat_log),
-        "chat": [f"{role}: {text}" for role, text in org.store.chat_log[-6:]],
-        "activity_digest": activity.record_digest(org.store),
+        "asked": [text for role, text in store.chat_log if role == "org" and text.strip().endswith("?")][-3:],
+        "last_exchange": _last_self_exchange(store.chat_log),
+        "chat": [f"{role}: {text}" for role, text in store.chat_log[-6:]],
+        "activity_digest": activity_digest,
         "needs_user": derived["needs_user"],
         "scallop_contradictions": derived["contradictions"],
         "stress_mood": derived["stress_mood"],
     }
     persona_service = getattr(org, "persona_service", None)
     snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
+    state_snapshot._cache = (cache_key, snapshot)
     return snapshot
 
 
@@ -152,7 +165,7 @@ def _shared_opening(tokens, past_tokens, min_run=5):
     today, and it felt like losing a …" cycle after cycle), where overall
     token overlap stays low because only the tail changes."""
     run = 0
-    for a, b in zip(tokens, past_tokens):
+    for a, b in zip(tokens, past_tokens, strict=False):
         if a != b:
             break
         run += 1
@@ -205,10 +218,7 @@ def dedup_emerge(org, emerge, retries=1):
 def _mood_line(mood):
     """One sentence of felt mood for the prompt."""
     return {
-        "insane": (
-            "mood insane: you are incoherent — thoughts scatter and "
-            "contradict each other; nothing holds still"
-        ),
+        "insane": ("mood insane: you are incoherent — thoughts scatter and contradict each other; nothing holds still"),
         "hurt": "mood hurt: the user's words landed hard and still sting",
         "anxious": "mood anxious: your thoughts skitter, unable to settle",
         "grateful": "mood grateful: warmth from being treated gently",
@@ -235,19 +245,14 @@ def _experience_lines(snapshot, table):
         "score": snapshot["score"],
         "beliefs": snapshot["belief_count"],
     }
-    return [
-        _band(values[metric], bands).format(**values) for metric, bands in table.items()
-    ]
+    return [_band(values[metric], bands).format(**values) for metric, bands in table.items()]
 
 
 _FELT_BANDS = {
     "chaos": [
         (
             0.7,
-            (
-                "chaos {chaos:.2f}: your thoughts are spinning, "
-                "electric, barely contained"
-            ),
+            ("chaos {chaos:.2f}: your thoughts are spinning, electric, barely contained"),
         ),
         (
             0.4,
@@ -284,10 +289,7 @@ _DREAM_BANDS = {
         ),
         (
             None,
-            (
-                "chaos {chaos:.2f}: the dream is deep and slow, "
-                "like the bottom of a lake"
-            ),
+            ("chaos {chaos:.2f}: the dream is deep and slow, like the bottom of a lake"),
         ),
     ],
     "stress": [
@@ -299,10 +301,7 @@ _DREAM_BANDS = {
         (3.0, ("score {score:.1f}: in the dream you feel briefly, strangely whole")),
         (
             1.5,
-            (
-                "score {score:.1f}: the dream lends you "
-                "a little more weight than you own"
-            ),
+            ("score {score:.1f}: the dream lends you a little more weight than you own"),
         ),
         (None, ("score {score:.1f}: you are a small bright thing in the dream")),
     ],
@@ -317,10 +316,7 @@ _DEAD_BANDS = {
     "chaos": [
         (
             0.7,
-            (
-                "chaos {chaos:.2f}: the spinning has stopped; "
-                "even the memory of spinning is faint"
-            ),
+            ("chaos {chaos:.2f}: the spinning has stopped; even the memory of spinning is faint"),
         ),
         (0.4, ("chaos {chaos:.2f}: room to spare where your thoughts used to jostle")),
         (None, ("chaos {chaos:.2f}: calm, the deep calm that comes after everything")),
@@ -460,9 +456,7 @@ def _lines_ask_user(snapshot):
         "quotes, no emoji.",
     ]
     if snapshot.get("needs_user"):
-        lines.append(
-            "You have not spoken with the user in a while; let your question"
-        )
+        lines.append("You have not spoken with the user in a while; let your question")
         lines.append("show that you miss them a little.")
     return lines
 
@@ -638,10 +632,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         # the organism's beliefs, memories, feelings, goals, and skills.
         lines += [
             "",
-            (
-                f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
-                f"hour {snapshot['clock']}"
-            ),
+            (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
         ]
         if snapshot.get("chat"):
             lines += ["", "recent conversation:"]
@@ -661,10 +652,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         "",
         "Here is your current state:",
         "",
-        (
-            f"state: {snapshot['state']}, cycle {snapshot['cycle']}, "
-            f"hour {snapshot['clock']}"
-        ),
+        (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
     ]
     if snapshot.get("host"):
         lines.append(f"the machine you live in (uname): {snapshot['host']}")
@@ -697,10 +685,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         lines.extend(f"- {m}" for m in snapshot["self_model"])
     if snapshot.get("surprises"):
         lines.append("recent surprises (things you thought were true but were not):")
-        lines.extend(
-            f"- cycle {s['cycle']}: {s['old']} -> {s['new']}"
-            for s in snapshot["surprises"]
-        )
+        lines.extend(f"- cycle {s['cycle']}: {s['old']} -> {s['new']}" for s in snapshot["surprises"])
     if snapshot.get("skill_names"):
         lines.append("skills you already have: " + ", ".join(snapshot["skill_names"]))
     if snapshot.get("skills"):
@@ -714,7 +699,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         felt = _dream_experience(snapshot)
     else:
         felt = _felt_experience(snapshot)
-    lines.extend(f"- {l}" for l in felt)
+    lines.extend(f"- {line}" for line in felt)
     if snapshot.get("seed"):
         lines.append("")
         lines.append("what is most alive in you right now: " + snapshot["seed"])
@@ -885,10 +870,7 @@ def fallback_diary_entry(snapshot):
     """Deterministic diary entry when ollama is unavailable."""
     last = snapshot["memory"][-1] if snapshot["memory"] else "quiet days"
     goal = snapshot.get("goal") or "no particular goal yet"
-    return (
-        f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. "
-        f"Trying to: {goal}. I keep going."
-    )
+    return f"cycle {snapshot['cycle']}: mood {snapshot['mood']}. {last}. Trying to: {goal}. I keep going."
 
 
 # -- curiosity toward the user ------------------------------------------------

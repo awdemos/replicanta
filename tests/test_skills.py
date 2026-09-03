@@ -2,7 +2,12 @@
 techniques distilled from experience, stored as markdown files, retrieved
 by keyword overlap, curated when stale."""
 
-from replicanta import skills
+from pathlib import Path
+from unittest.mock import patch
+
+from replicanta import extensions, llmclient, narration, skills, tui_views, voice
+from replicanta.organism import Organism
+from replicanta.probe import SystemProbe
 
 
 def _store(tmp_path):
@@ -67,6 +72,63 @@ def test_list_scans_files(tmp_path):
     assert {s.name for s in _store(tmp_path).list()} == {"a", "b"}
 
 
+def test_list_uses_mtime_cache(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    store.save(
+        skills.Skill(
+            name="a",
+            when="when",
+            how="how",
+            created_cycle=0,
+            updated_cycle=0,
+        )
+    )
+    store.list()
+    with patch.object(Path, "read_text") as mock_read:
+        store.list()
+    mock_read.assert_not_called()
+
+
+def test_list_invalidates_cache_after_save(tmp_path):
+    store = _store(tmp_path)
+    store.save(
+        skills.Skill(
+            name="a",
+            when="when",
+            how="how",
+            created_cycle=0,
+            updated_cycle=0,
+        )
+    )
+    assert len(store.list()) == 1
+    store.save(
+        skills.Skill(
+            name="b",
+            when="when",
+            how="how",
+            created_cycle=0,
+            updated_cycle=0,
+        )
+    )
+    assert len(store.list()) == 2
+
+
+def test_list_invalidates_cache_after_archive(tmp_path):
+    store = _store(tmp_path)
+    store.save(
+        skills.Skill(
+            name="a",
+            when="when",
+            how="how",
+            created_cycle=0,
+            updated_cycle=1,
+        )
+    )
+    assert len(store.list()) == 1
+    store.archive_stale(cycle=200, limit=100)
+    assert store.list() == []
+
+
 def test_relevant_matches_keywords(tmp_path):
     store = _store(tmp_path)
     store.save(
@@ -112,10 +174,6 @@ def test_archive_stale_moves_unused(tmp_path):
 
 # -- tier A: reflection loop + retrieval --------------------------------------
 
-from replicanta import llmclient, narration, voice
-from replicanta.organism import Organism
-from replicanta.probe import SystemProbe
-
 
 def _organism(tmp_path, **kwargs):
     kwargs.setdefault(
@@ -124,6 +182,15 @@ def _organism(tmp_path, **kwargs):
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
+
+
+def patch_generate(monkeypatch, fn):
+    """Patch llmclient.generate_with_stats with a deterministic text fake."""
+
+    def wrapper(*a, **k):
+        return fn(*a, **k), {"prompt_tokens": 0, "gen_tokens": 0}
+
+    monkeypatch.setattr("replicanta.llmclient.generate_with_stats", wrapper)
 
 
 def test_reflect_creates_skill(tmp_path, monkeypatch):
@@ -228,6 +295,21 @@ def test_relevant_skills_injected_into_prompt(tmp_path):
     assert "what you have learned how to do" in prompt
 
 
+def test_irrelevant_skills_not_injected(tmp_path):
+    org = _organism(tmp_path)
+    org.skills.save(
+        skills.Skill(
+            name="zzz unrelated",
+            when="quantum frobnicate",
+            how="nothing",
+            created_cycle=0,
+            updated_cycle=0,
+        )
+    )
+    snap = narration.state_snapshot(org)
+    assert snap["skills"] == []
+
+
 def test_skill_effectiveness_updates_on_recorded_outcome(tmp_path):
     org = _organism(tmp_path)
     org.skills.save(
@@ -245,21 +327,6 @@ def test_skill_effectiveness_updates_on_recorded_outcome(tmp_path):
     skill = org.skills.get("rain talk")
     assert skill.uses == 1
     assert skill.effectiveness > 0.5
-
-
-def test_irrelevant_skills_not_injected(tmp_path):
-    org = _organism(tmp_path)
-    org.skills.save(
-        skills.Skill(
-            name="zzz unrelated",
-            when="quantum frobnicate",
-            how="nothing",
-            created_cycle=0,
-            updated_cycle=0,
-        )
-    )
-    snap = narration.state_snapshot(org)
-    assert snap["skills"] == []
 
 
 # -- tier A: engine trigger, curation, views ----------------------------------
@@ -301,8 +368,6 @@ def test_flush_curates_stale_skills(tmp_path):
 
 
 def test_mind_view_shows_skills(tmp_path):
-    from replicanta import tui_views
-
     org = _organism(tmp_path)
     org.skills.save(
         skills.Skill(
@@ -319,10 +384,6 @@ def test_mind_view_shows_skills(tmp_path):
 
 
 # -- tier B: patch proposals ----------------------------------------------------
-
-from conftest import patch_generate
-
-from replicanta import extensions
 
 
 def test_parse_reflect_extension_proposal():

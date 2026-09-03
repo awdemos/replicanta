@@ -253,10 +253,13 @@ container-use checkout <env-id>
 | `/swap default` | Switch organism |
 | `/organisms` | List organisms |
 | `/group start fern willow` | Group chat |
-| `/git on\|off` | Sense git worktree state |
-| `/help` (F1, ctrl+p) | Full command list |
+|| `/git on\|off` | Sense git worktree state |
+|| `/visualize [kind]` | Render a live-updating RDD chart of organism state |
+|| `/help` (F1, ctrl+p) | Full command list |
 
-Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7).
+Kinds for `/visualize`: `beliefs`, `attributes`, `activity`, `memories`, `recent`, `mood`, `sentiment`, `stress`, or `summary`.
+
+Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **visual** (F8 / shift+F8).
 
 ### Learning
 
@@ -303,7 +306,17 @@ rules, then return to the awake state.
   critic, two voters). If the LLM backend is unreachable, a deterministic
   fallback speaks instead.
 
-### Lifecycle
+### Lifecycle and heartbeat
+
+Replicanta does not need a separate heartbeat service. The TUI and web
+surfaces call `Organism.tick(dt)` on a one-second timer; that tick is the
+heartbeat. Each pulse advances:
+
+- lifecycle state (wake → sleep → fade)
+- host sensing and stress bands
+- mood and mental state
+- goal/diary/reflect scheduling
+- periodic persistence
 
 - **Wake**: self-questioning loop; attention narrows with fatigue; stress
   decays slowly while sleep debt and bad moods push it up.
@@ -311,6 +324,10 @@ rules, then return to the awake state.
   validated, promoted, or discarded. Stress recovers faster.
 - **Fade**: sustained critical stress across consecutive transitions ends the
   organism (persisted). `/revive` restores it.
+
+The Visual tab (F8) refreshes automatically on each tick whenever the
+organism's beliefs, memories, activity counters, or cycle change, so charts
+stay current without re-running `/visualize`.
 
 The genome (`organism.scl`) is human-readable and evolves on disk;
 `state.json` holds runtime state.
