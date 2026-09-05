@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from replicanta import extensions as ext_mod
 from replicanta import speech
 from replicanta.organism import (
