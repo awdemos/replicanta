@@ -729,8 +729,8 @@ class Glasshouse:
             directory.mkdir(parents=True, exist_ok=True)
             path = directory / f"{fileutil.slug(scenario.title)}.json"
             fileutil.atomic_write_text(path, json.dumps(mud.scenario_to_json(scenario), indent=1))
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("Failed to persist MUD scenario %s: %s", path, exc)
 
     def _mud_join(self, host_name):
         """Add the current organism to a hosted game."""
