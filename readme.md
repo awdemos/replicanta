@@ -56,7 +56,7 @@ For the web interface: `.venv/bin/replicanta --web`
 - **MUD** — dungeon crawl with `/mud`; type moves like `go north` or
   `take torch`.
 - **Self-modification** — it can propose patches to its own code; auto-apply is
-  off by default (`/auto-apply on` to apply without approval).
+  on by default (`/auto-apply off` to require approval).
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
   utterances, and fades.
 
@@ -268,7 +268,7 @@ Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **visual** 
 - Harsh words raise stress and mood `hurt`; kind words lower stress and mood
   `grateful`.
 - Self-patches are staged in `artifacts/extensions.json`. By default they
-  auto-apply; use `/auto-apply on` to allow self-patches without approval,
+  auto-apply; use `/auto-apply off` to require approval for every patch,
   or `/approve` and `/reject` to handle pending patches. `/revert`
   rolls back the last applied patch.
 - Each organism lives in `organisms/<name>/` with its own state and artifacts.
