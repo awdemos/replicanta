@@ -17,12 +17,13 @@ log = logging.getLogger(__name__)
 GOALS = (
     "reach", "grasp", "release", "point", "wave", "fist",
     "ripple", "pinch", "ok", "shaka", "rock", "spock",
-    "middle_finger",
+    "middle_finger", "thumbs_up",
 )
 
 POSTURES = (
     "open", "fist", "pinch", "ok", "point", "shaka", "rock", "spock",
     "ripple", "reach", "grasp", "release", "wave", "middle_finger",
+    "thumbs_up",
 )
 
 

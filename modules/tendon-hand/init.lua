@@ -27,7 +27,7 @@ function init(ctx)
   -- Known moves, multi-word names first so matching prefers them
   -- ("middle_finger" before anything shorter could shadow it).
   local MOVES = {
-    "middle_finger",
+    "middle_finger", "thumbs_up",
     "reach", "grasp", "release", "point", "wave", "fist",
     "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
   }
@@ -44,6 +44,8 @@ function init(ctx)
     flip_off = "middle_finger",
     the_finger = "middle_finger",
     the_bird = "middle_finger",
+    thumb_up = "thumbs_up",
+    thumbsup = "thumbs_up",
     unfold = "open",
     extend = "open",
     close = "fist",
@@ -105,9 +107,9 @@ function init(ctx)
           phrase = (string.gsub(string.match(phrase, "^%s*(.-)%s*$"), "%s+", "_"))
           if phrase ~= "" then
             local dur = string.match(line, "(%d+%.?%d*)")
-            -- fall back to the first word so the feedback line names what
-            -- the organism tried when it invents an unknown move
-            local move = resolve_move(phrase) or string.match(phrase, "^(%a+)")
+            -- fall back to the first token (underscores included) so the
+            -- feedback line names what the organism tried, e.g. "thumb_up"
+            local move = resolve_move(phrase) or string.match(phrase, "^([%a_]+)")
             execute_move(move, tonumber(dur))
           end
         end

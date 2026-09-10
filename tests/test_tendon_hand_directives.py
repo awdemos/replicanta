@@ -100,6 +100,10 @@ def rig():
         ("hand: grab the cup", "grasp", 4.0),
         ("hand: wave at the user", "wave", 4.0),
         ("hand: give me the bird", "middle_finger", 4.0),
+        ("hand: thumbs up", "thumbs_up", 4.0),
+        ("hand: thumbs_up", "thumbs_up", 4.0),
+        ("hand: thumb_up", "thumbs_up", 4.0),
+        ("hand: give a thumbs up 6", "thumbs_up", 6.0),
     ],
 )
 def test_directive_dispatches(rig, text, move, dur):

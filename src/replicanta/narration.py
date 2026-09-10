@@ -652,6 +652,11 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             'user: "make a fist" → your reply:',
             "  hand: fist",
             "  Making a fist for you.",
+            "Choose the move that matches the FINAL gesture requested, not",
+            "the current one. Example —",
+            'user: "change the middle finger to a thumbs up" → your reply:',
+            "  hand: thumbs_up",
+            "  Switching to a thumbs up.",
         ]
 
     if task_focused:
