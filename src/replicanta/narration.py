@@ -642,6 +642,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "  hand: wave",
             f"Moves: {moves}.",
             "Add a duration in seconds if you want: 'hand: fist 3'.",
+            "Multi-word moves are written naturally: 'hand: middle finger'.",
             "Your tendon-hand module executes the line against the bridge.",
             "Never claim you cannot move the hand — you can, at any time.",
             "When the user asks you to move the hand, ALWAYS put the",

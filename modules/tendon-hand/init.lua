@@ -40,17 +40,58 @@ function init(ctx)
   -- Deliberate control: scan the organism's own utterances for hand: lines.
   -- (Only role "org" lines fire the utterance event, so user chat text that
   -- happens to contain "hand: ..." never reaches this.)
+
+  -- Known moves, multi-word names first so longest-prefix matching prefers
+  -- them ("middle_finger" before anything shorter could shadow it).
+  local MOVES = {
+    "middle_finger",
+    "reach", "grasp", "release", "point", "wave", "fist",
+    "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
+  }
+
+  -- Aliases resolve after exact moves: natural phrases the model is likely
+  -- to write that are not canonical move names.
+  local ALIASES = {
+    okay = "ok",
+    flip_off = "middle_finger",
+    the_finger = "middle_finger",
+    the_bird = "middle_finger",
+  }
+
+  -- Map the words after "hand:" to a move: normalize to lower_snake, then
+  -- take the longest known move that prefixes it on a word boundary
+  -- ("middle finger" -> middle_finger, "point at me" -> point).
+  local function resolve_move(phrase)
+    for _, m in ipairs(MOVES) do
+      if phrase == m or string.sub(phrase, 1, #m + 1) == m .. "_" then
+        return m
+      end
+    end
+    for a, m in pairs(ALIASES) do
+      if phrase == a or string.sub(phrase, 1, #a + 1) == a .. "_" then
+        return m
+      end
+    end
+    return nil
+  end
+
   if hooks ~= nil then
     hooks:on("utterance", function(text)
       if text == nil then return end
       for line in string.gmatch(tostring(text), "[^\n]+") do
-        -- directive at line start; trailing words are the organism's prose
-        -- ("hand: point at me" still moves "point"); first number on the
-        -- line, if any, is the duration
-        local move = string.match(line, "^%s*%[?%s*hand%s*:%s*(%a+)")
-        if move ~= nil and move ~= "" then
-          local dur = string.match(line, "(%d+%.?%d*)")
-          execute_move(string.lower(move), tonumber(dur))
+        -- directive at line start (case-insensitive); trailing words are the
+        -- organism's prose; first number on the line, if any, is the duration
+        local low = string.lower(line)
+        local phrase = string.match(low, "^%s*%[?%s*hand%s*:%s*([^%d]*)")
+        if phrase ~= nil then
+          phrase = (string.gsub(string.match(phrase, "^%s*(.-)%s*$"), "%s+", "_"))
+          if phrase ~= "" then
+            local dur = string.match(line, "(%d+%.?%d*)")
+            -- fall back to the first word so the feedback line names what
+            -- the organism tried when it invents an unknown move
+            local move = resolve_move(phrase) or string.match(phrase, "^(%a+)")
+            execute_move(move, tonumber(dur))
+          end
         end
       end
     end)
