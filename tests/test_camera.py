@@ -114,9 +114,7 @@ def test_describe_image_raises_on_ollama_error(monkeypatch):
 
             return j.dumps({"error": "model not found"}).encode()
 
-    monkeypatch.setattr(
-        llmclient.urllib.request, "urlopen", lambda req, timeout: _Resp()
-    )
+    monkeypatch.setattr(llmclient.urllib.request, "urlopen", lambda req, timeout: _Resp())
     with pytest.raises(RuntimeError):
         llmclient.describe_image(b"x")
 
@@ -152,9 +150,7 @@ def test_felt_experience_without_sight(tmp_path):
     org.load()
     snap = narration.state_snapshot(org)
     assert snap["sight"] is None
-    assert not any(
-        line.startswith("sight:") for line in narration._felt_experience(snap)
-    )
+    assert not any(line.startswith("sight:") for line in narration._felt_experience(snap))
 
 
 # -- TUI wiring ---------------------------------------------------------------

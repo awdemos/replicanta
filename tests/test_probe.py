@@ -196,9 +196,7 @@ def test_all_belief_values_are_valid_symbols(proc, sys_tree):
 
 
 def test_clock_utc_formats_hhmm(proc, sys_tree):
-    probe = _probe(
-        proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 14, 30, tzinfo=UTC)
-    )
+    probe = _probe(proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 14, 30, tzinfo=UTC))
     assert probe.clock_utc() == "14:30 UTC"
 
 
@@ -227,9 +225,7 @@ def test_clock_midnight_belief(proc, sys_tree):
 
 
 def test_clock_hour_belief_is_a_word_not_digits(proc, sys_tree):
-    probe = _probe(
-        proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 17, 42, tzinfo=UTC)
-    )
+    probe = _probe(proc, sys_tree, clock=lambda: datetime(2026, 8, 7, 17, 42, tzinfo=UTC))
     b = probe.beliefs(probe.snapshot())
     assert b[("time", "hour", "seventeen")] == 0.9
     assert ("time", "hour", "17") not in b
@@ -302,9 +298,7 @@ def test_observe_persists_across_save_load(store):
 
 
 def test_sense_folds_metrics_into_store(proc, sys_tree):
-    org = Organism(
-        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, clock=_utc_midnight)
-    )
+    org = Organism(proc.parent, probe=_probe(proc, sys_tree, ncpu=4, clock=_utc_midnight))
     org.load()
     org.sense()
     b = org.store.beliefs()
@@ -319,9 +313,7 @@ def test_sense_bumps_stress_on_adverse_system(proc, sys_tree):
     _write(proc / "loadavg", "20.00 20.00 20.00 2/100 1000\n")
     _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "99000\n")
     _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")
-    org = Organism(
-        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))
-    )
+    org = Organism(proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10)))
     org.load()
     org.sense()
     assert org.store.stress > org.meter.BASELINE
@@ -334,9 +326,7 @@ def test_sense_does_not_stack_stress_on_persistent_adverse(proc, sys_tree):
     _write(proc / "loadavg", "20.00 20.00 20.00 2/100 1000\n")
     _write(proc.parent / "sys/class/thermal/thermal_zone0/temp", "99000\n")
     _write(proc.parent / "sys/class/power_supply/BAT1/capacity", "5\n")
-    org = Organism(
-        proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10))
-    )
+    org = Organism(proc.parent, probe=_probe(proc, sys_tree, ncpu=4, statvfs=_disk(1000, 10)))
     org.load()
     for _ in range(20):
         org.sense()
@@ -368,24 +358,15 @@ def test_load_migrates_legacy_object_beliefs(store):
     org.load()
     beliefs = org.store.beliefs()
     assert ("self", "mood", "calm") in beliefs
-    assert not any(
-        obj in ("apple", "ball", "milk", "water") for (obj, _a, _v) in beliefs
-    )
+    assert not any(obj in ("apple", "ball", "milk", "water") for (obj, _a, _v) in beliefs)
 
 
 def test_fresh_boot_seeds_self_core_not_objects(tmp_path):
-    shutil.copy(
-        Path(__file__).parent.parent / "organism.scl", tmp_path / "organism.scl"
-    )
-    org = Organism(
-        tmp_path, probe=_probe(Path("/nonexistent/proc"), Path("/nonexistent/sys"))
-    )
+    shutil.copy(Path(__file__).parent.parent / "organism.scl", tmp_path / "organism.scl")
+    org = Organism(tmp_path, probe=_probe(Path("/nonexistent/proc"), Path("/nonexistent/sys")))
     org.load()
     assert ("self", "mood", "calm") in org.store.beliefs()
-    assert not any(
-        obj in ("apple", "ball", "milk", "water")
-        for (obj, _a, _v) in org.store.beliefs()
-    )
+    assert not any(obj in ("apple", "ball", "milk", "water") for (obj, _a, _v) in org.store.beliefs())
 
 
 # -- uname: the host's identity --------------------------------------------
@@ -394,9 +375,11 @@ def test_fresh_boot_seeds_self_core_not_objects(tmp_path):
 def test_uname_default_uses_platform_not_subprocess(tmp_path, monkeypatch):
     import platform
 
-    monkeypatch.setattr(platform, "uname", lambda: platform.uname_result(
-        system="Linux", node="testhost", release="6.1", version="#1", machine="x86_64"
-    ))
+    monkeypatch.setattr(
+        platform,
+        "uname",
+        lambda: platform.uname_result(system="Linux", node="testhost", release="6.1", version="#1", machine="x86_64"),
+    )
     probe = SystemProbe(proc=tmp_path / "noproc", sys=tmp_path / "nosys")
     assert probe.uname() == "Linux testhost 6.1 x86_64"
 
@@ -424,9 +407,7 @@ def test_uname_injectable(tmp_path):
 
 
 def probe_beliefs(proc, sys_tree):
-    return _probe(proc, sys_tree, ncpu=4).beliefs(
-        _probe(proc, sys_tree, ncpu=4).snapshot()
-    )
+    return _probe(proc, sys_tree, ncpu=4).beliefs(_probe(proc, sys_tree, ncpu=4).snapshot())
 
 
 @pytest.fixture

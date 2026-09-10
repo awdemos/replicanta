@@ -8,9 +8,7 @@ from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault(
-        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org

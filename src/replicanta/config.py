@@ -104,10 +104,6 @@ def _toml_string(val):
     """Render a TOML basic string with escaping — an unescaped quote or
     newline would corrupt the config or inject extra keys on save."""
     escaped = (
-        val.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
+        val.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
     )
     return f'"{escaped}"'

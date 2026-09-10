@@ -139,9 +139,7 @@ class ThoughtArena:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"task": task, "user_message": user_message, "question": question}
         try:
-            result = self._debate(
-                org, snapshot, build, model, timeout, surprise, temperature
-            )
+            result = self._debate(org, snapshot, build, model, timeout, surprise, temperature)
         except NoUsableCandidateError:
             # content failure (model answered, nothing usable) — the
             # voice itself is fine, so don't mark it offline
@@ -165,9 +163,7 @@ class ThoughtArena:
                 "new_belief": False,
             }
             for skill in snapshot.get("relevant_skills", []):
-                skill_store.record_use(
-                    skill.name, cycle=org.store.cycle, outcome=outcome
-                )
+                skill_store.record_use(skill.name, cycle=org.store.cycle, outcome=outcome)
         if on_token is not None:
             for piece in re.findall(r"\S+\s*", result):
                 on_token(piece)
@@ -203,9 +199,7 @@ class ThoughtArena:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"task": task, "user_message": user_message, "question": question}
         try:
-            result = self._quick_take(
-                org, snapshot, build, model, timeout, temperature
-            )
+            result = self._quick_take(org, snapshot, build, model, timeout, temperature)
         except NoUsableCandidateError:
             return self._fallback(org.store, snapshot, user_message, fallback)
         except json.JSONDecodeError:
@@ -226,9 +220,7 @@ class ThoughtArena:
                 "new_belief": False,
             }
             for skill in snapshot.get("relevant_skills", []):
-                skill_store.record_use(
-                    skill.name, cycle=org.store.cycle, outcome=outcome
-                )
+                skill_store.record_use(skill.name, cycle=org.store.cycle, outcome=outcome)
         if on_token is not None:
             for piece in re.findall(r"\S+\s*", result):
                 on_token(piece)
@@ -240,9 +232,7 @@ class ThoughtArena:
         the candidate. Empty or degenerate output fails the take so the
         caller falls back, exactly like a failed debate."""
         base = narration.build_prompt(snapshot, **build)
-        draft = self._generate(
-            self._proposal(base), model, timeout, temperature, org=org
-        )
+        draft = self._generate(self._proposal(base), model, timeout, temperature, org=org)
         draft = _clean_candidate(draft)
         if not draft:
             raise NoUsableCandidateError("quick take produced no usable candidate")
@@ -254,17 +244,9 @@ class ThoughtArena:
             self._generate(self._proposal(base), model, timeout, temperature, org=org),
         ]
         if self._rng.random() < surprise:
-            drafts.append(
-                self._generate(
-                    self._rogue_proposal(base), model, timeout, temperature, org=org
-                )
-            )
+            drafts.append(self._generate(self._rogue_proposal(base), model, timeout, temperature, org=org))
         else:
-            drafts.append(
-                self._generate(
-                    self._proposal(base), model, timeout, temperature, org=org
-                )
-            )
+            drafts.append(self._generate(self._proposal(base), model, timeout, temperature, org=org))
         # a proposer that only managed meta-narration or special-token
         # loops has no candidate to offer; unwrap what is usable and let
         # a single surviving draft win outright (saving the critique and
@@ -275,14 +257,9 @@ class ThoughtArena:
             raise NoUsableCandidateError("debate produced no usable candidate")
         if len(drafts) == 1:
             return drafts[0]
-        critique = self._generate(
-            self._critique(base, drafts), model, timeout, temperature, org=org
-        )
+        critique = self._generate(self._critique(base, drafts), model, timeout, temperature, org=org)
         votes = [
-            self._generate(
-                self._vote(base, drafts, critique), model, timeout, temperature, org=org
-            )
-            for _ in range(2)
+            self._generate(self._vote(base, drafts, critique), model, timeout, temperature, org=org) for _ in range(2)
         ]
         return self._pick(drafts, votes, critique)
 
@@ -296,11 +273,7 @@ class ThoughtArena:
 
     # -- prompts ---------------------------------------------------------
     def _proposal(self, base):
-        return (
-            base + "\n\n"
-            "Draft a candidate answer, following the task instruction "
-            "above exactly."
-        )
+        return base + "\n\nDraft a candidate answer, following the task instruction above exactly."
 
     def _rogue_proposal(self, base):
         return base + "\n\n" + ROGUE_THOUGHT
@@ -370,12 +343,8 @@ class ThoughtArena:
     # -- model -----------------------------------------------------------
     def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature is None:
-            temperature = round(
-                TEMP_MIN + self._rng.random() * (TEMP_MAX - TEMP_MIN), 2
-            )
-        text, stats = llmclient.generate_with_stats(
-            prompt, model, timeout, temperature=temperature
-        )
+            temperature = round(TEMP_MIN + self._rng.random() * (TEMP_MAX - TEMP_MIN), 2)
+        text, stats = llmclient.generate_with_stats(prompt, model, timeout, temperature=temperature)
         if org is not None:
             self._meter(org, stats)
         return text

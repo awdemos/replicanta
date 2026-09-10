@@ -180,9 +180,7 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
 
     from replicanta import tui
 
-    monkeypatch.setattr(
-        "sys.argv", ["replicanta", "--dir", str(tmp_path), "--org", "../evil"]
-    )
+    monkeypatch.setattr("sys.argv", ["replicanta", "--dir", str(tmp_path), "--org", "../evil"])
     with pytest.raises(SystemExit):
         tui.main()
 

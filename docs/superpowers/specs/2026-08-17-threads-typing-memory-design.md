@@ -24,8 +24,8 @@ Give Replicanta organisms three new capabilities:
 @dataclass
 class CognitiveThread:
     id: str
-    kind: str          # e.g. "self_question", "reflect", "plan", "sense"
-    status: str        # "pending", "running", "done", "failed"
+    kind: str  # e.g. "self_question", "reflect", "plan", "sense"
+    status: str  # "pending", "running", "done", "failed"
     created_cycle: int
     payload: dict
     result: Any = None
@@ -51,6 +51,7 @@ def queue_thread(self, thread: CognitiveThread) -> str:
     self.dirty = True
     return thread.id
 
+
 def finish_thread(self, thread_id: str, result=None, error=None):
     thread = self.threads.get(thread_id)
     if thread is None:
@@ -58,13 +59,15 @@ def finish_thread(self, thread_id: str, result=None, error=None):
     thread.status = "failed" if error else "done"
     thread.result = result
     thread.error = error
-    self.thread_results.append({
-        "id": thread.id,
-        "kind": thread.kind,
-        "cycle": thread.created_cycle,
-        "result": result,
-        "error": error,
-    })
+    self.thread_results.append(
+        {
+            "id": thread.id,
+            "kind": thread.kind,
+            "cycle": thread.created_cycle,
+            "result": result,
+            "error": error,
+        }
+    )
     self.dirty = True
 ```
 
@@ -129,10 +132,18 @@ Every memory entry gets an `importance` score computed by heuristics:
 def score_importance(kind: str, text: str, cycle: int, state: dict) -> float:
     base = 0.5
     kind_weights = {
-        "faded": 1.0, "revived": 0.95, "born": 0.9,
-        "harsh": 0.85, "kind": 0.75, "surprise": 0.8,
-        "goal": 0.7, "learned": 0.65, "dream": 0.5,
-        "command": 0.6, "diary": 0.55, "mud": 0.5,
+        "faded": 1.0,
+        "revived": 0.95,
+        "born": 0.9,
+        "harsh": 0.85,
+        "kind": 0.75,
+        "surprise": 0.8,
+        "goal": 0.7,
+        "learned": 0.65,
+        "dream": 0.5,
+        "command": 0.6,
+        "diary": 0.55,
+        "mud": 0.5,
     }
     score = base + kind_weights.get(kind, 0.0)
     if "user" in text.lower():
@@ -163,9 +174,9 @@ def score_relevance(memory: dict, query: str) -> float:
 def rank_memories(memories: list[dict], query: str, top_k: int = 8) -> list[dict]:
     return sorted(
         memories,
-        key=lambda m: 0.6 * m.get("importance", 0.5)
-                      + 0.3 * score_relevance(m, query)
-                      + 0.1 * (m.get("recall", 0) / 100),
+        key=lambda m: (
+            0.6 * m.get("importance", 0.5) + 0.3 * score_relevance(m, query) + 0.1 * (m.get("recall", 0) / 100)
+        ),
         reverse=True,
     )[:top_k]
 ```

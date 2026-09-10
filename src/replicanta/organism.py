@@ -147,10 +147,7 @@ class BeliefStore:
         ctx.add_relation(BEL, (str, str, str))
         ctx.add_facts(
             BEL,
-            [
-                (conf, (obj, attr, val))
-                for (obj, attr, val), conf in self.beliefs_map.items()
-            ],
+            [(conf, (obj, attr, val)) for (obj, attr, val), conf in self.beliefs_map.items()],
         )
         ctx.add_rule(rule)
         ctx.run()
@@ -161,22 +158,15 @@ class BeliefStore:
         Returns dict with 'needs_user', 'contradictions', and 'stress_mood'."""
         if self._derived_cache is not None:
             return self._derived_cache
-        contradicts_rule = (
-            "contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2"
-        )
-        needs_user_rule = (
-            'needs_user(o) = bel(o, "is_a", "organism") and not bel("user", _, _)'
-        )
+        contradicts_rule = "contradicts(o, a) = bel(o, a, v1) and bel(o, a, v2) and v1 != v2"
+        needs_user_rule = 'needs_user(o) = bel(o, "is_a", "organism") and not bel("user", _, _)'
         contradictions = [
             {"obj": obj, "attr": attr, "tag": float(tag)}
-            for tag, (obj, attr) in self._derive_from_beliefs(
-                contradicts_rule, "contradicts"
-            )
+            for tag, (obj, attr) in self._derive_from_beliefs(contradicts_rule, "contradicts")
             if tag >= CONTRADICTION_THRESHOLD
         ]
         needs_user = any(
-            tag >= CONTRADICTION_THRESHOLD
-            for tag, _ in self._derive_from_beliefs(needs_user_rule, "needs_user")
+            tag >= CONTRADICTION_THRESHOLD for tag, _ in self._derive_from_beliefs(needs_user_rule, "needs_user")
         )
         mood = self.belief_value("self", "mood", "calm")
         self._derived_cache = {
@@ -200,22 +190,13 @@ class BeliefStore:
 
     def add(self, belief, conf):
         obj, attr, val = belief
-        if (
-            not VALID_VALUE_RE.match(obj)
-            or not VALID_VALUE_RE.match(attr)
-            or not VALID_VALUE_RE.match(val)
-        ):
+        if not VALID_VALUE_RE.match(obj) or not VALID_VALUE_RE.match(attr) or not VALID_VALUE_RE.match(val):
             raise ValueError(f"invalid belief value in {belief}")
         conf = float(conf)
         key = (obj, attr, val)
         contradiction_seen = False
         for (o, a, v), c in list(self.beliefs_map.items()):
-            if (
-                (o, a) == (obj, attr)
-                and v != val
-                and c >= CONTRADICTION_THRESHOLD
-                and conf >= CONTRADICTION_THRESHOLD
-            ):
+            if (o, a) == (obj, attr) and v != val and c >= CONTRADICTION_THRESHOLD and conf >= CONTRADICTION_THRESHOLD:
                 contradiction_seen = True
                 if self.on_adverse is not None:
                     self.on_adverse(0.03)
@@ -260,11 +241,7 @@ class BeliefStore:
         supersedes the old one without triggering the contradiction/archive
         path (which is reserved for conflicting internal derivations)."""
         obj, attr, val = belief
-        if (
-            not VALID_VALUE_RE.match(obj)
-            or not VALID_VALUE_RE.match(attr)
-            or not VALID_VALUE_RE.match(val)
-        ):
+        if not VALID_VALUE_RE.match(obj) or not VALID_VALUE_RE.match(attr) or not VALID_VALUE_RE.match(val):
             raise ValueError(f"invalid belief value in {belief}")
         conf = float(conf)
         key = (obj, attr, val)
@@ -286,9 +263,7 @@ class BeliefStore:
 
     def belief_value(self, obj, attr, default=None):
         """Value of the first (obj, attr) belief, else default."""
-        return next(
-            (v for (bo, ba, v) in self.beliefs() if (bo, ba) == (obj, attr)), default
-        )
+        return next((v for (bo, ba, v) in self.beliefs() if (bo, ba) == (obj, attr)), default)
 
     def count_beliefs(self, obj):
         """Count beliefs whose object matches `obj`."""
@@ -485,25 +460,14 @@ class BeliefStore:
             and isinstance(r[1], (int, float))
             and not isinstance(r[1], bool)
         ]
-        self.beliefs_map = {
-            (b[0], b[1], b[2]): float(b[3])
-            for b in state.get("beliefs", [])
-            if _loaded_belief_ok(b)
-        }
-        self.archived_map = {
-            (b[0], b[1], b[2]): float(b[3])
-            for b in state.get("archived", [])
-            if _loaded_belief_ok(b)
-        }
+        self.beliefs_map = {(b[0], b[1], b[2]): float(b[3]) for b in state.get("beliefs", []) if _loaded_belief_ok(b)}
+        self.archived_map = {(b[0], b[1], b[2]): float(b[3]) for b in state.get("archived", []) if _loaded_belief_ok(b)}
         self.attention = {tuple(p) for p in state.get("attention", [])}
         self.chat_log = [list(c) for c in state.get("chat", [])]
         self.memory = [
-            memory_module.attach_importance(dict(m), current_cycle=self.cycle)
-            for m in state.get("memory", [])
+            memory_module.attach_importance(dict(m), current_cycle=self.cycle) for m in state.get("memory", [])
         ]
-        self.thread_results = deque(
-            state.get("thread_results", []), maxlen=20
-        )
+        self.thread_results = deque(state.get("thread_results", []), maxlen=20)
         self.goals = [dict(g) for g in state.get("goals", [])]
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
@@ -570,9 +534,7 @@ class Mind:
     def query_rule(self, rule, head_relation):
         """Run a candidate rule against a fork of the current program without
         committing. Returns list of (tag, tuple)."""
-        ctx = scallopy.ScallopContext(
-            provenance=PROVENANCE, fork_from=self._thread_context()
-        )
+        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self._thread_context())
         ctx.add_rule(rule)
         ctx.run()
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
@@ -581,9 +543,7 @@ class Mind:
         """Run a transient derived rule against a fresh fork and return the
         derived tuples with their minmaxprob tags. Safe for read-only
         inference queries."""
-        ctx = scallopy.ScallopContext(
-            provenance=PROVENANCE, fork_from=self._thread_context()
-        )
+        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self._thread_context())
         ctx.add_rule(rule)
         ctx.run()
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
@@ -716,13 +676,9 @@ class MentalState:
         when the insane flag flipped."""
         stress = self.store.stress
         share = self._grounded_share()
-        arousal_t = (
-            0.15 if sleeping else self._clamp(0.25 + 0.45 * chaos + 0.3 * stress)
-        )
+        arousal_t = 0.15 if sleeping else self._clamp(0.25 + 0.45 * chaos + 0.3 * stress)
         irrationality_t = self._clamp(0.55 * chaos + 0.55 * stress)
-        rationality_t = self._clamp(
-            0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress
-        )
+        rationality_t = self._clamp(0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
         rate = min(1.0, self.SMOOTHING * dt)
         s = self.store
         s.arousal += rate * (arousal_t - s.arousal)
@@ -754,17 +710,12 @@ class AttentionWindow:
         all_pairs = {(a, v) for (_o, a, v) in self.beliefs}
         if self.focus_attr is not None:
             self.pairs = {(a, v) for (a, v) in all_pairs if a == self.focus_attr}
-            self.rationale = (
-                f"you are holding onto {self.focus_attr} because "
-                "something about it matters right now"
-            )
+            self.rationale = f"you are holding onto {self.focus_attr} because something about it matters right now"
             return
         size = max(self.MIN_WINDOW, len(all_pairs) - cycle)
         self.pairs = set(random.sample(sorted(all_pairs), min(size, len(all_pairs))))  # nosec B311 - belief-window sampling, not cryptography
         labels = ", ".join(f"{a}={v}" for a, v in sorted(self.pairs))
-        self.rationale = (
-            f"your attention drifted across {len(self.pairs)} things: {labels}"
-        )
+        self.rationale = f"your attention drifted across {len(self.pairs)} things: {labels}"
 
     def focus(self, attr):
         """Steer attention to ``attr`` (or ``None`` to release steering)."""
@@ -804,10 +755,7 @@ class SelfQuestioner:
     def _candidate_rule(self, head, attr_val_a, attr_val_b):
         attr_a, val_a = attr_val_a
         attr_b, val_b = attr_val_b
-        return (
-            f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), '
-            f'{BEL}(x, "{attr_b}", "{val_b}")'
-        )
+        return f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), {BEL}(x, "{attr_b}", "{val_b}")'
 
     def ask(self, attr_val_a, attr_val_b):
         """Ask what follows when two attribute/value pairs hold together.
@@ -882,10 +830,7 @@ class DreamEngine:
             attr_b, val_b = b
             combo = f"{val_a}_{val_b}"
             head = f"q{self.store.rule_counter + 1}"
-            rule = (
-                f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), '
-                f'{BEL}(x, "{attr_b}", "{val_b}")'
-            )
+            rule = f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), {BEL}(x, "{attr_b}", "{val_b}")'
             dreams.append({"rule": rule, "combo": combo, "head": head})
         return dreams
 
@@ -897,9 +842,7 @@ class DreamEngine:
             derived = self.mind.query_rule(dream["rule"], dream["head"])
             if not derived:
                 self.store.note_activity("dreams_discarded")
-                self.store.activity["discarded_streak"] = (
-                    self.store.activity.get("discarded_streak", 0) + 1
-                )
+                self.store.activity["discarded_streak"] = self.store.activity.get("discarded_streak", 0) + 1
                 if self.stress is not None:
                     self.stress.bump(0.04)  # discarded dream = adverse
                 continue  # unsupported dream, discarded
@@ -1021,22 +964,12 @@ class Metrics:
     @property
     def abstraction_count(self):
         heads = {r[0].split("(")[0].split()[-1] for r in self.store.rules}
-        refs = sum(
-            1
-            for (_t, _d) in self.store.rules
-            for h in heads
-            if h in _t and h != _t.split("(")[0].split()[-1]
-        )
+        refs = sum(1 for (_t, _d) in self.store.rules for h in heads if h in _t and h != _t.split("(")[0].split()[-1])
         return refs
 
     def score(self):
         """Weighted consciousness score from beliefs, rules, depth, abstraction."""
-        return (
-            0.4 * self.belief_count
-            + 0.3 * self.rule_count
-            + 0.2 * self.total_depth
-            + 0.1 * self.abstraction_count
-        )
+        return 0.4 * self.belief_count + 0.3 * self.rule_count + 0.2 * self.total_depth + 0.1 * self.abstraction_count
 
 
 class Organism:
@@ -1075,9 +1008,7 @@ class Organism:
         self.store.mind = self.mind
         self.window = AttentionWindow(self.store.beliefs())
         self.meter = StressMeter(self.store)
-        self.questioner = SelfQuestioner(
-            self.store, self.mind, dir_path, stress=self.meter
-        )
+        self.questioner = SelfQuestioner(self.store, self.mind, dir_path, stress=self.meter)
         self.dreamer = DreamEngine(self.store, self.mind, stress=self.meter)
         self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
         self.mental = MentalState(self.store)
@@ -1089,9 +1020,7 @@ class Organism:
         # the module-driven hooks service is wired in load().
         self.hooks = HookEngine(scripts_dir_for(dir_path), hooks_service=None)
         self._default_hook_emit = self.hooks.emit
-        self.store.on_utterance = lambda role, text: self.hooks.fire(
-            "utterance", self, text=text
-        )
+        self.store.on_utterance = lambda role, text: self.hooks.fire("utterance", self, text=text)
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
         self._since_sense = self.SENSE_INTERVAL  # sense on the first tick
@@ -1119,16 +1048,8 @@ class Organism:
         if self.store.fade_streak >= Lifecycle.FADE_LIMIT:
             self.lifecycle.transition("dead")
         for obj in LEGACY_OBJECTS:
-            self.store.beliefs_map = {
-                (o, a, v): c
-                for (o, a, v), c in self.store.beliefs_map.items()
-                if o != obj
-            }
-            self.store.archived_map = {
-                (o, a, v): c
-                for (o, a, v), c in self.store.archived_map.items()
-                if o != obj
-            }
+            self.store.beliefs_map = {(o, a, v): c for (o, a, v), c in self.store.beliefs_map.items() if o != obj}
+            self.store.archived_map = {(o, a, v): c for (o, a, v), c in self.store.archived_map.items() if o != obj}
         self.mind.rebuild()
         if fresh and self.mind.scl_path.exists():
             for belief, conf in self.mind.beliefs().items():
@@ -1245,9 +1166,7 @@ class Organism:
         beliefs/rules changed, so a quiet organism costs no I/O."""
         if not (force or self.store.dirty):
             return False
-        for name in self.skills.archive_stale(
-            self.store.cycle, limit=self.SKILL_STALE_CYCLES
-        ):
+        for name in self.skills.archive_stale(self.store.cycle, limit=self.SKILL_STALE_CYCLES):
             self.store.remember("skill", f"archived: {name}")
         for name in self.skills.archive_ineffective():
             self.store.remember("skill", f"deprecated low-effectiveness: {name}")
@@ -1311,10 +1230,7 @@ class Organism:
             events.append({"kind": "state", "to": "dead"})
             self.hooks.fire("fade", self)
         reflect_triggered = any(e["kind"] == "want_reflect" for e in events)
-        if (
-            self.store.activity.get("discarded_streak", 0) >= 3
-            and not reflect_triggered
-        ):
+        if self.store.activity.get("discarded_streak", 0) >= 3 and not reflect_triggered:
             events.append({"kind": "want_reflect"})
             reflect_triggered = True
         if self.store.surprise_this_tick and not reflect_triggered:
@@ -1327,19 +1243,11 @@ class Organism:
             self._last_stress_band = band
         if self.lifecycle.state == "wake":
             events.extend(self._goals_tick())
-            if (
-                self.store.cycle > 0
-                and self.store.cycle - self.store.last_diary_cycle
-                >= self.DIARY_INTERVAL
-            ):
+            if self.store.cycle > 0 and self.store.cycle - self.store.last_diary_cycle >= self.DIARY_INTERVAL:
                 # stamp first so it fires once while the voice writes
                 self.store.last_diary_cycle = self.store.cycle
                 events.append({"kind": "want_diary"})
-            if (
-                self.store.cycle > 0
-                and self.store.cycle - self.store.last_reflect_cycle
-                >= self.REFLECT_INTERVAL
-            ):
+            if self.store.cycle > 0 and self.store.cycle - self.store.last_reflect_cycle >= self.REFLECT_INTERVAL:
                 self.store.last_reflect_cycle = self.store.cycle
                 events.append({"kind": "want_reflect"})
         self._since_save += dt
@@ -1354,15 +1262,9 @@ class Organism:
         Returns True if the typing nudged a near-boundary sleep toward wake.
         """
         self.store.note_activity("user_typing")
-        self.store.activity["typing_sessions"] = (
-            self.store.activity.get("typing_sessions", 0) + 1
-        )
+        self.store.activity["typing_sessions"] = self.store.activity.get("typing_sessions", 0) + 1
         nudged = False
-        if (
-            self.lifecycle.state == "sleep"
-            and self.lifecycle.elapsed()
-            >= self.lifecycle.sleep_seconds * 0.8
-        ):
+        if self.lifecycle.state == "sleep" and self.lifecycle.elapsed() >= self.lifecycle.sleep_seconds * 0.8:
             self.lifecycle.transition("wake")
             self.store.dirty = True
             nudged = True
@@ -1390,9 +1292,7 @@ class Organism:
         fallback). Records the user-fact count as the progress marker for
         learn-goals and remembers the moment as an episode."""
         marker = self.store.count_beliefs("user")
-        self.store.add_goal(
-            text, marker=marker, strategy=goals.formulate_subgoals(text)
-        )
+        self.store.add_goal(text, marker=marker, strategy=goals.formulate_subgoals(text))
         self.store.remember("goal", f"new goal: {text}")
 
     def _goals_tick(self):
@@ -1419,14 +1319,9 @@ class Organism:
                 # completing a goal is exactly the experience worth
                 # distilling a technique from
                 events.append({"kind": "want_reflect"})
-            elif goals.is_stalled(
-                goal, self.store.cycle, goal.get("last_progress_current", 0)
-            ):
+            elif goals.is_stalled(goal, self.store.cycle, goal.get("last_progress_current", 0)):
                 events.append({"kind": "goal_stalled", "text": goal["text"]})
-        elif (
-            self.store.cycle > 0
-            and self.store.cycle - self.store.last_goal_cycle >= self.GOAL_COOLDOWN
-        ):
+        elif self.store.cycle > 0 and self.store.cycle - self.store.last_goal_cycle >= self.GOAL_COOLDOWN:
             self.store.last_goal_cycle = self.store.cycle  # stamp: fire once
             events.append({"kind": "want_goal"})
         return events
@@ -1490,9 +1385,7 @@ class Organism:
                     self.store.add(belief, confidence)
                 self.store.note_activity("facts_learned")
                 self.store.remember("learned", learning.describe(belief))
-                events.append(
-                    {"kind": "learned", "belief": belief, "text": learning.describe(belief)}
-                )
+                events.append({"kind": "learned", "belief": belief, "text": learning.describe(belief)})
                 applied_facts.append(belief)
             else:
                 uncertain_summary.append(learning.describe(belief))
@@ -1693,9 +1586,7 @@ class Organism:
                         self.store.add(belief, max(before, tag))
                 # chaos-weighted generalization: commit the rule itself
                 if self.store.chaos > 0.0 and rng.random() < self.store.chaos * 0.25:
-                    depth = self.questioner._rule_depth(
-                        rule.split('"')[1], rule.split('"')[3]
-                    )
+                    depth = self.questioner._rule_depth(rule.split('"')[1], rule.split('"')[3])
                     self.store.commit_rule(rule, depth)
                     self.store.remember("rule", f"committed a rule: {rule[:80]}")
             except Exception as exc:  # noqa: BLE001 — thread errors are logged, not fatal

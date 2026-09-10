@@ -126,9 +126,7 @@ def test_commit_rule_marks_genome_dirty(tmp_path):
     assert store.dirty and store.genome_dirty
     store.save()
     assert not store.dirty and not store.genome_dirty
-    assert (
-        'rel q1(x) = bel(x, "color", "blue")' in (tmp_path / "organism.scl").read_text()
-    )
+    assert 'rel q1(x) = bel(x, "color", "blue")' in (tmp_path / "organism.scl").read_text()
 
 
 # -- front-end commands -------------------------------------------------------

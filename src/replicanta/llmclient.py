@@ -26,7 +26,7 @@ from replicanta import extensions, telemetry
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "ternary-bonsai-1.7b-f16"
+DEFAULT_MODEL = "ternary-bonsai-1.7b:q2_k"
 MAX_TOKENS = 180
 
 
@@ -102,9 +102,7 @@ def llama_cpp_url():
 def ollama_url():
     """Ollama generate endpoint (env: OLLAMA_URL, read per call so tests
     and runtime overrides are not frozen at import)."""
-    return _validate_llm_url(
-        os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
-    )
+    return _validate_llm_url(os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate"))
 
 
 def default_timeout():
@@ -255,9 +253,7 @@ def _generate_ollama(prompt, model, timeout, temperature):
             },
         }
     ).encode()
-    req = urllib.request.Request(
-        ollama_url(), data=payload, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(ollama_url(), data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
@@ -348,18 +344,14 @@ def describe_image(image_bytes, model=None, timeout=None):
     payload = json.dumps(
         {
             "model": model,
-            "prompt": (
-                "Describe what is visible in this image in one or two short sentences."
-            ),
+            "prompt": ("Describe what is visible in this image in one or two short sentences."),
             "images": [base64.b64encode(image_bytes).decode()],
             "stream": False,
             "think": False,
             "options": {"num_predict": 80, "temperature": 0.3},
         }
     ).encode()
-    req = urllib.request.Request(
-        ollama_url(), data=payload, headers={"Content-Type": "application/json"}
-    )
+    req = urllib.request.Request(ollama_url(), data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
@@ -378,11 +370,7 @@ def seed_for(snapshot, rng, exclude=()):
     Seeds used recently (exclude) are avoided while alternatives remain,
     so an idle organism with a static pool still wanders."""
     pool = []
-    pool += [
-        f"this belief: {b}"
-        for b in snapshot["beliefs"][:4]
-        if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS
-    ]
+    pool += [f"this belief: {b}" for b in snapshot["beliefs"][:4] if b.split(" ")[1].split(":")[0] not in ENV_OBJECTS]
     pool += [f"the user — {f}" for f in snapshot.get("user_facts", [])]
     pool += [f"a memory — {m}" for m in snapshot.get("memory", [])]
     if snapshot.get("user_view"):
@@ -413,9 +401,7 @@ _META_PREFIX_RE = re.compile(
 )
 # labels chatty models prepend to the answer itself ("Draft: …",
 # "Response: …") — strip the label, keep the answer
-_LABEL_PREFIX_RE = re.compile(
-    r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*"
-)
+_LABEL_PREFIX_RE = re.compile(r"(?i)^\s*(?:draft|response|reply|answer|candidate)\s*:\s*")
 _META_TAIL_RE = re.compile(
     r"(?is)\n\s*(?:here\s+is\s+the\s+(?:evaluation|critique|assessment|"
     r"revised)|evaluation:|critique:|assessment:|weakness).*$",
@@ -474,8 +460,7 @@ def _strip_instruction_echoes(text):
     kept = [
         line
         for line in text.splitlines()
-        if not _INSTRUCTION_ECHO_RE.match(line)
-        and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)
+        if not _INSTRUCTION_ECHO_RE.match(line) and not any(m in line.lower() for m in _INSTRUCTION_MARKERS)
     ]
     return "\n".join(kept)
 

@@ -63,9 +63,7 @@ def test_service_registry_missing_returns_none():
 
 def test_module_loader_discovers_valid_modules(tmp_path):
     (tmp_path / "alpha").mkdir()
-    (tmp_path / "alpha" / "manifest.toml").write_text(
-        'name = "alpha"\nversion = "1.0.0"\n'
-    )
+    (tmp_path / "alpha" / "manifest.toml").write_text('name = "alpha"\nversion = "1.0.0"\n')
     (tmp_path / "alpha" / "init.lua").write_text("function init(ctx) end\n")
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
@@ -176,12 +174,8 @@ def test_resolve_load_order_linear(tmp_path):
     for name in ("base", "derived"):
         d = tmp_path / name
         d.mkdir()
-        (d / "manifest.toml").write_text(
-            f'name = "{name}"\nversion = "1.0.0"\n'
-        )
-    (tmp_path / "derived" / "manifest.toml").write_text(
-        'name = "derived"\nversion = "1.0.0"\ndepends = ["base"]\n'
-    )
+        (d / "manifest.toml").write_text(f'name = "{name}"\nversion = "1.0.0"\n')
+    (tmp_path / "derived" / "manifest.toml").write_text('name = "derived"\nversion = "1.0.0"\ndepends = ["base"]\n')
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
     ordered = loader._resolve_load_order(modules)
@@ -191,9 +185,7 @@ def test_resolve_load_order_linear(tmp_path):
 def test_resolve_load_order_missing_dependency(tmp_path):
     d = tmp_path / "orphan"
     d.mkdir()
-    (d / "manifest.toml").write_text(
-        'name = "orphan"\nversion = "1.0.0"\ndepends = ["missing"]\n'
-    )
+    (d / "manifest.toml").write_text('name = "orphan"\nversion = "1.0.0"\ndepends = ["missing"]\n')
     loader = ModuleLoader(tmp_path, organism=None, config={})
     modules = loader._discover()
     ordered = loader._resolve_load_order(modules)
@@ -226,39 +218,37 @@ Expected: `AttributeError: 'ModuleLoader' object has no attribute '_resolve_load
 Add to `src/replicanta/modules.py` inside `ModuleLoader`:
 
 ```python
-    def _resolve_load_order(self, modules):
-        """Topological sort by depends. Returns ordered list; logs warnings
-        and returns [] on missing deps or cycles."""
-        by_name = {m["name"]: m for m in modules if m.get("name")}
-        ordered = []
-        visited = set()
-        temp = set()
+def _resolve_load_order(self, modules):
+    """Topological sort by depends. Returns ordered list; logs warnings
+    and returns [] on missing deps or cycles."""
+    by_name = {m["name"]: m for m in modules if m.get("name")}
+    ordered = []
+    visited = set()
+    temp = set()
 
-        def visit(name, path):
-            if name in temp:
-                self.warnings.append(
-                    f"circular dependency detected: {' -> '.join(path + [name])}"
-                )
-                return False
-            if name in visited:
-                return True
-            if name not in by_name:
-                self.warnings.append(f"dependency '{name}' not found; skipping dependents")
-                return False
-            temp.add(name)
-            for dep in by_name[name].get("depends", []):
-                if not visit(dep, path + [name]):
-                    return False
-            temp.remove(name)
-            visited.add(name)
-            ordered.append(by_name[name])
+    def visit(name, path):
+        if name in temp:
+            self.warnings.append(f"circular dependency detected: {' -> '.join(path + [name])}")
+            return False
+        if name in visited:
             return True
+        if name not in by_name:
+            self.warnings.append(f"dependency '{name}' not found; skipping dependents")
+            return False
+        temp.add(name)
+        for dep in by_name[name].get("depends", []):
+            if not visit(dep, path + [name]):
+                return False
+        temp.remove(name)
+        visited.add(name)
+        ordered.append(by_name[name])
+        return True
 
-        for name in sorted(by_name):
-            if name not in visited:
-                if not visit(name, []):
-                    return []
-        return ordered
+    for name in sorted(by_name):
+        if name not in visited:
+            if not visit(name, []):
+                return []
+    return ordered
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -427,12 +417,14 @@ from replicanta.organism import BeliefStore
 
 def test_persona_service_register_and_list():
     svc = PersonaService(BeliefStore(Path("/tmp")))
-    svc.register({
-        "name": "se",
-        "description": "software engineer",
-        "prompt": "You are an engineer.",
-        "beliefs": [],
-    })
+    svc.register(
+        {
+            "name": "se",
+            "description": "software engineer",
+            "prompt": "You are an engineer.",
+            "beliefs": [],
+        }
+    )
     assert svc.list() == ["se"]
 
 
@@ -440,12 +432,14 @@ def test_persona_service_activate(tmp_path):
     store = BeliefStore(tmp_path)
     config = {}
     svc = PersonaService(store, config=config)
-    svc.register({
-        "name": "se",
-        "description": "software engineer",
-        "prompt": "You are an engineer.",
-        "beliefs": [["self", "style", "terse"]],
-    })
+    svc.register(
+        {
+            "name": "se",
+            "description": "software engineer",
+            "prompt": "You are an engineer.",
+            "beliefs": [["self", "style", "terse"]],
+        }
+    )
     svc.activate("se")
     assert config.get("persona", {}).get("active") == "se"
     assert ("self", "style", "terse") in store.beliefs()
@@ -455,12 +449,14 @@ def test_persona_service_activate(tmp_path):
 def test_persona_prompt_fragment(tmp_path):
     store = BeliefStore(tmp_path)
     svc = PersonaService(store)
-    svc.register({
-        "name": "se",
-        "description": "software engineer",
-        "prompt": "You are an engineer.",
-        "beliefs": [],
-    })
+    svc.register(
+        {
+            "name": "se",
+            "description": "software engineer",
+            "prompt": "You are an engineer.",
+            "beliefs": [],
+        }
+    )
     assert svc.prompt_fragment() == ""
     svc.activate("se")
     assert svc.prompt_fragment() == "You are an engineer."
@@ -562,9 +558,7 @@ def test_load_all_initializes_modules(tmp_path):
     d.mkdir()
     (d / "manifest.toml").write_text('name = "cmdmod"\nversion = "1.0.0"\n')
     (d / "init.lua").write_text(
-        'function init(ctx)\n'
-        '  ctx.services.get("commands"):register("/hello", function(args) return "hi" end)\n'
-        'end\n'
+        'function init(ctx)\n  ctx.services.get("commands"):register("/hello", function(args) return "hi" end)\nend\n'
     )
     loader = ModuleLoader(tmp_path, organism=None, config={})
     loader.load_all()
@@ -716,13 +710,9 @@ def test_organism_loads_modules(tmp_path, monkeypatch):
     _seed_organism(tmp_path)
     modules_dir = tmp_path / "modules" / "testmod"
     modules_dir.mkdir(parents=True)
-    (modules_dir / "manifest.toml").write_text(
-        'name = "testmod"\nversion = "1.0.0"\n'
-    )
+    (modules_dir / "manifest.toml").write_text('name = "testmod"\nversion = "1.0.0"\n')
     (modules_dir / "init.lua").write_text(
-        'function init(ctx)\n'
-        '  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\n'
-        'end\n'
+        'function init(ctx)\n  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\nend\n'
     )
     org = Organism(tmp_path, probe=_dummy_probe())
     org.load()
@@ -764,17 +754,18 @@ from replicanta.modules import ModuleLoader
 3. Add helper methods:
 
 ```python
-    def _modules_dir(self):
-        if self.dir_path.parent.name == "organisms":
-            return self.dir_path.parent.parent / "modules"
-        return self.dir_path / "modules"
+def _modules_dir(self):
+    if self.dir_path.parent.name == "organisms":
+        return self.dir_path.parent.parent / "modules"
+    return self.dir_path / "modules"
 
-    def _emit_log(self, msg):
-        # Append to chat log if possible; otherwise ignore.
-        try:
-            self.store.record_chat("system", str(msg))
-        except Exception:  # noqa: BLE001
-            pass
+
+def _emit_log(self, msg):
+    # Append to chat log if possible; otherwise ignore.
+    try:
+        self.store.record_chat("system", str(msg))
+    except Exception:  # noqa: BLE001
+        pass
 ```
 
 4. Update `HookEngine` creation to use the hooks service:
@@ -844,9 +835,7 @@ def test_hook_engine_with_service(tmp_path):
 
 
 def test_hook_engine_legacy_scripts(tmp_path):
-    (tmp_path / "a.lua").write_text(
-        'function on_birth(ctx)\n  LOG = (LOG or "") .. "b"\nend\n'
-    )
+    (tmp_path / "a.lua").write_text('function on_birth(ctx)\n  LOG = (LOG or "") .. "b"\nend\n')
     engine = HookEngine(tmp_path)
     # Legacy behavior: executes script and calls on_birth
     # This test mainly verifies no hooks_service path still works.
@@ -932,26 +921,31 @@ def test_state_snapshot_includes_persona(tmp_path):
     from replicanta.modules import PersonaService
 
     store = Path("/tmp")
+
     # Simpler: build a fake org with persona_service
     class FakeOrg:
         def __init__(self):
             from replicanta.organism import BeliefStore, Lifecycle, Metrics
+
             self.store = BeliefStore(tmp_path)
             self.lifecycle = Lifecycle(self.store)
             self.window = type("W", (), {"pairs": set()})()
             self.last_sight = None
             self.skills = None
             self.persona_service = PersonaService(self.store)
-            self.persona_service.register({
-                "name": "se",
-                "description": "engineer",
-                "prompt": "You are an engineer.",
-                "beliefs": [],
-            })
+            self.persona_service.register(
+                {
+                    "name": "se",
+                    "description": "engineer",
+                    "prompt": "You are an engineer.",
+                    "beliefs": [],
+                }
+            )
             self.persona_service.activate("se")
 
         def metrics(self):
             from replicanta.organism import Metrics
+
             return Metrics(self.store)
 
     org = FakeOrg()
@@ -963,6 +957,7 @@ def test_build_prompt_appends_persona(tmp_path):
     class FakeOrg:
         def __init__(self):
             from replicanta.organism import BeliefStore, Lifecycle, Metrics
+
             self.store = BeliefStore(tmp_path)
             self.lifecycle = Lifecycle(self.store)
             self.window = type("W", (), {"pairs": set()})()
@@ -972,6 +967,7 @@ def test_build_prompt_appends_persona(tmp_path):
 
         def metrics(self):
             from replicanta.organism import Metrics
+
             return Metrics(self.store)
 
     prompt = build_prompt(state_snapshot(FakeOrg()))
@@ -1054,12 +1050,14 @@ def test_persona_service_activate_and_list():
 
     store = BeliefStore(Path("/tmp"))
     svc = PersonaService(store)
-    svc.register({
-        "name": "se",
-        "description": "engineer",
-        "prompt": "You are an engineer.",
-        "beliefs": [],
-    })
+    svc.register(
+        {
+            "name": "se",
+            "description": "engineer",
+            "prompt": "You are an engineer.",
+            "beliefs": [],
+        }
+    )
     assert svc.list() == ["se"]
     svc.activate("se")
     assert svc.active()["name"] == "se"
@@ -1076,8 +1074,8 @@ Expected: `/persona` not in COMMAND_NAMES; test_persona_command passes if import
 Modify `src/replicanta/tui_commands.py`: add to COMMANDS:
 
 ```python
-    ("/persona", "/persona [name|off|list]", "activate, clear, or list personas"),
-    ("/modules", "/modules", "list loaded modules and provided services"),
+(("/persona", "/persona [name|off|list]", "activate, clear, or list personas"),)
+(("/modules", "/modules", "list loaded modules and provided services"),)
 ```
 
 Modify `src/replicanta/tui.py`: add to `_dispatch()` before the final `else`:
@@ -1092,32 +1090,31 @@ Modify `src/replicanta/tui.py`: add to `_dispatch()` before the final `else`:
 Add methods:
 
 ```python
-    def _persona_command(self, args):
-        svc = getattr(self.org, "persona_service", None)
-        if svc is None:
-            self._append_log("persona service unavailable", STYLE_WARN)
-            return
-        if not args or args[0] == "list":
-            active = svc.active()
-            names = svc.list()
-            line = "personas: " + ", ".join(
-                f"*{n}" if active and active["name"] == n else n for n in names
-            )
-            self._append_log(line, STYLE_DIM)
-        elif args[0] == "off":
-            svc.deactivate()
-            self._append_log("persona cleared", STYLE_DIM)
-        else:
-            svc.activate(args[0])
-            self._append_log(f"persona: {args[0]}", STYLE_DIM)
+def _persona_command(self, args):
+    svc = getattr(self.org, "persona_service", None)
+    if svc is None:
+        self._append_log("persona service unavailable", STYLE_WARN)
+        return
+    if not args or args[0] == "list":
+        active = svc.active()
+        names = svc.list()
+        line = "personas: " + ", ".join(f"*{n}" if active and active["name"] == n else n for n in names)
+        self._append_log(line, STYLE_DIM)
+    elif args[0] == "off":
+        svc.deactivate()
+        self._append_log("persona cleared", STYLE_DIM)
+    else:
+        svc.activate(args[0])
+        self._append_log(f"persona: {args[0]}", STYLE_DIM)
 
-    def _modules_command(self):
-        loader = getattr(self.org, "module_loader", None)
-        if loader is None:
-            self._append_log("module loader unavailable", STYLE_WARN)
-            return
-        names = sorted(loader.modules)
-        self._append_log(f"loaded modules ({len(names)}): {', '.join(names)}", STYLE_DIM)
+
+def _modules_command(self):
+    loader = getattr(self.org, "module_loader", None)
+    if loader is None:
+        self._append_log("module loader unavailable", STYLE_WARN)
+        return
+    names = sorted(loader.modules)
+    self._append_log(f"loaded modules ({len(names)}): {', '.join(names)}", STYLE_DIM)
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1159,6 +1156,7 @@ from replicanta.modules import ModuleLoader
 def test_builtin_persona_modules_load(tmp_path, monkeypatch):
     # Copy built-in modules into temp dir
     import shutil
+
     src = Path(__file__).parent.parent / "modules"
     if src.is_dir():
         shutil.copytree(src, tmp_path / "modules", dirs_exist_ok=True)

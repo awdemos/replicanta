@@ -159,9 +159,7 @@ def test_revert_removes_last_applied(tmp_path):
     path = _path(tmp_path)
     extensions.propose(path, _good_pattern(), auto_apply=False)
     extensions.approve(path)
-    extensions.propose(
-        path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=False
-    )
+    extensions.propose(path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=False)
     extensions.approve(path)
     reverted = extensions.revert_last(path)
     assert reverted["kind"] == "seed"
@@ -183,9 +181,7 @@ def test_learning_extract_uses_registry_pattern(tmp_path):
 
 def test_sentiment_uses_registry_terms(tmp_path):
     extensions.load_global(_path(tmp_path))
-    extensions.propose(
-        _path(tmp_path), {"kind": "harsh_term", "text": "blork"}, auto_apply=True
-    )
+    extensions.propose(_path(tmp_path), {"kind": "harsh_term", "text": "blork"}, auto_apply=True)
     assert sentiment.harshness("you are a blork") > 0.0
     assert sentiment.harshness("you are lovely") == 0.0
 

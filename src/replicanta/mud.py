@@ -212,9 +212,7 @@ class MudWorld:
         finished = False
         won = False
         if self.scenario.win_condition.get("room") == actor.room:
-            text += (
-                f" You have reached your destination and won, in {turn} turns."
-            )
+            text += f" You have reached your destination and won, in {turn} turns."
             finished = True
             won = True
         return TurnResult(text=text, moved=True, finished=finished, won=won)
@@ -231,10 +229,7 @@ class MudWorld:
                     if custom:
                         text = f"{custom} — you have won, in {turn} turns."
                     else:
-                        text = (
-                            f"You take the {held}. The dungeon exhales — "
-                            f"you have won, in {turn} turns."
-                        )
+                        text = f"You take the {held}. The dungeon exhales — you have won, in {turn} turns."
                     return TurnResult(text=text, took=held, finished=True, won=True)
                 if self.scenario.win_condition.get("room") == actor.room:
                     return TurnResult(
@@ -324,11 +319,7 @@ class MudSession:
             # Legacy single-actor save: infer the organism's room from the
             # last command, or default to the scenario start.
             room = _legacy_actor_room(command_log) or ""
-            actors = {
-                "organism": MudActor(
-                    name="organism", room=room, inventory=[], kind="organism"
-                )
-            }
+            actors = {"organism": MudActor(name="organism", room=room, inventory=[], kind="organism")}
             turn_order = ["organism"]
             turn_index = 0
 
@@ -376,32 +367,21 @@ def default_scenario() -> Scenario:
     """The built-in deterministic dungeon: mossy clearing, cave, locked gate."""
     return Scenario(
         title="The Amulet of Vatox",
-        premise=(
-            "A mossy clearing, a cave mouth, and a locked treasury. "
-            "Find the amulet and escape."
-        ),
+        premise=("A mossy clearing, a cave mouth, and a locked treasury. Find the amulet and escape."),
         start_room="clearing",
         rooms={
             "clearing": Room(
-                desc=(
-                    "A mossy clearing under a flat grey sky. A cave yawns to the north."
-                ),
+                desc=("A mossy clearing under a flat grey sky. A cave yawns to the north."),
                 exits={"north": "cave mouth"},
                 items=[],
             ),
             "cave mouth": Room(
-                desc=(
-                    "The cave's mouth. Cold air breathes out of the dark. "
-                    "A torch leans against the rock."
-                ),
+                desc=("The cave's mouth. Cold air breathes out of the dark. A torch leans against the rock."),
                 exits={"south": "clearing", "east": "dark hall"},
                 items=["torch"],
             ),
             "dark hall": Room(
-                desc=(
-                    "A long hall of wet stone. Steps spiral down; "
-                    "a rusty gate blocks the north arch."
-                ),
+                desc=("A long hall of wet stone. Steps spiral down; a rusty gate blocks the north arch."),
                 exits={"west": "cave mouth", "down": "well room", "north": "treasury"},
                 locked={"north": ("brass key", "The rusty gate is locked tight.")},
                 items=[],
@@ -488,9 +468,7 @@ class MudGame:
 
     # -- actor management --------------------------------------------------------
 
-    def add_actor(
-        self, name: str, kind: str = "organism", room: str | None = None
-    ) -> MudActor:
+    def add_actor(self, name: str, kind: str = "organism", room: str | None = None) -> MudActor:
         """Add a new actor to the game. Returns the actor."""
         if name in self.actors:
             return self.actors[name]
@@ -577,10 +555,7 @@ class MudGame:
         if result.moved:
             self._record_room(actor.room)
             new_room = self.world.rooms[actor.room]
-            if (
-                new_room.plot_trigger
-                and new_room.plot_trigger not in self.session.plot_beats
-            ):
+            if new_room.plot_trigger and new_room.plot_trigger not in self.session.plot_beats:
                 result.plot = new_room.plot_trigger
                 self.session.plot_beats.append(new_room.plot_trigger)
 
@@ -612,11 +587,7 @@ class MudGame:
         if verb == "look":
             return TurnResult(text=self.world.look(actor.room))
         if verb in ("inventory", "inv", "i"):
-            text = (
-                "You carry: " + ", ".join(actor.inventory) + "."
-                if actor.inventory
-                else "You carry nothing."
-            )
+            text = "You carry: " + ", ".join(actor.inventory) + "." if actor.inventory else "You carry nothing."
             return TurnResult(text=text)
         return TurnResult(text=f"'{command.strip()}'? The dungeon ignores that.")
 
@@ -737,9 +708,7 @@ def situation_text(game, actor_name=None, hint=None):
         lines.append("Recent moves:")
         for actor_log, cmd, turn in recent:
             lines.append(f"- turn {turn} ({actor_log}): {cmd}")
-    lines.append(
-        "Commands: go <exit> (or just the exit name), take <item>, look, inventory."
-    )
+    lines.append("Commands: go <exit> (or just the exit name), take <item>, look, inventory.")
     if hint:
         lines.append(f"A friend watching shouts: {hint}")
     return "\n".join(lines)
@@ -756,10 +725,7 @@ def action_prompt(game, org=None, actor_name=None, hint=None):
     )
     org_line = ""
     if org is not None:
-        org_line = (
-            f"You are {_org_name(org)}. {_user_name(org)} is watching "
-            "from beyond the screen."
-        )
+        org_line = f"You are {_org_name(org)}. {_user_name(org)} is watching from beyond the screen."
     body = situation_text(game, actor_name=actor_name, hint=hint)
     return "\n".join(filter(None, [instruction, org_line, body, "Your move:"]))
 
@@ -851,11 +817,7 @@ def fallback_action(game, rng, actor_name=None):
     """The wanderer: prefer unvisited exits, then items, then any exit."""
     actor = game.actors.get(actor_name) if actor_name else game.current_actor()
     room = game.world.rooms[actor.room]
-    unvisited = [
-        direction
-        for direction in room.exits
-        if room.exits[direction] not in game.session.visited
-    ]
+    unvisited = [direction for direction in room.exits if room.exits[direction] not in game.session.visited]
     if unvisited:
         return "go " + rng.choice(sorted(unvisited))
     if room.items:
@@ -863,9 +825,7 @@ def fallback_action(game, rng, actor_name=None):
     return "go " + rng.choice(sorted(room.exits))
 
 
-def choose_action(
-    game, hint=None, rng=None, generate=None, org=None, actor_name=None, temperature=0.7
-):
+def choose_action(game, hint=None, rng=None, generate=None, org=None, actor_name=None, temperature=0.7):
     """The organism's next move: ask the voice, parse it, fall back to
     the wanderer when the voice is silent or speaks nonsense. Returns
     ActionChoice(command, reason) — the reason is the organism's stated
@@ -965,9 +925,7 @@ def validate_scenario(data: dict[str, Any]) -> Scenario:
         locked = {}
         for direction, lock_info in locked_raw.items():
             if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
-                raise ValueError(
-                    f"invalid locked format for {direction} in {room_id}"
-                )
+                raise ValueError(f"invalid locked format for {direction} in {room_id}")
             locked[direction] = (lock_info[0], lock_info[1])
         plot_trigger = room_data.get("plot_trigger")
         is_goal = room_data.get("is_goal", False)
@@ -983,9 +941,7 @@ def validate_scenario(data: dict[str, Any]) -> Scenario:
     for room_id, room in rooms.items():
         for direction, target in room.exits.items():
             if target not in rooms:
-                raise ValueError(
-                    f"exit {direction} from {room_id} to unknown {target}"
-                )
+                raise ValueError(f"exit {direction} from {room_id} to unknown {target}")
 
     if win_condition.get("item") is not None:
         item = win_condition["item"]
@@ -1049,18 +1005,14 @@ def generate_scenario(
     if generate is None:
 
         def generate(prompt):
-            return llmclient.generate(
-                prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=temperature
-            )
+            return llmclient.generate(prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=temperature)
 
     prompt = _scenario_generation_prompt(description, org)
     try:
         raw = generate(prompt)
         text = raw.strip()
         if text.startswith("```"):
-            text = "\n".join(
-                line for line in text.splitlines() if not line.strip().startswith("```")
-            )
+            text = "\n".join(line for line in text.splitlines() if not line.strip().startswith("```"))
             text = text.strip()
         data = json.loads(text)
         return scenario_or_default(data)

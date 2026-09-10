@@ -13,18 +13,14 @@ from replicanta.sentiment import harshness, kindness
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault(
-        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
 
 
 def _mood_belief(org):
-    return next(
-        (v for (o, a, v) in org.store.beliefs() if (o, a) == ("self", "mood")), None
-    )
+    return next((v for (o, a, v) in org.store.beliefs() if (o, a) == ("self", "mood")), None)
 
 
 # -- kindness scorer ---------------------------------------------------------

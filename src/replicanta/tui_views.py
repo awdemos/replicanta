@@ -56,8 +56,7 @@ def empty_inner():
     """Empty-state renderable for the Inner tab."""
     return Panel(
         Text(
-            "Mental-state gauges appear here: mood, stress, grounding, chaos, "
-            "and recent thought metabolism.",
+            "Mental-state gauges appear here: mood, stress, grounding, chaos, and recent thought metabolism.",
             style="dim",
         ),
         title="inner",
@@ -112,10 +111,7 @@ def mind_view(org):
         if active:
             strategy = active.get("strategy")
             strategy_line = f"   strategy: {strategy}" if strategy else ""
-            lines.append(
-                f"→ now trying: {active['text']} "
-                f"(since cycle {active['created_cycle']}){strategy_line}"
-            )
+            lines.append(f"→ now trying: {active['text']} (since cycle {active['created_cycle']}){strategy_line}")
         for g in [g for g in org.store.goals if g["done_cycle"] is not None][-3:]:
             lines.append(f"   done (cycle {g['done_cycle']}): {g['text']}")
     skill_store = getattr(org, "skills", None)
@@ -144,10 +140,7 @@ def mind_view(org):
         lines += [
             "",
             "attention: " + ", ".join(pairs),
-            (
-                "(only beliefs matching the focus window strongly "
-                "influence replies right now)"
-            ),
+            ("(only beliefs matching the focus window strongly influence replies right now)"),
         ]
     lines += [
         "",
@@ -170,20 +163,14 @@ def memory_view(org):
     lines = [
         "episodes",
         "",
-        (
-            "(notable moments from the organism's life, stamped by the "
-            "cycle they happened)"
-        ),
+        ("(notable moments from the organism's life, stamped by the cycle they happened)"),
         "",
     ]
     for ep in org.store.memory:
         lines.append(f"cycle {ep['cycle']:<4} {ep['kind']:<8} {ep['text']}")
     if not org.store.memory:
         lines += [
-            (
-                "(nothing remembered yet — events appear here when the "
-                "organism dreams, learns, or fades)"
-            ),
+            ("(nothing remembered yet — events appear here when the organism dreams, learns, or fades)"),
             "",
         ]
     beliefs = org.store.beliefs()
@@ -360,9 +347,7 @@ def mind_renderable(org):
                 ),
             )
         caption = Text("techniques the organism has learned and can reuse", style="dim")
-        panels.append(
-            Panel(Group(grid, Text(""), caption), title="skills", border_style="yellow")
-        )
+        panels.append(Panel(Group(grid, Text(""), caption), title="skills", border_style="yellow"))
 
     if store.rules:
         grid = Table.grid(padding=(0, 1))
@@ -383,8 +368,7 @@ def mind_renderable(org):
         body = Group(
             Text(", ".join(pairs)),
             Text(
-                "only beliefs matching the focus window strongly influence "
-                "replies right now",
+                "only beliefs matching the focus window strongly influence replies right now",
                 style="dim",
             ),
         )
@@ -396,9 +380,7 @@ def mind_renderable(org):
 
     m = org.metrics()
     genome_text = (
-        f"{m.belief_count} beliefs · {m.rule_count} rules · "
-        f"depth {m.total_depth} · consciousness score "
-        f"{m.score():.1f}"
+        f"{m.belief_count} beliefs · {m.rule_count} rules · depth {m.total_depth} · consciousness score {m.score():.1f}"
     )
     footer = Text.assemble(
         ("genome: ", "bold"),
@@ -548,8 +530,7 @@ def inner_renderable(org):
                 width=24,
                 color="green",
             ),
-            f"{tried} questions → {derived} derivations "
-            f"({derived / max(tried, 1):.0%} yield) over {cycle} cycles",
+            f"{tried} questions → {derived} derivations ({derived / max(tried, 1):.0%} yield) over {cycle} cycles",
         )
         grid.add_row(
             "rules",
@@ -560,16 +541,13 @@ def inner_renderable(org):
                 width=24,
                 color="blue",
             ),
-            f"{committed} rules committed · {promoted} dreams "
-            f"promoted / {discarded} discarded",
+            f"{committed} rules committed · {promoted} dreams promoted / {discarded} discarded",
         )
         panels.append(Panel(grid, title="perpetuation loop", border_style="magenta"))
 
     arena = activity.summary_lines(store)
     if arena:
-        panels.append(
-            Panel(Text("\n".join(arena)), title="thought arena", border_style="yellow")
-        )
+        panels.append(Panel(Text("\n".join(arena)), title="thought arena", border_style="yellow"))
 
     proposal = _pending_proposal(org)
     if proposal:
@@ -617,8 +595,7 @@ def inner_view(org):
         discarded = stats["discarded"]
         lines += ["", "perpetuation loop", ""]
         lines.append(
-            f"{tried} questions → {derived} derivations "
-            f"({derived / max(tried, 1):.0%} yield) over {cycle} cycles"
+            f"{tried} questions → {derived} derivations ({derived / max(tried, 1):.0%} yield) over {cycle} cycles"
         )
         lines.append(
             f"{committed} rules committed ({committed / max(derived, 1):.0%}"
@@ -636,9 +613,7 @@ def inner_view(org):
         lines += ["", "pending proposal", ""]
         lines.append(proposal)
         auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
-        lines.append(
-            "auto-applied" if auto else "(/approve to apply · /reject to discard)"
-        )
+        lines.append("auto-applied" if auto else "(/approve to apply · /reject to discard)")
     return "\n".join(lines)
 
 
@@ -703,9 +678,7 @@ def cells_layout(org):
             )
         )
     for text, depth in org.store.rules:
-        items.append(
-            ("rule", 0.5 + min(depth, 4) / 8, text, {"text": text, "depth": depth})
-        )
+        items.append(("rule", 0.5 + min(depth, 4) / 8, text, {"text": text, "depth": depth}))
     for entry in org.store.memory[-50:]:
         mkind = entry.get("kind", "memory")
         items.append(
@@ -756,9 +729,7 @@ def cells_layout(org):
             if cell is None:
                 text.append("  ", style=f"on {_CELLS_BG}")
             else:
-                text.append(
-                    "  ", style=f"on {_cell_color(cell['kind'], cell['confidence'])}"
-                )
+                text.append("  ", style=f"on {_cell_color(cell['kind'], cell['confidence'])}")
         text.append("\n")
     # legend: real swatches in the exact colors the grid uses — each kind
     # shows its weak->strong endpoints, because brightness is confidence
@@ -774,9 +745,7 @@ def cells_layout(org):
         legend.append("  ", style=f"on {_cell_color(kind, 0.15)}")
         legend.append("  ", style=f"on {_cell_color(kind, 1.0)}")
         legend.append(f" {label} · ", style="#94a3b8")
-    legend.append(
-        "dim→bright = weak→strong · click a cell to inspect it", style="#94a3b8"
-    )
+    legend.append("dim→bright = weak→strong · click a cell to inspect it", style="#94a3b8")
     text.append(legend)
     return text, grid
 

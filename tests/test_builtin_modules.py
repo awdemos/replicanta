@@ -6,6 +6,7 @@ from replicanta.modules import ModuleLoader
 def test_builtin_persona_modules_load(tmp_path):
     # Copy built-in modules into temp dir
     import shutil
+
     src = Path(__file__).parent.parent / "modules"
     if src.is_dir():
         shutil.copytree(src, tmp_path / "modules", dirs_exist_ok=True)

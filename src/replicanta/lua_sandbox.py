@@ -29,6 +29,7 @@ _ALLOWED_LUA_GLOBALS = frozenset(
     }
 )
 
+
 def _attribute_getter(obj, name):
     """Lupa attribute handler: expose public attributes, hide privates.
 

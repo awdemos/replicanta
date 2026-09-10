@@ -37,9 +37,7 @@ def _make_modules_dir(tmp_path):
     for name in ("alpha", "beta"):
         d = modules_dir / name
         d.mkdir(parents=True)
-        (d / "manifest.toml").write_text(
-            f'name = "{name}"\nversion = "1.0.0"\n'
-        )
+        (d / "manifest.toml").write_text(f'name = "{name}"\nversion = "1.0.0"\n')
         (d / "init.lua").write_text("function init(ctx) end\n")
     return modules_dir
 
@@ -86,9 +84,7 @@ def test_modules_screen_toggles_enabled(monkeypatch, tmp_path):
 def test_modules_screen_save_persists_config(tmp_path, monkeypatch):
     modules_dir = tmp_path / "modules"
     (modules_dir / "alpha").mkdir(parents=True)
-    (modules_dir / "alpha" / "manifest.toml").write_text(
-        'name = "alpha"\nversion = "1.0.0"\n'
-    )
+    (modules_dir / "alpha" / "manifest.toml").write_text('name = "alpha"\nversion = "1.0.0"\n')
     (modules_dir / "alpha" / "init.lua").write_text("function init(ctx) end\n")
 
     loader = ModuleLoader(

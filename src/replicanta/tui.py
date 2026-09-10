@@ -2516,7 +2516,7 @@ class OrganismApp(App):
             return
         try:
             result = svc.dispatch(args if args else ["state"])
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self._append_log(f"hand command failed: {exc}", STYLE_WARN)
             return
         for line in str(result or "").splitlines():

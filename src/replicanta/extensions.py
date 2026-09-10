@@ -91,6 +91,7 @@ def _write(path, registry):
 # own default ExtensionRegistry; module-level helpers delegate to the current
 # thread's default.
 
+
 class ExtensionRegistry:
     """Per-thread (or per-instance) validated extension registry."""
 

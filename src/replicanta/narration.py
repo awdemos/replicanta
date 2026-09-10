@@ -641,7 +641,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "line in your reply, like this:",
             '  hand.move("wave")',
             f"Moves: {moves}.",
-            'Pass a duration in seconds as the second argument:',
+            "Pass a duration in seconds as the second argument:",
             '  hand.move("fist", 3)',
             'Multi-word moves are written naturally: hand.move("middle finger").',
             "If asked for a motion outside this list, call the closest",

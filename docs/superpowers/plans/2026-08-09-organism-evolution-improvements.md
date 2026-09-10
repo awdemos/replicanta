@@ -49,12 +49,9 @@
       rate = derived / max(tried, 1)
       lines = [
           f"over roughly the last {elapsed} cycles:",
-          f"- asked {tried} self-questions, produced {derived} derivations "
-          f"({rate:.0%} yield)",
-          f"- committed {committed} rules, promoted {promoted} dreams, "
-          f"discarded {discarded} dreams",
-          f"- formed {beliefs_new} new beliefs, used the inner voice "
-          f"{llm_calls} times ({fallbacks} fallbacks)",
+          f"- asked {tried} self-questions, produced {derived} derivations ({rate:.0%} yield)",
+          f"- committed {committed} rules, promoted {promoted} dreams, discarded {discarded} dreams",
+          f"- formed {beliefs_new} new beliefs, used the inner voice {llm_calls} times ({fallbacks} fallbacks)",
       ]
       if promoted + discarded > 0:
           dream_rate = promoted / max(promoted + discarded, 1)
@@ -114,6 +111,7 @@
 
   LEARN_GOAL_PREFIXES = ("learn", "know", "understand")
 
+
   def goal_progress(store):
       """Return a human-readable progress line for the active goal."""
       goal = store.active_goal()
@@ -125,21 +123,22 @@
       # count relevant user facts
       target = _target_count(text)
       current = _count_relevant_facts(store, text)
-      return (
-          f"goal: {text}  (started cycle {start}, "
-          f"{elapsed} cycles ago, progress {current}/{target})"
-      )
+      return f"goal: {text}  (started cycle {start}, {elapsed} cycles ago, progress {current}/{target})"
+
 
   def _target_count(text):
-      nums = [int(n) for n in __import__('re').findall(r'\d+', text)]
+      nums = [int(n) for n in __import__("re").findall(r"\d+", text)]
       return nums[-1] if nums else 5
+
 
   def _count_relevant_facts(store, text):
       """Crude relevance: count user facts whose description overlaps words
       with the goal text."""
       import re
+
       words = set(re.findall(r"[a-z]{3,}", text.lower()))
       from replicanta.learning import describe
+
       count = 0
       for (obj, attr, val), _conf in store.beliefs().items():
           if obj != "user":
@@ -148,6 +147,7 @@
           if words & set(re.findall(r"[a-z]{3,}", fact)):
               count += 1
       return count
+
 
   def formulate_subgoals(goal_text):
       """Return a short strategy string for a goal."""
@@ -177,15 +177,20 @@
   In `organism.py`, `add_goal()` should also store a `strategy` field:
   ```python
   from replicanta.goals import formulate_subgoals
+
   ...
+
+
   def add_goal(self, text):
-      self.store.goals.append({
-          "text": text,
-          "created_cycle": self.store.cycle,
-          "done_cycle": None,
-          "marker": "...",
-          "strategy": formulate_subgoals(text),
-      })
+      self.store.goals.append(
+          {
+              "text": text,
+              "created_cycle": self.store.cycle,
+              "done_cycle": None,
+              "marker": "...",
+              "strategy": formulate_subgoals(text),
+          }
+      )
   ```
 
   In `narration.py`, include `goal_strategy` in the snapshot and render it in the prompt.

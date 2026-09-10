@@ -48,9 +48,7 @@ def test_thread_pool_does_not_harvest_pending():
 
 
 def test_make_self_question_thread_builds_rule():
-    thread, rule, head = make_self_question_thread(
-        "color", "blue", "shape", "round", 7, created_cycle=3
-    )
+    thread, rule, head = make_self_question_thread("color", "blue", "shape", "round", 7, created_cycle=3)
     assert thread.kind == "self_question"
     assert thread.created_cycle == 3
     assert head == "q7"

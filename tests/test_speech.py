@@ -255,9 +255,7 @@ def test_env_model_path_allows_voice_inside_voices_dir(tmp_path, monkeypatch):
 def test_voice_urls_parses_hf_layout():
     model, config = speech.voice_urls("en_US-lessac-medium")
     assert model == (
-        "https://huggingface.co/rhasspy/piper-voices/resolve/"
-        "v1.0.0/en/en_US/lessac/medium/"
-        "en_US-lessac-medium.onnx"
+        "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
     )
     assert config.endswith("en_US-lessac-medium.onnx.json")
     model, _ = speech.voice_urls("en_US-libritts_r-medium")
@@ -346,10 +344,7 @@ def test_expected_sha256_prefers_pin_over_metadata(monkeypatch):
         raise AssertionError("metadata lookup must not run for a pinned voice")
 
     monkeypatch.setattr(speech, "_metadata_sha256", boom)
-    assert (
-        speech._expected_sha256("en_US-lessac-medium")
-        == speech._PINNED_VOICE_SHA256["en_US-lessac-medium"]
-    )
+    assert speech._expected_sha256("en_US-lessac-medium") == speech._PINNED_VOICE_SHA256["en_US-lessac-medium"]
 
 
 def test_metadata_sha256_reads_lfs_oid(monkeypatch):

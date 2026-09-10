@@ -96,9 +96,7 @@ def test_context_names_the_roster_and_recent_lines(group):
 def test_utterances_persist_in_speaker_memory(group, monkeypatch):
     _scripted(monkeypatch, ["hi from fern", "hi from willow"])
     group.broadcast("hello everyone")
-    fern_said = [
-        e["text"] for e in group.members["fern"].store.memory if e["kind"] == "group"
-    ]
+    fern_said = [e["text"] for e in group.members["fern"].store.memory if e["kind"] == "group"]
     assert any("I said: hi from fern" in t for t in fern_said)
     # every member also remembers the user's line
     for org in group.members.values():

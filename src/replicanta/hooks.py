@@ -61,9 +61,7 @@ class HookEngine:
 
     def reload(self):
         """Re-read the scripts directory (drop + rebuild the runtime)."""
-        self.scripts = (
-            sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
-        )
+        self.scripts = sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
         self._lua = None
 
     # -- runtime -----------------------------------------------------------
@@ -137,11 +135,7 @@ class HookEngine:
                         self.emit(disabled)
                     return
                 try:
-                    ctx = (
-                        self._ctx(org, event, text)
-                        if org is not None
-                        else self._lua.table(event=event, text=text)
-                    )
+                    ctx = self._ctx(org, event, text) if org is not None else self._lua.table(event=event, text=text)
                 except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
                     self.emit(f"ctx: {exc}")
                     return

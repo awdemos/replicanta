@@ -84,9 +84,7 @@ class Camera:
                     ok, frame = cap.read()
                 if not ok or frame is None:
                     return None
-                ok, buf = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
-                )
+                ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
                 return buf.tobytes() if ok else None
             finally:
                 cap.release()

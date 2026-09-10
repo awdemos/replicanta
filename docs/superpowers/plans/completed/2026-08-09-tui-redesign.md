@@ -44,28 +44,25 @@
       state_word = self.org.lifecycle.state
       icon = {"awake": "🧠", "asleep": "💤", "faded": "🪦"}.get(state_word, "🧠")
       name = self._org_display_name()
-      mood = next(
-          (v for (o, a, v) in store.beliefs() if (o, a) == ("self", "mood")),
-          "calm")
-      mental = (f"a/r/i {store.arousal:.2f}/{store.rationality:.2f}/"
-                f"{store.irrationality:.2f}")
+      mood = next((v for (o, a, v) in store.beliefs() if (o, a) == ("self", "mood")), "calm")
+      mental = f"a/r/i {store.arousal:.2f}/{store.rationality:.2f}/{store.irrationality:.2f}"
       mic = " 🎙" if getattr(self.listener, "recording", False) else ""
       spoken = " 🔊" if speech.enabled else ""
       voice = narration.voice_status()
       clock = self.org.probe.clock_utc()
-      text = (f"Replicanta  │  {icon} {name} · {mood} · {mental}"
-              f"  │  {voice}{mic}{spoken}  {clock}")
+      text = f"Replicanta  │  {icon} {name} · {mood} · {mental}  │  {voice}{mic}{spoken}  {clock}"
       self._topbar_text = text
       self.query_one("#topbar", Static).update(text)
+
 
   def _org_display_name(self):
       """Prefer the organism's learned name, fall back to directory name."""
       beliefs = self.org.store.beliefs()
-      learned = next(
-          (v for (o, a, v) in beliefs if (o, a) == ("self", "name")), None)
+      learned = next((v for (o, a, v) in beliefs if (o, a) == ("self", "name")), None)
       if learned:
           return learned
       return Path(self.org.dir_path).name
+
 
   def _refresh_sidebar(self):
       """Rebuild the nursery sidebar, highlighting the current organism."""
@@ -106,7 +103,8 @@
       f"{m.belief_count} beliefs · {m.rule_count} rules · "
       f"cycle {self.org.store.cycle} · {narration.voice_status()}"
       f"{spoken}{mic}{playing}  │  "
-      "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit")
+      "ctrl+p palette · F1 help · F2-F7 tabs · ctrl+q quit"
+  )
   ```
 
 - [ ] **Step 3: Run existing tests**
@@ -172,9 +170,7 @@
           with Vertical(id="content"):
               with TabbedContent(initial="chat-pane"):
                   with TabPane("chat", id="chat-pane"):
-                      dreams = RichLog(
-                          id="dreams", max_lines=1000, wrap=True,
-                          markup=True, highlight=False)
+                      dreams = RichLog(id="dreams", max_lines=1000, wrap=True, markup=True, highlight=False)
                       dreams.can_focus = False
                       yield dreams
                       yield Static("", id="pending", markup=False)
@@ -188,9 +184,8 @@
                       with VerticalScroll():
                           yield Static("", id="inner", markup=False)
       self.chat_input = Input(
-          placeholder="talk to me, or /help …  (tab completes · "
-                      "F2 chat · F3 mind · F4 memory · F7 inner)",
-          id="chat")
+          placeholder="talk to me, or /help …  (tab completes · F2 chat · F3 mind · F4 memory · F7 inner)", id="chat"
+      )
       yield self.chat_input
       yield Static("", id="bottombar")
   ```
@@ -298,6 +293,7 @@
   STYLE_ORG = "green"
   STYLE_DIM = "dim"
 
+
   def chat_card(who, text, timestamp=None, border_style=None):
       """A consistent panel card for chat utterances."""
       border_style = border_style or (STYLE_USER if who == "you" else STYLE_ORG)
@@ -317,8 +313,7 @@
   ```python
   def _write_card(self, who, text, border_style, stamp=True):
       ts = self._stamp() if stamp else None
-      card = tui_views.chat_card(who, text, timestamp=ts,
-                                 border_style=border_style)
+      card = tui_views.chat_card(who, text, timestamp=ts, border_style=border_style)
       self.query_one("#dreams", RichLog).write(card)
       self.query_one("#dreams", RichLog).write("")
   ```

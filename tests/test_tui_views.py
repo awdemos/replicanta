@@ -1,4 +1,3 @@
-
 import pytest
 from rich.console import Console
 
@@ -27,9 +26,7 @@ def _render_renderable(renderable):
 
     from rich.console import Console
 
-    console = Console(
-        width=80, force_terminal=False, color_system=None, record=True, file=io.StringIO()
-    )
+    console = Console(width=80, force_terminal=False, color_system=None, record=True, file=io.StringIO())
     console.print(renderable)
     return console.export_text()
 
@@ -174,8 +171,7 @@ def test_inner_view_shows_pending_proposal(org, tmp_path):
     artifacts = org.store.dir_path / "artifacts"
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
-        '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}'
+        '{"version": 0, "entries": [], "pending": {"kind": "seed", "text": "what if the rain is curious"}}'
     )
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
@@ -188,8 +184,7 @@ def test_inner_view_shows_manual_approval_when_auto_off(org, tmp_path):
     artifacts = org.store.dir_path / "artifacts"
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
-        '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}'
+        '{"version": 0, "entries": [], "pending": {"kind": "seed", "text": "what if the rain is curious"}}'
     )
     view = tui_views.inner_view(org)
     assert "pending proposal" in view
@@ -251,8 +246,7 @@ def test_inner_renderable_shows_pending_proposal(org, tmp_path):
     artifacts = org.store.dir_path / "artifacts"
     artifacts.mkdir()
     (artifacts / "extensions.json").write_text(
-        '{"version": 0, "entries": [], "pending": '
-        '{"kind": "seed", "text": "what if the rain is curious"}}'
+        '{"version": 0, "entries": [], "pending": {"kind": "seed", "text": "what if the rain is curious"}}'
     )
     text = _render(tui_views.inner_renderable(org))
     assert "pending proposal" in text

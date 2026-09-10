@@ -341,9 +341,7 @@ def test_choose_uses_generated_command():
 
 def test_choose_falls_back_on_nonsense():
     game = MudGame()
-    cmd, _reason = mud.choose_action(
-        game, rng=random.Random(0), generate=lambda p: "purple elephants"
-    )
+    cmd, _reason = mud.choose_action(game, rng=random.Random(0), generate=lambda p: "purple elephants")
     assert cmd == "go north"  # wanderer in the clearing
 
 
@@ -385,9 +383,7 @@ def test_parse_action_with_reason_none_when_only_command():
 
 def test_choose_captures_stated_reason():
     game = MudGame()
-    cmd, reason = mud.choose_action(
-        game, generate=lambda p: "because the dark hall pulls at me\ngo north"
-    )
+    cmd, reason = mud.choose_action(game, generate=lambda p: "because the dark hall pulls at me\ngo north")
     assert cmd == "go north"
     assert reason == "because the dark hall pulls at me"
 
@@ -448,20 +444,14 @@ def test_choose_uses_injected_generate_even_when_org_given():
 
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
-    cmd, reason = mud.choose_action(
-        game, rng=random.Random(0), generate=lambda p: "purple elephants"
-    )
+    cmd, reason = mud.choose_action(game, rng=random.Random(0), generate=lambda p: "purple elephants")
     assert cmd == "go north"
     assert "silent" in reason
 
 
 def test_choose_reason_scrubs_prompt_echoes():
     game = MudGame()
-    raw = (
-        "Draft a candidate answer, following the task instruction "
-        "above exactly.\n"
-        "because the key glints\ngo down"
-    )
+    raw = "Draft a candidate answer, following the task instruction above exactly.\nbecause the key glints\ngo down"
     cmd, reason = mud.choose_action(game, generate=lambda p: raw)
     assert cmd == "go down"
     assert reason == "because the key glints"
@@ -529,9 +519,7 @@ def test_validate_scenario_raises_valueerror_on_bad_input(payload):
 
 
 def test_generate_scenario_uses_default_on_bad_json():
-    scenario = mud.generate_scenario(
-        "haunted space station", _org(), generate=lambda p: "not json"
-    )
+    scenario = mud.generate_scenario("haunted space station", _org(), generate=lambda p: "not json")
     assert scenario.title == "The Amulet of Vatox"
 
 
@@ -562,9 +550,7 @@ def test_generate_scenario_parses_valid_json():
             },
         },
     }
-    scenario = mud.generate_scenario(
-        "tower", _org(), generate=lambda p: __import__("json").dumps(data)
-    )
+    scenario = mud.generate_scenario("tower", _org(), generate=lambda p: __import__("json").dumps(data))
     assert scenario.title == "The Tiny Tower"
 
 

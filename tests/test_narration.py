@@ -34,9 +34,7 @@ class FakeOrg:
         self.store.chaos = 0.5
         self.store.add(("cat", "has_fur", "true"), 0.9)
         self.store.add(("cat", "has_paws", "true"), 0.8)
-        self.store.rules.append(
-            ('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1)
-        )
+        self.store.rules.append(('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1))
         self.lifecycle = Lifecycle(self.store)
         self.window = FakeWindow()
 
@@ -76,9 +74,7 @@ def test_state_snapshot_invalidation(org):
 
 
 def test_state_snapshot_includes_host_uname(org):
-    org.probe = SimpleNamespace(
-        clock_utc=lambda: "14:30 UTC", uname=lambda: "Linux testhost 6.1 x86_64"
-    )
+    org.probe = SimpleNamespace(clock_utc=lambda: "14:30 UTC", uname=lambda: "Linux testhost 6.1 x86_64")
     snap = state_snapshot(org)
     assert snap["host"] == "Linux testhost 6.1 x86_64"
     prompt = build_prompt(snap)
@@ -472,9 +468,7 @@ def test_seed_pool_excludes_env_metrics(org):
 def test_seed_pool_includes_imaginative_seeds(org):
     snap = state_snapshot(org)
     seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(50)}
-    assert any(
-        "wonder" in s or "cannot verify" in s or "ask the user" in s for s in seeds
-    )
+    assert any("wonder" in s or "cannot verify" in s or "ask the user" in s for s in seeds)
 
 
 def test_build_prompt_ask_user_branch(org):
@@ -550,8 +544,8 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 # -- voice quality v2: model, think-mode, prompt register --------------------
 
 
-def test_default_model_is_qwen3_8_ud_hf_q3_k_m():
-    assert llmclient.DEFAULT_MODEL == "qwen3.8-ud-hf:q3_k_m"
+def test_default_model_is_ternary_bonsai_q2_k():
+    assert llmclient.DEFAULT_MODEL == "ternary-bonsai-1.7b:q2_k"
 
 
 def test_strip_think_removes_block():
@@ -624,16 +618,12 @@ def test_reply_branch_is_substance_first(org):
 
 
 def test_is_repeat_of_recent_exact():
-    assert narration.is_repeat_of_recent(
-        "I keep circling the same thought.", ["I keep circling the same thought!"]
-    )
+    assert narration.is_repeat_of_recent("I keep circling the same thought.", ["I keep circling the same thought!"])
 
 
 def test_is_repeat_of_recent_near_twin():
     # 6 shared tokens out of 7 -> above the 0.8 overlap threshold
-    assert narration.is_repeat_of_recent(
-        "I wonder about fur and paws today.", ["I wonder about fur and paws."]
-    )
+    assert narration.is_repeat_of_recent("I wonder about fur and paws today.", ["I wonder about fur and paws."])
 
 
 def test_is_repeat_of_recent_fresh_passes():
@@ -648,12 +638,7 @@ def test_is_repeat_of_recent_shared_opening():
     # loop away (the pattern real musings fell into)
     assert narration.is_repeat_of_recent(
         "I lost another belief today, and it felt like losing a page from an old book.",
-        [
-            (
-                "I lost another belief today. It felt like losing a leaf from "
-                "a tree in autumn."
-            )
-        ],
+        [("I lost another belief today. It felt like losing a leaf from a tree in autumn.")],
     )
 
 
@@ -668,9 +653,7 @@ def test_is_repeat_of_recent_short_shared_opening_passes():
 def test_narrate_retries_when_thought_repeats(org, monkeypatch):
     org.store.record_chat("org", "I keep circling the same thought.")
     takes = iter(["I keep circling the same thought!", "something entirely new."])
-    monkeypatch.setattr(
-        "replicanta.arena.ThoughtArena.emerge", lambda self, org, **kw: next(takes)
-    )
+    monkeypatch.setattr("replicanta.arena.ThoughtArena.emerge", lambda self, org, **kw: next(takes))
     assert narrate(org) == "something entirely new."
 
 
@@ -743,9 +726,7 @@ def test_emerge_rotates_away_from_recent_seeds(org, monkeypatch):
     from replicanta.arena import ThoughtArena
 
     prompts = []
-    patch_generate(
-        monkeypatch, lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought"
-    )
+    patch_generate(monkeypatch, lambda prompt, *a, **k: prompts.append(prompt) or "a fresh thought")
     ThoughtArena(rng=random.Random(1)).emerge(org)
     ThoughtArena(rng=random.Random(1)).emerge(org)
     seeds = [org._recent_seeds[i] for i in range(len(org._recent_seeds))]
@@ -758,12 +739,14 @@ def test_state_snapshot_includes_persona(tmp_path):
     from replicanta.modules import PersonaService
 
     svc = PersonaService(BeliefStore(tmp_path))
-    svc.register({
-        "name": "se",
-        "description": "engineer",
-        "prompt": "You are an engineer.",
-        "beliefs": [],
-    })
+    svc.register(
+        {
+            "name": "se",
+            "description": "engineer",
+            "prompt": "You are an engineer.",
+            "beliefs": [],
+        }
+    )
     svc.activate("se")
 
     class FakeOrg:

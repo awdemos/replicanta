@@ -50,9 +50,7 @@ def test_build_prompt_self_ask_instruction(org):
 
 
 def test_build_prompt_self_answer_includes_question(org):
-    prompt = build_prompt(
-        state_snapshot(org), task="self_answer", question="why am I here?"
-    )
+    prompt = build_prompt(state_snapshot(org), task="self_answer", question="why am I here?")
     assert "why am I here?" in prompt
     assert "Answer your own question" in prompt
 

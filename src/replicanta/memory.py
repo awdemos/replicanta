@@ -96,11 +96,7 @@ class MemoryScorer:
                 )
             relevance = score_relevance(memory.get("text", ""), query)
             recall = min(1.0, memory.get("recall", 0) / 100)
-            return (
-                self.importance_weight * importance
-                + self.relevance_weight * relevance
-                + self.recall_weight * recall
-            )
+            return self.importance_weight * importance + self.relevance_weight * relevance + self.recall_weight * recall
 
         ranked = sorted(memories, key=_key, reverse=True)
         return ranked[:top_k]

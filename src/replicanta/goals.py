@@ -71,7 +71,4 @@ def goal_progress(store):
     target = _target_count(text)
     current = _relevant_facts(store, text)
     stalled = " (stalled)" if is_stalled(goal, store.cycle, current) else ""
-    return (
-        f"goal: {text}  (started cycle {start}, {elapsed} cycles ago, "
-        f"progress {current}/{target}){stalled}"
-    )
+    return f"goal: {text}  (started cycle {start}, {elapsed} cycles ago, progress {current}/{target}){stalled}"

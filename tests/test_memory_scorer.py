@@ -37,9 +37,7 @@ def test_rank_prefers_important_and_relevant():
 
 
 def test_rank_limits_top_k():
-    memories = [
-        {"cycle": i, "kind": "dream", "text": f"dream {i}"} for i in range(20)
-    ]
+    memories = [{"cycle": i, "kind": "dream", "text": f"dream {i}"} for i in range(20)]
     scorer = MemoryScorer()
     assert len(scorer.rank(memories, "query", top_k=5)) == 5
 

@@ -4,7 +4,6 @@ import logging
 import tomllib
 from pathlib import Path
 
-import lupa
 from replicanta import config as project_config
 from replicanta import lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text

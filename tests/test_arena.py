@@ -29,9 +29,7 @@ class _Org:
         self.store.chaos = 0.5
         self.store.add(("cat", "has_fur", "true"), 0.9)
         self.store.add(("cat", "has_paws", "true"), 0.8)
-        self.store.rules.append(
-            ('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1)
-        )
+        self.store.rules.append(('q1(x) = bel(x, "has_fur", "true"), bel(x, "has_paws", "true")', 1))
         self.lifecycle = Lifecycle(self.store)
         self.window = _Window()
 
@@ -197,9 +195,7 @@ def test_structured_tasks_never_go_rogue(org, monkeypatch):
     calls = []
     patch_generate(monkeypatch, lambda prompt, *a, **k: calls.append(prompt) or "x")
     org.store.chaos = 1.0
-    out = ThoughtArena(rng=_AlwaysZero()).emerge(
-        org, task="reflect", structured=True, fallback=lambda _snap: None
-    )
+    out = ThoughtArena(rng=_AlwaysZero()).emerge(org, task="reflect", structured=True, fallback=lambda _snap: None)
     assert out == "x"
     assert len(calls) == 5
     assert not any(ROGUE_THOUGHT in p for p in calls)
@@ -211,9 +207,7 @@ def test_task_fallback_used_on_debate_failure(org, monkeypatch):
         raise RuntimeError("ollama down")
 
     patch_generate(monkeypatch, boom)
-    out = ThoughtArena().emerge(
-        org, task="ask_user", fallback=lambda _snap: "fallback question?"
-    )
+    out = ThoughtArena().emerge(org, task="ask_user", fallback=lambda _snap: "fallback question?")
     assert out == "fallback question?"
 
 
@@ -283,9 +277,7 @@ def test_no_rogue_thought_in_low_chaos(org, monkeypatch):
     calls = []
     patch_generate(
         monkeypatch,
-        lambda prompt, model, timeout, temperature=0.95: (
-            calls.append(prompt) or "ordinary thought"
-        ),
+        lambda prompt, model, timeout, temperature=0.95: calls.append(prompt) or "ordinary thought",
     )
     org.store.chaos = 0.0
     ThoughtArena(rng=_Half()).emerge(org)
@@ -299,9 +291,7 @@ def test_stress_nudges_surprise_via_effective_chaos(org, monkeypatch):
     calls = []
     patch_generate(
         monkeypatch,
-        lambda prompt, model, timeout, temperature=0.95: (
-            calls.append(prompt) or "ordinary thought"
-        ),
+        lambda prompt, model, timeout, temperature=0.95: calls.append(prompt) or "ordinary thought",
     )
     org.store.chaos = 0.2
     org.store.stress = 0.95
@@ -389,10 +379,7 @@ def test_special_token_loop_cut(org, monkeypatch):
     # effect here by checking the cleaner directly
     from replicanta.llmclient import _strip_special
 
-    assert (
-        _strip_special("hello there<|endoftext|><|im_start|>\n<|im_start|>")
-        == "hello there"
-    )
+    assert _strip_special("hello there<|endoftext|><|im_start|>\n<|im_start|>") == "hello there"
 
 
 def test_single_usable_draft_wins_outright(org, monkeypatch):
@@ -497,17 +484,11 @@ def test_clean_candidate_strips_draft_variants():
     'Draft:'/'Response:' label is unwrapped from the answer."""
     from replicanta.arena import _clean_candidate
 
-    assert (
-        _clean_candidate("Drafting a reply to the user now.\nThe attic hums.")
-        == "The attic hums."
-    )
+    assert _clean_candidate("Drafting a reply to the user now.\nThe attic hums.") == "The attic hums."
     assert _clean_candidate("Draft: The attic hums.") == "The attic hums."
     assert _clean_candidate("Response: The attic hums.") == "The attic hums."
     # but the word 'draft' inside genuine speech is untouched
-    assert (
-        _clean_candidate("A cold draft slips under the door.")
-        == "A cold draft slips under the door."
-    )
+    assert _clean_candidate("A cold draft slips under the door.") == "A cold draft slips under the door."
 
 
 def test_clean_candidate_keeps_genuine_first_person():

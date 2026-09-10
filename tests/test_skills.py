@@ -61,12 +61,8 @@ def test_patch_preserves_uses_and_bumps_updated(tmp_path):
 
 def test_list_scans_files(tmp_path):
     store = _store(tmp_path)
-    store.save(
-        skills.Skill(name="a", when="x", how="y", created_cycle=0, updated_cycle=0)
-    )
-    store.save(
-        skills.Skill(name="b", when="z", how="w", created_cycle=0, updated_cycle=0)
-    )
+    store.save(skills.Skill(name="a", when="x", how="y", created_cycle=0, updated_cycle=0))
+    store.save(skills.Skill(name="b", when="z", how="w", created_cycle=0, updated_cycle=0))
     assert {s.name for s in store.list()} == {"a", "b"}
     # a fresh store over the same dir sees the same skills
     assert {s.name for s in _store(tmp_path).list()} == {"a", "b"}
@@ -155,12 +151,8 @@ def test_relevant_matches_keywords(tmp_path):
 
 def test_archive_stale_moves_unused(tmp_path):
     store = _store(tmp_path)
-    store.save(
-        skills.Skill(name="old", when="x", how="y", created_cycle=0, updated_cycle=0)
-    )
-    store.save(
-        skills.Skill(name="used", when="z", how="w", created_cycle=0, updated_cycle=0)
-    )
+    store.save(skills.Skill(name="old", when="x", how="y", created_cycle=0, updated_cycle=0))
+    store.save(skills.Skill(name="used", when="z", how="w", created_cycle=0, updated_cycle=0))
     store.record_use("used")
     used = store.get("used")
     used.updated_cycle = 90
@@ -176,9 +168,7 @@ def test_archive_stale_moves_unused(tmp_path):
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault(
-        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
@@ -197,11 +187,7 @@ def test_reflect_creates_skill(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     patch_generate(
         monkeypatch,
-        lambda *a, **k: (
-            "skill: rain talk\n"
-            "when: the user mentions rain\n"
-            "how: connect it to something I know, ask once"
-        ),
+        lambda *a, **k: "skill: rain talk\nwhen: the user mentions rain\nhow: connect it to something I know, ask once",
     )
     result = voice.reflect(org)
     assert result["action"] == "created"
@@ -321,9 +307,7 @@ def test_skill_effectiveness_updates_on_recorded_outcome(tmp_path):
             updated_cycle=0,
         )
     )
-    org.skills.record_use(
-        "rain talk", cycle=1, outcome={"grounded": True, "user_replied": True}
-    )
+    org.skills.record_use("rain talk", cycle=1, outcome={"grounded": True, "user_replied": True})
     skill = org.skills.get("rain talk")
     assert skill.uses == 1
     assert skill.effectiveness > 0.5
@@ -354,17 +338,11 @@ def test_goal_completion_triggers_reflection(tmp_path):
 
 def test_flush_curates_stale_skills(tmp_path):
     org = _organism(tmp_path)
-    org.skills.save(
-        skills.Skill(
-            name="ancient", when="x", how="y", created_cycle=0, updated_cycle=0
-        )
-    )
+    org.skills.save(skills.Skill(name="ancient", when="x", how="y", created_cycle=0, updated_cycle=0))
     org.store.cycle = 200
     org.flush(force=True)
     assert org.skills.get("ancient") is None
-    assert any(
-        m["kind"] == "skill" and "archived" in m["text"] for m in org.store.memory
-    )
+    assert any(m["kind"] == "skill" and "archived" in m["text"] for m in org.store.memory)
 
 
 def test_mind_view_shows_skills(tmp_path):
@@ -488,9 +466,7 @@ def test_reflect_prompt_offers_extension_format(tmp_path, monkeypatch):
 
 def test_parse_reflect_cleans_noisy_name():
     result = narration.parse_reflect(
-        "skill: ask    - a new technique worth keeping\n"
-        "when: the user is quiet\n"
-        "how: let one question hang in the air"
+        "skill: ask    - a new technique worth keeping\nwhen: the user is quiet\nhow: let one question hang in the air"
     )
     assert result["name"] == "ask"
 
@@ -503,8 +479,6 @@ def test_parse_reflect_caps_long_names():
 def test_parse_skips_corrupt_meta(tmp_path):
     store = _store(tmp_path)
     store.dir_path.mkdir(parents=True, exist_ok=True)
-    (store.dir_path / "broken.md").write_text(
-        "# broken\nwhen: x\nhow: y\nmeta: uses=notanumber\n"
-    )
+    (store.dir_path / "broken.md").write_text("# broken\nwhen: x\nhow: y\nmeta: uses=notanumber\n")
     assert store.get("broken") is None
     assert store.list() == []

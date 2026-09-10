@@ -1073,7 +1073,7 @@ def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=Tr
     print(f"Authorization token: {app.token}")
     Path("/tmp/replicanta-current.token").write_text(app.token)
     if open_browser:
-      threading.Timer(0.2, lambda: webbrowser.open(f"{url}/#token={app.token}")).start()
+        threading.Timer(0.2, lambda: webbrowser.open(f"{url}/#token={app.token}")).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

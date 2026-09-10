@@ -9,9 +9,7 @@ def test_load_config_missing_file_returns_defaults(tmp_path):
 
 
 def test_load_config_reads_user_values(tmp_path):
-    (tmp_path / "replicanta.toml").write_text(
-        '[git]\nenabled = true\ndirty_many_at = 99\n'
-    )
+    (tmp_path / "replicanta.toml").write_text("[git]\nenabled = true\ndirty_many_at = 99\n")
     cfg = config.load_config(tmp_path)
     assert cfg["git"]["enabled"] is True
     assert cfg["git"]["dirty_many_at"] == 99

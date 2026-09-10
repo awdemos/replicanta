@@ -82,14 +82,9 @@ def _env_model_path():
         return None
     return path
 
-HF_VOICE_URL = (
-    "https://huggingface.co/rhasspy/piper-voices/resolve/"
-    "v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}"
-)
-HF_TREE_API_URL = (
-    "https://huggingface.co/api/models/rhasspy/piper-voices/"
-    "tree/v1.0.0/{lang}/{locale}/{name}/{quality}"
-)
+
+HF_VOICE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/{lang}/{locale}/{name}/{quality}/{full}{ext}"
+HF_TREE_API_URL = "https://huggingface.co/api/models/rhasspy/piper-voices/tree/v1.0.0/{lang}/{locale}/{name}/{quality}"
 _VOICE_NAME_RE = re.compile(r"^([a-z]{2,3}_[A-Z]{2})-([a-z0-9_]+)-([a-z]+)$")
 
 # SHA-256 of the .onnx for voices shipped in voices/. These pins anchor the
@@ -183,9 +178,7 @@ def voice_urls(spec):
     lang = locale.split("_")[0]
     full = f"{locale}-{name}-{quality}"
     return tuple(
-        HF_VOICE_URL.format(
-            lang=lang, locale=locale, name=name, quality=quality, full=full, ext=ext
-        )
+        HF_VOICE_URL.format(lang=lang, locale=locale, name=name, quality=quality, full=full, ext=ext)
         for ext in (".onnx", ".onnx.json")
     )
 
@@ -200,9 +193,7 @@ def _metadata_sha256(spec):
     if not m:
         return None
     locale, name, quality = m.groups()
-    url = HF_TREE_API_URL.format(
-        lang=locale.split("_")[0], locale=locale, name=name, quality=quality
-    )
+    url = HF_TREE_API_URL.format(lang=locale.split("_")[0], locale=locale, name=name, quality=quality)
     try:
         out = subprocess.run(  # nosec
             ["curl", "-sfSL", url],
@@ -348,6 +339,7 @@ def _speak(text):
     pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
     if channels > 1:
         pcm = pcm.reshape(-1, channels)
+
     # Book-end silence gives the audio backend and DAC time to start the
     # stream before speech begins and keeps the sink from trimming the tail.
     def _silence(seconds):
@@ -356,9 +348,7 @@ def _speak(text):
             return np.zeros((frames, channels), dtype=np.float32)
         return np.zeros(frames, dtype=np.float32)
 
-    pcm = np.concatenate(
-        [_silence(_SPEECH_PREROLL_SECONDS), pcm, _silence(_SPEECH_POSTROLL_SECONDS)]
-    )
+    pcm = np.concatenate([_silence(_SPEECH_PREROLL_SECONDS), pcm, _silence(_SPEECH_POSTROLL_SECONDS)])
     sc.default_speaker().play(pcm, samplerate=rate)
 
 

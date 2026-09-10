@@ -43,6 +43,7 @@
 ```python
 def test_lua_sandbox_cannot_reach_python_os():
     from replicanta.hooks import HookEngine
+
     engine = HookEngine()
     script = """
 local ok, err = pcall(function()
@@ -165,6 +166,7 @@ pytest tests/test_web.py -k export tests/test_fileutil.py -q
 ```python
 def test_generate_rejects_metadata_ssrf():
     from replicanta.llmclient import _is_allowed_url
+
     assert not _is_allowed_url("http://169.254.169.254/latest/meta-data/")
     assert not _is_allowed_url("file:///etc/passwd")
     assert _is_allowed_url("http://localhost:11434/api/generate")
@@ -277,6 +279,7 @@ pytest tests/test_organism.py -k patch -q
 ```python
 def test_download_voice_rejects_bad_name():
     from replicanta.speech import download_voice
+
     with pytest.raises(ValueError, match="invalid voice name"):
         download_voice("../system")
 ```
@@ -629,6 +632,7 @@ pytest tests/test_organism.py -q
 ```python
 def test_config_catches_toml_errors_not_bugs():
     import tempfile
+
     with tempfile.NamedTemporaryFile(suffix=".toml", delete=False, mode="w") as f:
         f.write("[invalid\n")
         f.flush()

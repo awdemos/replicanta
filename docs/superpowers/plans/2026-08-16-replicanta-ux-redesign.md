@@ -36,7 +36,7 @@
 COMMANDS = [
     # (name, usage, description, category)
     ("/chaos", "/chaos 0..1", "set randomness 0-1", "State"),
-    ...
+    ...,
 ]
 ```
 
@@ -148,8 +148,8 @@ class CommandPalette(Screen):
 In `OrganismApp.BINDINGS`, add/confirm:
 
 ```python
-Binding("ctrl+p", "command_palette", "command palette"),
-Binding("f1", "help", "help"),
+(Binding("ctrl+p", "command_palette", "command palette"),)
+(Binding("f1", "help", "help"),)
 ```
 
 Add action:
@@ -160,6 +160,7 @@ def action_command_palette(self):
         if command:
             self.chat_input.value = command + " "
             self.chat_input.focus()
+
     self.push_screen(CommandPalette(), callback=_fill)
 ```
 
@@ -348,6 +349,7 @@ In `OrganismApp`:
 def set_activity(self, text):
     self.query_one(ActivityLabel).show(text)
 
+
 @property
 def activity_text(self):
     return str(self.query_one(ActivityLabel).renderable)
@@ -362,9 +364,7 @@ Update `_respond`, `_narrate`, `_self_talk`, `_ask_user`, MUD worker to call
 
 ```python
 def test_activity_shows_during_response(pilot, monkeypatch):
-    monkeypatch.setattr(
-        "replicanta.voice.respond", lambda *a, **k: "hello"
-    )
+    monkeypatch.setattr("replicanta.voice.respond", lambda *a, **k: "hello")
     pilot.app.action_respond("hi")
     assert "thinking" in pilot.app.activity_text.lower()
 ```
@@ -407,9 +407,7 @@ def _update_mutation_banner(self):
     pending = extensions.registry().get("pending")
     banner = self.query_one(MutationBanner)
     if pending:
-        banner.query_one("#mutation-summary", Static).update(
-            f"Pending patch: {pending.get('kind', 'unknown')}"
-        )
+        banner.query_one("#mutation-summary", Static).update(f"Pending patch: {pending.get('kind', 'unknown')}")
         banner.styles.display = "block"
     else:
         banner.styles.display = "none"
@@ -578,10 +576,7 @@ def empty_memory():
 
 
 def empty_inner():
-    return Static(
-        "Mental-state gauges appear here: mood, stress, grounding, chaos, "
-        "and recent thought metabolism."
-    )
+    return Static("Mental-state gauges appear here: mood, stress, grounding, chaos, and recent thought metabolism.")
 ```
 
 - [ ] **Step 2: Render them when content is empty**
@@ -653,10 +648,7 @@ def _command(self, data):
 
 ```python
 def _commands(self):
-    return [
-        {"name": c[0], "usage": c[1], "description": c[2], "category": c[3]}
-        for c in tui_commands.COMMANDS
-    ]
+    return [{"name": c[0], "usage": c[1], "description": c[2], "category": c[3]} for c in tui_commands.COMMANDS]
 ```
 
 - [ ] **Step 4: Update JS for command bar and hints**

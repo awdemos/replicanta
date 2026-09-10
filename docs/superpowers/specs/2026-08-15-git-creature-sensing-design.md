@@ -66,8 +66,8 @@ Returns a dict:
     "branch": "main",
     "upstream": "origin/main",  # None if no upstream
     "dirty_count": 3,
-    "unpushed_count": 2,        # None if no upstream
-    "behind_count": 0,          # None if no upstream
+    "unpushed_count": 2,  # None if no upstream
+    "behind_count": 0,  # None if no upstream
 }
 ```
 

@@ -156,9 +156,9 @@ def test_hand_service_registered_and_callable(rig):
 @pytest.mark.parametrize(
     "text",
     [
-        "she said hand: wave",   # directive must start the line
-        "hand:5",                # no move word
-        "handwriting: fist",     # not the directive marker
+        "she said hand: wave",  # directive must start the line
+        "hand:5",  # no move word
+        "handwriting: fist",  # not the directive marker
         "just prose, no directive",
     ],
 )

@@ -50,9 +50,7 @@ def harshness(text):
     """Score how harsh a user message is, 0.0 (neutral) .. HARSHNESS_CAP.
     Terms extend via the tier B extension registry."""
     low = text.lower()
-    terms = _HARSH_TERMS + tuple(
-        e["text"] for e in extensions.active_entries("harsh_term")
-    )
+    terms = _HARSH_TERMS + tuple(e["text"] for e in extensions.active_entries("harsh_term"))
     hits = sum(1 for term in terms if term in low)
     return min(HARSHNESS_CAP, hits * _HARSH_HITS)
 
@@ -61,8 +59,6 @@ def kindness(text):
     """Score how kind a user message is, 0.0 (neutral) .. KINDNESS_CAP.
     Terms extend via the tier B extension registry."""
     low = text.lower()
-    terms = _KIND_TERMS + tuple(
-        e["text"] for e in extensions.active_entries("kind_term")
-    )
+    terms = _KIND_TERMS + tuple(e["text"] for e in extensions.active_entries("kind_term"))
     hits = sum(1 for term in terms if term in low)
     return min(KINDNESS_CAP, hits * _KIND_HITS)

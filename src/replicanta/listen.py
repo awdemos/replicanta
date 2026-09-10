@@ -128,9 +128,7 @@ class Listener:
             return
         self._chunks = []
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._capture, args=(mic,), daemon=True, name="listen"
-        )
+        self._thread = threading.Thread(target=self._capture, args=(mic,), daemon=True, name="listen")
         self._thread.start()
 
     def _open_mic(self):
@@ -140,9 +138,7 @@ class Listener:
 
         if self.mic_spec is None:
             return sc.default_microphone()
-        mic = match_microphone(
-            sc.all_microphones(include_loopback=False), self.mic_spec
-        )
+        mic = match_microphone(sc.all_microphones(include_loopback=False), self.mic_spec)
         if mic is None:
             raise LookupError(f"no microphone matching {self.mic_spec!r}")
         return mic
@@ -196,9 +192,7 @@ class Listener:
         try:
             if self._transcriber is not None:
                 return self._transcriber(audio).strip()
-            segments, _info = self._load_model().transcribe(
-                audio, beam_size=5, vad_filter=True
-            )
+            segments, _info = self._load_model().transcribe(audio, beam_size=5, vad_filter=True)
             return " ".join(s.text.strip() for s in segments).strip()
         except Exception:  # noqa: BLE001 — hearing must never kill anything
             return ""

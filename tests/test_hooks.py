@@ -18,9 +18,7 @@ def scripts(tmp_path):
 
 
 def _org(tmp_path):
-    org = Organism(
-        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    org = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org.load()
     return org
 
@@ -33,9 +31,7 @@ def test_no_scripts_is_a_quiet_noop(scripts):
 
 def test_hook_receives_ctx_and_logs(scripts, tmp_path):
     (scripts / "hello.lua").write_text(
-        "function on_learned(ctx)\n"
-        "  ctx.log('learned from: ' .. ctx.text .. ' at cycle '.. ctx.cycle)\n"
-        "end\n"
+        "function on_learned(ctx)\n  ctx.log('learned from: ' .. ctx.text .. ' at cycle '.. ctx.cycle)\nend\n"
     )
     emitted = []
     engine = HookEngine(scripts, emit=emitted.append)
@@ -88,9 +84,7 @@ def test_broken_script_emits_error_never_raises(scripts, tmp_path):
 
 def test_sandbox_blocks_os(scripts, tmp_path):
     (scripts / "evil.lua").write_text(
-        "function on_cycle(ctx)\n"
-        "  if os == nil then ctx.log('no os') else ctx.log('PWNED') end\n"
-        "end\n"
+        "function on_cycle(ctx)\n  if os == nil then ctx.log('no os') else ctx.log('PWNED') end\nend\n"
     )
     emitted = []
     engine = HookEngine(scripts, emit=emitted.append)
@@ -100,9 +94,7 @@ def test_sandbox_blocks_os(scripts, tmp_path):
 
 def test_sandbox_blocks_python_global(scripts, tmp_path):
     (scripts / "rce.lua").write_text(
-        "function on_cycle(ctx)\n"
-        "  if python == nil then ctx.log('no python') else ctx.log('PWNED') end\n"
-        "end\n"
+        "function on_cycle(ctx)\n  if python == nil then ctx.log('no python') else ctx.log('PWNED') end\nend\n"
     )
     emitted = []
     engine = HookEngine(scripts, emit=emitted.append)
@@ -111,11 +103,7 @@ def test_sandbox_blocks_python_global(scripts, tmp_path):
 
 
 def test_sandbox_blocks_python_rce_in_run(scripts, tmp_path):
-    (scripts / "pwn.lua").write_text(
-        "function main(ctx)\n"
-        "  python.none.__subclasses__()\n"
-        "end\n"
-    )
+    (scripts / "pwn.lua").write_text("function main(ctx)\n  python.none.__subclasses__()\nend\n")
     engine = HookEngine(scripts)
     status = engine.run("pwn.lua", _org(tmp_path))
     assert status.startswith("pwn.lua:")
@@ -171,9 +159,7 @@ def test_organism_fires_birth_learned_and_utterance(tmp_path):
     emitted = []
     org_dir = tmp_path / "organisms" / "default"
     org_dir.mkdir(parents=True)
-    org = Organism(
-        org_dir, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    org = Organism(org_dir, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org.hooks.emit = emitted.append
     org.load()
     assert emitted == ["born as default"]
@@ -188,9 +174,7 @@ def test_organism_fires_birth_learned_and_utterance(tmp_path):
 def test_cycle_hook_fires_on_transition(tmp_path):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    (scripts / "c.lua").write_text(
-        "function on_cycle(ctx) ctx.log('-> ' .. ctx.text) end\n"
-    )
+    (scripts / "c.lua").write_text("function on_cycle(ctx) ctx.log('-> ' .. ctx.text) end\n")
     emitted = []
     org = Organism(
         tmp_path,
@@ -208,9 +192,7 @@ def test_cycle_hook_fires_on_transition(tmp_path):
 
 def test_run_executes_main_with_ctx(scripts, tmp_path):
     (scripts / "once.lua").write_text(
-        "function main(ctx)\n"
-        "  ctx.log('ran ' .. ctx.event .. ' as ' .. ctx.organism)\n"
-        "end\n"
+        "function main(ctx)\n  ctx.log('ran ' .. ctx.event .. ' as ' .. ctx.organism)\nend\n"
     )
     emitted = []
     engine = HookEngine(scripts, emit=emitted.append)
@@ -248,9 +230,7 @@ def test_run_broken_script_returns_error_never_raises(scripts, tmp_path):
 def test_run_shares_the_sandbox(scripts, tmp_path):
     """/lua scripts are sandboxed exactly like event hooks."""
     (scripts / "evil.lua").write_text(
-        "function main(ctx)\n"
-        "  if os == nil then ctx.log('no os') else ctx.log('PWNED') end\n"
-        "end\n"
+        "function main(ctx)\n  if os == nil then ctx.log('no os') else ctx.log('PWNED') end\nend\n"
     )
     emitted = []
     engine = HookEngine(scripts, emit=emitted.append)
@@ -271,24 +251,16 @@ def test_hook_engine_with_service(tmp_path):
 
 
 def test_hook_engine_legacy_scripts(tmp_path):
-    (tmp_path / "a.lua").write_text(
-        'function on_birth(ctx)\n  LOG = (LOG or "") .. "b"\nend\n'
-    )
+    (tmp_path / "a.lua").write_text('function on_birth(ctx)\n  LOG = (LOG or "") .. "b"\nend\n')
     engine = HookEngine(tmp_path)
     engine.fire("birth", None)
     assert engine._lua.globals()["LOG"] == "b"
 
 
 def test_hook_engine_no_multi_fire(tmp_path):
-    (tmp_path / "a.lua").write_text(
-        'function on_cycle(ctx)\n  LOG = (LOG or "") .. "A"\nend\n'
-    )
-    (tmp_path / "b.lua").write_text(
-        'function on_cycle(ctx)\n  LOG = (LOG or "") .. "B"\nend\n'
-    )
-    (tmp_path / "c.lua").write_text(
-        '-- c defines no cycle hook\n'
-    )
+    (tmp_path / "a.lua").write_text('function on_cycle(ctx)\n  LOG = (LOG or "") .. "A"\nend\n')
+    (tmp_path / "b.lua").write_text('function on_cycle(ctx)\n  LOG = (LOG or "") .. "B"\nend\n')
+    (tmp_path / "c.lua").write_text("-- c defines no cycle hook\n")
     engine = HookEngine(tmp_path)
     engine.fire("cycle", None)
     assert engine._lua.globals()["LOG"] == "AB"

@@ -57,9 +57,7 @@ class ThreadPool:
     """
 
     def __init__(self, max_workers: int = 4):
-        self.executor = ThreadPoolExecutor(
-            max_workers=max_workers, thread_name_prefix="cognitive"
-        )
+        self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="cognitive")
         self.pending: dict[str, Future] = {}
 
     def submit(
@@ -121,10 +119,7 @@ def make_self_question_thread(
     Returns the thread, the rule text, and the generated head relation name.
     """
     head = f"q{rule_counter}"
-    rule = (
-        f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), '
-        f'{BEL}(x, "{attr_b}", "{val_b}")'
-    )
+    rule = f'{head}(x) = {BEL}(x, "{attr_a}", "{val_a}"), {BEL}(x, "{attr_b}", "{val_b}")'
     thread = CognitiveThread(
         id=f"self_question_{_fresh_id()}",
         kind="self_question",

@@ -55,6 +55,7 @@
 ```python
 from dataclasses import dataclass, field
 
+
 @dataclass
 class Room:
     desc: str
@@ -63,6 +64,7 @@ class Room:
     locked: dict[str, tuple[str, str]] = field(default_factory=dict)
     plot_trigger: str | None = None
     is_goal: bool = False
+
 
 @dataclass
 class Scenario:
@@ -230,8 +232,7 @@ Add state `self._mud_paused = False`.
 In `tui_commands.py`, expand the `/mud` entry:
 
 ```python
-("/mud", "/mud [map|story|quest|scenario|reset|pause|resume|step]",
- "toggle or control the dungeon crawl")
+("/mud", "/mud [map|story|quest|scenario|reset|pause|resume|step]", "toggle or control the dungeon crawl")
 ```
 
 ### Acceptance criteria

@@ -1,4 +1,5 @@
 """Drive the Replicanta TUI for an asciinema/agg GIF recording."""
+
 import contextlib
 import os
 import sys

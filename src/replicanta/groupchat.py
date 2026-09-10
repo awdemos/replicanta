@@ -46,9 +46,7 @@ class GroupChat:
         """The prompt fragment every speaker sees: the roster plus the
         most recent transcript lines."""
         roster = ", ".join(self.names())
-        recent = "\n".join(
-            f"{speaker}: {text}" for speaker, text in self.transcript[-MAX_CONTEXT:]
-        )
+        recent = "\n".join(f"{speaker}: {text}" for speaker, text in self.transcript[-MAX_CONTEXT:])
         return (
             f"You are in a group chat with {roster} and the user. "
             "Reply as yourself — one or two short sentences, and "

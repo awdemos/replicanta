@@ -7,10 +7,12 @@ from replicanta.gitstate import DEFAULT_THRESHOLDS, GitProbe
 
 def _spawn(responses):
     """responses maps 'arg string' -> (returncode, stdout, stderr)."""
+
     def spawn(_worktree, args):
         cmd = " ".join(args)
         rc, out, err = responses.get(cmd, (1, "", f"unexpected: {cmd}"))
         return subprocess.CompletedProcess(args, rc, out, err)
+
     return spawn
 
 
@@ -118,9 +120,7 @@ def test_distress_edge_triggered():
 
 
 def test_summary():
-    probe = GitProbe(
-        "/tmp", spawn=_spawn(_repo_responses(dirty=3, ahead=2, behind=1))
-    )
+    probe = GitProbe("/tmp", spawn=_spawn(_repo_responses(dirty=3, ahead=2, behind=1)))
     snap = probe.snapshot()
     assert probe.summary(snap) == "main · 3△ · 2↑ · 1↓"
 

@@ -139,9 +139,7 @@ def test_load_config_missing_file_returns_defaults(tmp_path):
 
 
 def test_load_config_reads_user_values(tmp_path):
-    (tmp_path / "replicanta.toml").write_text(
-        '[git]\nenabled = true\ndirty_many_at = 99\n'
-    )
+    (tmp_path / "replicanta.toml").write_text("[git]\nenabled = true\ndirty_many_at = 99\n")
     cfg = config.load_config(tmp_path)
     assert cfg["git"]["enabled"] is True
     assert cfg["git"]["dirty_many_at"] == 99
@@ -331,12 +329,8 @@ class GitProbe:
         if self._upstream() is None:
             return (None, None)
         try:
-            ahead = int(
-                self._run(["rev-list", "--count", "HEAD@{upstream}..HEAD"]).strip()
-            )
-            behind = int(
-                self._run(["rev-list", "--count", "HEAD..HEAD@{upstream}"]).strip()
-            )
+            ahead = int(self._run(["rev-list", "--count", "HEAD@{upstream}..HEAD"]).strip())
+            behind = int(self._run(["rev-list", "--count", "HEAD..HEAD@{upstream}"]).strip())
         except (OSError, RuntimeError, ValueError):
             return (None, None)
         return (ahead, behind)
@@ -426,10 +420,12 @@ from replicanta.gitstate import DEFAULT_THRESHOLDS, GitProbe
 
 def _spawn(responses):
     """responses maps 'arg string' -> (returncode, stdout, stderr)."""
+
     def spawn(_worktree, args):
         cmd = " ".join(args)
         rc, out, err = responses.get(cmd, (1, "", f"unexpected: {cmd}"))
         return subprocess.CompletedProcess(args, rc, out, err)
+
     return spawn
 
 
@@ -537,9 +533,7 @@ def test_distress_edge_triggered():
 
 
 def test_summary():
-    probe = GitProbe(
-        "/tmp", spawn=_spawn(_repo_responses(dirty=3, ahead=2, behind=1))
-    )
+    probe = GitProbe("/tmp", spawn=_spawn(_repo_responses(dirty=3, ahead=2, behind=1)))
     snap = probe.snapshot()
     assert probe.summary(snap) == "main · 3△ · 2↑ · 1↓"
 
@@ -639,48 +633,53 @@ Add this block at the end of `load()`, after `self.window.refresh(cycle=self.sto
 Add these methods to `src/replicanta/organism.py` (place them near `sense()` or `load()`):
 
 ```python
-    def _root_dir(self):
-        """Project root: grandparent of an organism in organisms/; otherwise
-        the organism's own directory."""
-        if self.dir_path.parent.name == "organisms":
-            return self.dir_path.parent.parent
-        return self.dir_path
+def _root_dir(self):
+    """Project root: grandparent of an organism in organisms/; otherwise
+    the organism's own directory."""
+    if self.dir_path.parent.name == "organisms":
+        return self.dir_path.parent.parent
+    return self.dir_path
 
-    def _attach_git_probe(self, git_cfg):
-        """Attach a GitProbe using the given config. Never raises."""
-        try:
-            self.git_probe = GitProbe(self.dir_path, config=git_cfg)
-        except OSError as exc:
-            if not self._git_warning_emitted:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning("git sensing unavailable: %s", exc)
-                self._git_warning_emitted = True
 
-    def git_enable(self):
-        """Enable git sensing and persist the flag in replicanta.toml."""
-        root = self._root_dir()
-        cfg = project_config.load_config(root)
-        cfg.setdefault("git", {})["enabled"] = True
-        project_config.save_config(root, cfg)
-        self._attach_git_probe(cfg.get("git", {}))
+def _attach_git_probe(self, git_cfg):
+    """Attach a GitProbe using the given config. Never raises."""
+    try:
+        self.git_probe = GitProbe(self.dir_path, config=git_cfg)
+    except OSError as exc:
+        if not self._git_warning_emitted:
+            import logging
 
-    def git_disable(self):
-        """Disable git sensing and persist the flag in replicanta.toml."""
-        root = self._root_dir()
-        cfg = project_config.load_config(root)
-        cfg.setdefault("git", {})["enabled"] = False
-        project_config.save_config(root, cfg)
-        self.git_probe = None
+            logger = logging.getLogger(__name__)
+            logger.warning("git sensing unavailable: %s", exc)
+            self._git_warning_emitted = True
 
-    def git_status(self):
-        """Return a short git summary for the worktree."""
-        if self.git_probe is None:
-            return "git sensing is off"
-        snap = self.git_probe.snapshot()
-        if not snap["is_repo"]:
-            return "git sensing on, but this worktree is not a git repository"
-        return self.git_probe.summary(snap)
+
+def git_enable(self):
+    """Enable git sensing and persist the flag in replicanta.toml."""
+    root = self._root_dir()
+    cfg = project_config.load_config(root)
+    cfg.setdefault("git", {})["enabled"] = True
+    project_config.save_config(root, cfg)
+    self._attach_git_probe(cfg.get("git", {}))
+
+
+def git_disable(self):
+    """Disable git sensing and persist the flag in replicanta.toml."""
+    root = self._root_dir()
+    cfg = project_config.load_config(root)
+    cfg.setdefault("git", {})["enabled"] = False
+    project_config.save_config(root, cfg)
+    self.git_probe = None
+
+
+def git_status(self):
+    """Return a short git summary for the worktree."""
+    if self.git_probe is None:
+        return "git sensing is off"
+    snap = self.git_probe.snapshot()
+    if not snap["is_repo"]:
+        return "git sensing on, but this worktree is not a git repository"
+    return self.git_probe.summary(snap)
 ```
 
 - [ ] **Step 4: Extend `sense()` to fold git state**
@@ -896,7 +895,7 @@ git commit -m "feat: wire GitProbe into Organism sense/stress/memory pipeline"
 In `src/replicanta/tui_commands.py`, add this entry to `COMMANDS` (near the other slash commands):
 
 ```python
-    ("/git", "/git [on|off|status]", "toggle or show git sensing"),
+(("/git", "/git [on|off|status]", "toggle or show git sensing"),)
 ```
 
 - [ ] **Step 2: Add help text snippet**
@@ -904,9 +903,9 @@ In `src/replicanta/tui_commands.py`, add this entry to `COMMANDS` (near the othe
 Append this to the `help_text()` return value, after the existing scripting section:
 
 ```python
-        "",
-        "git sensing: /git on|off toggles whether the organism feels the",
-        "worktree state; /git status shows the current repo summary.",
+("",)
+("git sensing: /git on|off toggles whether the organism feels the",)
+("worktree state; /git status shows the current repo summary.",)
 ```
 
 - [ ] **Step 3: Dispatch `/git` in the TUI**

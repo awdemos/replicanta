@@ -83,23 +83,17 @@ _PATTERNS = [
         True,
     ),
     (
-        re.compile(
-            r"\bi (?:really )?(?:like|love|enjoy) " + _VALUE + r"[.!,]?$", re.IGNORECASE
-        ),
+        re.compile(r"\bi (?:really )?(?:like|love|enjoy) " + _VALUE + r"[.!,]?$", re.IGNORECASE),
         lambda m: ("user", f"like_{m.group(1)}", "true"),
         False,
     ),
     (
-        re.compile(
-            r"\bi (?:really )?(?:hate|dislike) " + _VALUE + r"[.!,]?$", re.IGNORECASE
-        ),
+        re.compile(r"\bi (?:really )?(?:hate|dislike) " + _VALUE + r"[.!,]?$", re.IGNORECASE),
         lambda m: ("user", f"dislike_{m.group(1)}", "true"),
         False,
     ),
     (
-        re.compile(
-            r"\bi (?:am|feel) (?:feeling )?" + _VALUE + r"[.!,]?$", re.IGNORECASE
-        ),
+        re.compile(r"\bi (?:am|feel) (?:feeling )?" + _VALUE + r"[.!,]?$", re.IGNORECASE),
         lambda m: ("user", "feeling", m.group(1)),
         True,
     ),
@@ -114,9 +108,7 @@ _PATTERNS = [
         True,
     ),
     (
-        re.compile(
-            r"^([a-zA-Z]+) (?:is|means) " + _VALUE + r"[.!,]?$", re.IGNORECASE
-        ),
+        re.compile(r"^([a-zA-Z]+) (?:is|means) " + _VALUE + r"[.!,]?$", re.IGNORECASE),
         lambda m: ("self", "knows", f"{m.group(1)}_is_{m.group(2)}"),
         True,
     ),
@@ -132,9 +124,7 @@ _NEGATION_PATTERNS = [
         False,
     ),
     (
-        re.compile(
-            r"\bi (?:am|feel) (?:feeling )?not " + _VALUE + r"[.!,]?$", re.IGNORECASE
-        ),
+        re.compile(r"\bi (?:am|feel) (?:feeling )?not " + _VALUE + r"[.!,]?$", re.IGNORECASE),
         lambda m: ("user", "feeling", f"not_{m.group(1)}"),
         True,
     ),
@@ -231,9 +221,9 @@ def _classify_speech_act(text):
     lower = text.strip().lower()
     if text.endswith("?"):
         return "question"
-    if lower.startswith(
-        ("i want ", "i need ", "i would like ", "let's ", "i hope to ")
-    ) or re.search(r"\bremind me to\b", lower):
+    if lower.startswith(("i want ", "i need ", "i would like ", "let's ", "i hope to ")) or re.search(
+        r"\bremind me to\b", lower
+    ):
         return "intent"
     if lower.startswith(("please ", "can you ", "could you ", "set ", "make ")):
         return "command"
@@ -275,9 +265,7 @@ def _extract_facts(text, speech_act):
         value = _sanitize(raw)
         if value is None:
             continue
-        obj, attr, val = (
-            part.replace("{x}", value) for part in entry["template"].split(":")
-        )
+        obj, attr, val = (part.replace("{x}", value) for part in entry["template"].split(":"))
         fact = ((obj, attr, val), obj == "self")
         if fact not in facts:
             facts.append(fact)
@@ -399,9 +387,7 @@ def analyze(text, context=None, use_llm=None):
         result["goals"].append(goal)
 
     for belief, replace in _extract_facts(text, speech_act):
-        result["facts"].append(
-            {"belief": belief, "replace": replace, "confidence": LEARN_CONF}
-        )
+        result["facts"].append({"belief": belief, "replace": replace, "confidence": LEARN_CONF})
 
     if (
         (use_llm if use_llm is not None else _llm_enabled())
@@ -410,9 +396,7 @@ def analyze(text, context=None, use_llm=None):
     ):
         for item in _llm_extract(text):
             belief = (item["subject"], item["relation"], item["object"])
-            result["facts"].append(
-                {"belief": belief, "replace": True, "confidence": LLM_CONF}
-            )
+            result["facts"].append({"belief": belief, "replace": True, "confidence": LLM_CONF})
 
     return result
 
@@ -426,11 +410,7 @@ def extract(text):
     use `analyze()` to capture those.
     """
     result = analyze(text)
-    return [
-        (item["belief"], item["replace"])
-        for item in result["facts"]
-        if item["confidence"] >= LEARN_CONF
-    ]
+    return [(item["belief"], item["replace"]) for item in result["facts"] if item["confidence"] >= LEARN_CONF]
 
 
 def describe(belief):

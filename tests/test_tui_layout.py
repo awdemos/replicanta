@@ -87,11 +87,7 @@ def test_sidebar_selection_opens_action_menu(monkeypatch, tmp_path):
             app._refresh_sidebar()
             await asyncio.sleep(0.05)
             lv = app.query_one("#sidebar-list", ListView)
-            fern_item = next(
-                item
-                for item in lv.children
-                if "fern" in str(_renderable_text(item.children[0]))
-            )
+            fern_item = next(item for item in lv.children if "fern" in str(_renderable_text(item.children[0])))
             event = type("Selected", (), {"item": fern_item})()
             app.on_list_view_selected(event)
             await asyncio.sleep(0.05)
@@ -333,14 +329,9 @@ def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
             # every member remembers the line as a group episode, but it is
             # not recorded in their one-on-one chat_log.
             assert any(
-                "hello everyone" in e["text"]
-                for e in app._group.members["fern"].store.memory
-                if e["kind"] == "group"
+                "hello everyone" in e["text"] for e in app._group.members["fern"].store.memory if e["kind"] == "group"
             )
-            assert not any(
-                "hello everyone" in t
-                for _r, t in app._group.members["fern"].store.chat_log
-            )
+            assert not any("hello everyone" in t for _r, t in app._group.members["fern"].store.chat_log)
 
     asyncio.run(check())
 
@@ -352,20 +343,12 @@ def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
     async def check():
         async with app.run_test():
             app.handle_command("/group start fern")
-            app._deliver_group(
-                [("fern", "hi from fern"), ("default", "hi from default")]
-            )
+            app._deliver_group([("fern", "hi from fern"), ("default", "hi from default")])
             await asyncio.sleep(0.05)
             # group replies are rendered as member cards, but they must not
             # pollute each speaker's individual one-on-one chat log.
-            assert not any(
-                "hi from fern" in t
-                for _r, t in app._group.members["fern"].store.chat_log
-            )
-            assert not any(
-                "hi from default" in t
-                for _r, t in app.org.store.chat_log
-            )
+            assert not any("hi from fern" in t for _r, t in app._group.members["fern"].store.chat_log)
+            assert not any("hi from default" in t for _r, t in app.org.store.chat_log)
 
     asyncio.run(check())
 
@@ -378,9 +361,7 @@ def test_log_narration_records_musing_in_chat_log(monkeypatch, tmp_path):
     async def check():
         async with app.run_test():
             app._log_narration("a quiet thought about rain.")
-            assert any(
-                "a quiet thought about rain." in t for _r, t in app.org.store.chat_log
-            )
+            assert any("a quiet thought about rain." in t for _r, t in app.org.store.chat_log)
 
     asyncio.run(check())
 
@@ -401,10 +382,7 @@ def test_sidebar_renders_groups_with_members(monkeypatch, tmp_path):
             app._refresh_sidebar()
             await asyncio.sleep(0.05)
             lv = app.query_one("#sidebar-list", ListView)
-            entries = [
-                (item.name, str(_renderable_text(item.children[0])))
-                for item in lv.children
-            ]
+            entries = [(item.name, str(_renderable_text(item.children[0]))) for item in lv.children]
             names = [n for n, _label in entries]
             # group header present, fern nested under it, default stays flat
             assert "group:thinkers" in names
@@ -521,9 +499,7 @@ def test_right_click_group_header_opens_rename_prompt(monkeypatch, tmp_path):
             header = next(item for item in lv.children if item.name == "group:thinkers")
             # right-click the header row (offset is screen-relative here:
             # no widget selector, so pilot aims at the screen itself)
-            await pilot.click(
-                None, offset=(header.region.x + 2, header.region.y), button=3
-            )
+            await pilot.click(None, offset=(header.region.x + 2, header.region.y), button=3)
             await pilot.pause()
             assert isinstance(app.screen, NamePromptScreen)
 

@@ -133,9 +133,7 @@ def summary_lines(store):
         f"utterances manifested ({a.get('fallbacks', 0)} fallbacks)"
     )
     utterances = a.get("utterances", 0)
-    grounded_share = (
-        f"{a.get('grounded_utterances', 0)}/{utterances}" if utterances else "—"
-    )
+    grounded_share = f"{a.get('grounded_utterances', 0)}/{utterances}" if utterances else "—"
     lines.append(
         f"coupling: {a.get('facts_learned', 0)} facts learned from the "
         f"user ({rate('facts_learned')}) · grounded utterances "
@@ -163,9 +161,7 @@ def record_digest(store, cycles=30):
     if not snapshots or snapshots[-1]["cycle"] != now:
         snapshot = {
             "cycle": now,
-            "counters": {
-                k: a.get(k, 0) for k in (SYMBOLIC_KEYS + NEURAL_KEYS + COUPLING_KEYS)
-            },
+            "counters": {k: a.get(k, 0) for k in (SYMBOLIC_KEYS + NEURAL_KEYS + COUPLING_KEYS)},
         }
         snapshots.append(snapshot)
 
@@ -194,16 +190,12 @@ def record_digest(store, cycles=30):
     dream_rate = promoted / max(promoted + discarded, 1)
 
     lines = [f"over the last {elapsed} cycles you have:"]
-    lines.append(
-        f"- asked {tried} self-questions and produced {derived} derivations "
-        f"({rate:.0%} yield)"
-    )
+    lines.append(f"- asked {tried} self-questions and produced {derived} derivations ({rate:.0%} yield)")
     lines.append(
         f"- committed {committed} rules, promoted {promoted} dreams, and "
         f"discarded {discarded} dreams ({dream_rate:.0%} dream promotion)"
     )
     lines.append(
-        f"- formed {beliefs_new} new beliefs and used your inner voice "
-        f"{llm_calls} times ({fallbacks} fallbacks)"
+        f"- formed {beliefs_new} new beliefs and used your inner voice {llm_calls} times ({fallbacks} fallbacks)"
     )
     return "\n".join(lines)

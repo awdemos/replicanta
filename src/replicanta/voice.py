@@ -52,15 +52,11 @@ def _emerge(
 @telemetry.span("voice.narrate")
 def narrate(org, model=None, timeout=None, rng=None):
     """First-person idle thought; None when it would just repeat a recent line."""
-    return dedup_emerge(
-        org, lambda: _emerge(org, task="idle", model=model, timeout=timeout, rng=rng)
-    )
+    return dedup_emerge(org, lambda: _emerge(org, task="idle", model=model, timeout=timeout, rng=rng))
 
 
 @telemetry.span("voice.respond")
-def respond(
-    org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True
-):
+def respond(org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True):
     """First-person reply to the user; quick=True skips the debate.
 
     Records both the incoming message and the generated reply in the
@@ -140,9 +136,7 @@ def reflect(org, model=None, timeout=None, rng=None):
     )
     if hasattr(org, "record_self_model"):
         if result["action"] == "patched":
-            org.record_self_model(
-                f"I refine my skill {result['name']} when {result['when']}"
-            )
+            org.record_self_model(f"I refine my skill {result['name']} when {result['when']}")
         else:
             org.record_self_model(f"I tend to {result['name']} when {result['when']}")
     return result

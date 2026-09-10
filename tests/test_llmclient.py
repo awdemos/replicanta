@@ -26,9 +26,7 @@ def _fake_resp(payload):
 
 
 def _patch_urlopen(monkeypatch, payload):
-    monkeypatch.setattr(
-        "urllib.request.urlopen", lambda req, timeout=None: _fake_resp(payload)
-    )
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _fake_resp(payload))
 
 
 def test_generate_with_stats_maps_token_counts(monkeypatch):

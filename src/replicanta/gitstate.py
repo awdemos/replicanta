@@ -123,12 +123,8 @@ class GitProbe:
         if self._upstream() is None:
             return (None, None)
         try:
-            ahead = int(
-                self._run(["rev-list", "--count", "HEAD@{upstream}..HEAD"]).strip()
-            )
-            behind = int(
-                self._run(["rev-list", "--count", "HEAD..HEAD@{upstream}"]).strip()
-            )
+            ahead = int(self._run(["rev-list", "--count", "HEAD@{upstream}..HEAD"]).strip())
+            behind = int(self._run(["rev-list", "--count", "HEAD..HEAD@{upstream}"]).strip())
         except (OSError, RuntimeError, ValueError):
             return (None, None)
         return (ahead, behind)

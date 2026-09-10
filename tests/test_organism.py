@@ -49,8 +49,6 @@ def test_mind_beliefs_returns_float_confidences():
         assert 0.0 <= conf <= 1.0
 
 
-
-
 @pytest.fixture
 def store(tmp_path):
     return BeliefStore(tmp_path)
@@ -160,8 +158,7 @@ def test_scl_with_committed_rules_reimports(tmp_path):
 def test_mind_derive_runs_transient_rule(tmp_path):
     # Seed the genome directly so two conflicting values survive in bel.
     (tmp_path / "organism.scl").write_text(
-        'rel 0.9::bel("apple", "color", "red")\n'
-        'rel 0.9::bel("apple", "color", "green")\n'
+        'rel 0.9::bel("apple", "color", "red")\nrel 0.9::bel("apple", "color", "green")\n'
     )
     mind = Mind(tmp_path / "organism.scl")
     mind.rebuild()
@@ -954,7 +951,9 @@ def test_tui_set_reflection_nothing_is_quiet(monkeypatch, tmp_path):
     app._set_reflection({"action": "none"})
     assert logged == []
 
+
 # -- tier B: approval commands ---------------------------------------------------
+
 
 def _proposal_entry():
     return {
@@ -1216,15 +1215,11 @@ def test_tui_voice_rejects_bad_arg(monkeypatch, tmp_path):
 
 
 def test_tui_voice_list_marks_active(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        speech, "list_voices", lambda: ["en_GB-alan-low", "en_US-lessac-medium"]
-    )
+    monkeypatch.setattr(speech, "list_voices", lambda: ["en_GB-alan-low", "en_US-lessac-medium"])
     monkeypatch.setattr(speech, "voice_name", lambda: "en_US-lessac-medium")
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice list")
-    assert any(
-        "*en_US-lessac-medium" in line and "en_GB-alan-low" in line for line in logged
-    )
+    assert any("*en_US-lessac-medium" in line and "en_GB-alan-low" in line for line in logged)
 
 
 def test_tui_voice_use_switches_and_speaks(monkeypatch, tmp_path):
@@ -1243,10 +1238,7 @@ def test_tui_voice_use_unknown_suggests_get(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "list_voices", lambda: ["en_US-lessac-medium"])
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
     app.handle_command("/voice use en_GB-alan-low")
-    assert any(
-        "no voice 'en_GB-alan-low'" in line and "/voice get en_GB-alan-low" in line
-        for line in logged
-    )
+    assert any("no voice 'en_GB-alan-low'" in line and "/voice get en_GB-alan-low" in line for line in logged)
 
 
 def test_tui_voice_get_runs_download_worker(monkeypatch, tmp_path):
@@ -1304,7 +1296,7 @@ def test_load_revalidates_beliefs_and_rules(tmp_path):
                 ],
                 "archived": [["good", "shape", "round", 0.5], ["bad val", "x", "y", 0.5]],
                 "rules": [
-                    ['bel(o, a, v) :- ok(o)', 1],  # valid single line
+                    ["bel(o, a, v) :- ok(o)", 1],  # valid single line
                     ['x\nrel 1.0::injected("a", "b", "c")', 1],  # newline injection
                 ],
             }
@@ -1438,13 +1430,9 @@ def test_organism_loads_modules(tmp_path, monkeypatch):
     _seed_organism(tmp_path)
     modules_dir = tmp_path / "modules" / "testmod"
     modules_dir.mkdir(parents=True)
-    (modules_dir / "manifest.toml").write_text(
-        'name = "testmod"\nversion = "1.0.0"\n'
-    )
+    (modules_dir / "manifest.toml").write_text('name = "testmod"\nversion = "1.0.0"\n')
     (modules_dir / "init.lua").write_text(
-        'function init(ctx)\n'
-        '  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\n'
-        'end\n'
+        'function init(ctx)\n  ctx.services.get("commands"):register("/test", function(args) return "ok" end)\nend\n'
     )
     (tmp_path / "replicanta.toml").write_text('[modules]\nenabled = ["testmod"]\n')
     org = Organism(tmp_path, probe=_dummy_probe())

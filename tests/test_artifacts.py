@@ -10,9 +10,7 @@ from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path, **kwargs):
-    kwargs.setdefault(
-        "probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    kwargs.setdefault("probe", SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
@@ -56,9 +54,7 @@ def test_write_diary_remembers_episode(tmp_path):
 def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     captured = {}
-    patch_generate(
-        monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x"
-    )
+    patch_generate(monkeypatch, lambda prompt, *a, **k: captured.setdefault("p", prompt) or "x")
     voice.diary_entry(org)
     assert "diary entry" in captured["p"]
 

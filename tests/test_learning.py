@@ -10,9 +10,7 @@ from replicanta.probe import SystemProbe
 
 
 def _organism(tmp_path):
-    org = Organism(
-        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    org = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org.load()
     return org
 
@@ -29,15 +27,11 @@ def test_extract_name():
 
 
 def test_extract_like_multiword():
-    assert _beliefs_only(extract("i really like ice cream")) == [
-        ("user", "like_ice_cream", "true")
-    ]
+    assert _beliefs_only(extract("i really like ice cream")) == [("user", "like_ice_cream", "true")]
 
 
 def test_extract_dislike():
-    assert _beliefs_only(extract("i hate loud noises")) == [
-        ("user", "dislike_loud_noises", "true")
-    ]
+    assert _beliefs_only(extract("i hate loud noises")) == [("user", "dislike_loud_noises", "true")]
 
 
 def test_extract_feeling():
@@ -46,9 +40,7 @@ def test_extract_feeling():
 
 
 def test_extract_you_are():
-    assert _beliefs_only(extract("you are beautiful")) == [
-        ("self", "described_as", "beautiful")
-    ]
+    assert _beliefs_only(extract("you are beautiful")) == [("self", "described_as", "beautiful")]
 
 
 def test_extract_your_trait():
@@ -56,9 +48,7 @@ def test_extract_your_trait():
 
 
 def test_extract_strips_filler():
-    assert _beliefs_only(extract("i like rain a lot")) == [
-        ("user", "like_rain", "true")
-    ]
+    assert _beliefs_only(extract("i like rain a lot")) == [("user", "like_rain", "true")]
 
 
 def test_questions_teach_nothing():
@@ -102,9 +92,7 @@ def test_hear_learned_facts_persist(tmp_path):
     org = _organism(tmp_path)
     org.hear("i like rain")
     org.flush()
-    fresh = Organism(
-        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    fresh = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     fresh.load()
     assert fresh.store.conf(("user", "like_rain", "true")) == 0.8
 
@@ -135,10 +123,7 @@ def test_learned_facts_render_into_genome(tmp_path):
     org = _organism(tmp_path)
     org.hear("i like rain")
     org.flush()
-    assert (
-        'rel 0.8::bel("user", "like_rain", "true")'
-        in (tmp_path / "organism.scl").read_text()
-    )
+    assert 'rel 0.8::bel("user", "like_rain", "true")' in (tmp_path / "organism.scl").read_text()
 
 
 # -- narration exposure ---------------------------------------------------------
@@ -167,7 +152,6 @@ def test_prompt_includes_user_facts(tmp_path):
     assert "- your name is sam" in prompt
 
 
-
 # -- analyze() / new patterns -------------------------------------------------
 
 
@@ -191,24 +175,16 @@ def test_analyze_extracts_commands():
 
 
 def test_extract_generic_my_trait():
-    assert _beliefs_only(extract("my job is engineer")) == [
-        ("user", "job", "engineer")
-    ]
+    assert _beliefs_only(extract("my job is engineer")) == [("user", "job", "engineer")]
 
 
 def test_extract_definitional_fact():
-    assert _beliefs_only(extract("scallop means logic")) == [
-        ("self", "knows", "scallop_is_logic")
-    ]
+    assert _beliefs_only(extract("scallop means logic")) == [("self", "knows", "scallop_is_logic")]
 
 
 def test_extract_negation():
-    assert _beliefs_only(extract("i don't like rain")) == [
-        ("user", "dislike_rain", "true")
-    ]
-    assert _beliefs_only(extract("you are not nice")) == [
-        ("self", "described_as", "not_nice")
-    ]
+    assert _beliefs_only(extract("i don't like rain")) == [("user", "dislike_rain", "true")]
+    assert _beliefs_only(extract("you are not nice")) == [("self", "described_as", "not_nice")]
 
 
 def test_extract_feeling_synonyms():
@@ -218,9 +194,7 @@ def test_extract_feeling_synonyms():
 
 def test_extract_preserves_literal_colors():
     # "blue" must not be rewritten to "sad" outside of feeling context.
-    assert _beliefs_only(extract("your color is blue")) == [
-        ("self", "color", "blue")
-    ]
+    assert _beliefs_only(extract("your color is blue")) == [("self", "color", "blue")]
 
 
 def test_llm_fallback_extracts_facts(monkeypatch):

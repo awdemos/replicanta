@@ -4,9 +4,9 @@ Runs an SSE listener thread against the local robot-hand bridge and exposes
 arm control to Lua modules/hooks as the ``arm`` service.
 """
 
+import contextlib
 import json
 import logging
-import math
 import threading
 import time
 from http.client import HTTPConnection, HTTPException
@@ -15,16 +15,43 @@ from urllib.parse import urlparse
 log = logging.getLogger(__name__)
 
 GOALS = (
-    "reach", "grasp", "release", "point", "wave", "fist",
-    "ripple", "pinch", "ok", "shaka", "rock", "spock",
-    "middle_finger", "thumbs_up",
+    "reach",
+    "grasp",
+    "release",
+    "point",
+    "wave",
+    "fist",
+    "ripple",
+    "pinch",
+    "ok",
+    "shaka",
+    "rock",
+    "spock",
+    "middle_finger",
+    "thumbs_up",
 )
 
 POSTURES = (
-    "open", "fist", "pinch", "ok", "point", "shaka", "rock", "spock",
-    "ripple", "reach", "grasp", "release", "wave", "middle_finger",
+    "open",
+    "fist",
+    "pinch",
+    "ok",
+    "point",
+    "shaka",
+    "rock",
+    "spock",
+    "ripple",
+    "reach",
+    "grasp",
+    "release",
+    "wave",
+    "middle_finger",
     "thumbs_up",
 )
+
+
+def _clamp(x, lo=0.0, hi=1.0):
+    return max(lo, min(hi, float(x)))
 
 
 class ArmService:
@@ -103,10 +130,16 @@ class ArmService:
 
     def actuator(self, finger, joint, side, activation, duration_s=4.0):
         """Direct per-tendon drive: side = flexor|extensor, activation 0..1."""
-        self._post("/actuator", {
-            "finger": finger, "joint": joint, "side": side,
-            "activation": _clamp(float(activation)), "duration_s": float(duration_s),
-        })
+        self._post(
+            "/actuator",
+            {
+                "finger": finger,
+                "joint": joint,
+                "side": side,
+                "activation": _clamp(float(activation)),
+                "duration_s": float(duration_s),
+            },
+        )
         return {"ok": True}
 
     def pose(self, spec):
@@ -235,13 +268,11 @@ class ArmService:
                             self._record_telemetry(msg["state"])
                     elif line.startswith("id: "):
                         last_id = line[4:]
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log.debug("SSE loop error: %s", exc)
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
             time.sleep(2.0)
 
     def _record_telemetry(self, state):
@@ -280,7 +311,8 @@ class ArmService:
                 arousal = getattr(s, "arousal", 0.0)
                 chaos = getattr(s, "chaos", 0.0)
                 insane = getattr(s, "insane", False)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                log.debug("volition read error: %s", exc)
                 continue
             now = time.time()
             # avoid spamming the hand; decisions every 8-16 s depending on arousal
@@ -298,15 +330,15 @@ class ArmService:
                     self._last_goal = kind
                     self._last_volition = now
                     log.debug("volition chose goal %s (mood=%s stress=%.2f)", kind, mood, stress)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("volition goal error: %s", exc)
 
     @staticmethod
     def _decide(mood, stress, arousal, chaos, insane):
         if insane or stress > 0.78 or chaos > 0.85:
-            return "fist"          # protective closure
+            return "fist"  # protective closure
         if stress > 0.55 or arousal > 0.75:
-            return "grasp"         # reach/engage
+            return "grasp"  # reach/engage
         if mood in ("curious", "interested") or arousal > 0.5:
             return "reach"
         if mood in ("calm", "content") and stress < 0.25:
@@ -328,8 +360,8 @@ class _DictProxy:
     def __getattr__(self, name):
         try:
             val = self._data[name]
-        except KeyError:
-            raise AttributeError(name)
+        except KeyError as exc:
+            raise AttributeError(name) from exc
         if isinstance(val, dict):
             return _DictProxy(val)
         return val

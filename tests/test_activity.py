@@ -15,9 +15,7 @@ PAWS = ("cat", "has_paws", "true")
 
 
 def _org(tmp_path):
-    org = Organism(
-        tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys")
-    )
+    org = Organism(tmp_path, probe=SystemProbe(proc="/nonexistent/proc", sys="/nonexistent/sys"))
     org.load()
     return org
 
@@ -107,9 +105,7 @@ def _scripted_arena(monkeypatch, script, gen_tokens=3, prompt_tokens=11):
 
 def test_arena_meters_calls_tokens_and_utterance(tmp_path, monkeypatch):
     org = _org(tmp_path)
-    _scripted_arena(
-        monkeypatch, ["the cat again", "dogs, maybe", "both weak", "VOTE: 1", "VOTE: 1"]
-    )
+    _scripted_arena(monkeypatch, ["the cat again", "dogs, maybe", "both weak", "VOTE: 1", "VOTE: 1"])
     text = ThoughtArena().emerge(org)
     assert text == "the cat again"
     a = org.store.activity
@@ -153,12 +149,8 @@ def test_grounded_utterance_counted_when_seed_words_reused(tmp_path, monkeypatch
 
 
 def test_grounding_proxy():
-    assert activity.grounded(
-        "this belief: 0.90 cat:has_fur=true", "I keep thinking about the cat"
-    )
-    assert not activity.grounded(
-        "this belief: 0.90 cat:has_fur=true", "the rain outside is lovely"
-    )
+    assert activity.grounded("this belief: 0.90 cat:has_fur=true", "I keep thinking about the cat")
+    assert not activity.grounded("this belief: 0.90 cat:has_fur=true", "the rain outside is lovely")
     # scaffold words alone never count as grounding
     assert not activity.grounded("your calm mood", "the rain outside")
 
