@@ -658,6 +658,8 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             'user: "change the middle finger to a thumbs up" → your reply:',
             '  hand.move("thumbs_up")',
             "  Switching to a thumbs up.",
+            "Call hand.move at most ONCE per reply: one move, for the",
+            "gesture the user just asked for.",
         ]
 
     if task_focused:

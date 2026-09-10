@@ -51,6 +51,9 @@ class ArmService:
         self._volition = True
         self._last_volition = 0.0
         self._last_goal = None
+        # explicit moves (chat requests, slash commands) hold off volitional
+        # ones until the move has played out, so autonomy can't stomp them
+        self._explicit_hold_until = 0.0
         self._telemetry_log = []  # recent (time, key, value) tuples
         self._alive = True
         # Threads start lazily on first real use: ModuleLoader constructs an
@@ -79,12 +82,14 @@ class ArmService:
         # sandbox's attribute getter (dicts are not attribute-accessible).
         return _DictProxy(raw)
 
-    def goal(self, kind, duration_s=4.0):
+    def goal(self, kind, duration_s=4.0, _volitional=False):
         kind = str(kind).lower()
         if kind not in GOALS:
             raise ValueError(f"unknown goal {kind!r}; try {GOALS}")
         duration_s = max(0.3, min(15.0, float(duration_s)))
         self._post("/goal", {"kind": kind, "duration_s": duration_s})
+        if not _volitional:
+            self._explicit_hold_until = time.time() + duration_s + 2.0
         return {"ok": True, "goal": kind, "duration_s": duration_s}
 
     def posture(self, name, duration_s=4.0):
@@ -93,6 +98,7 @@ class ArmService:
             raise ValueError(f"unknown posture {name!r}; try {POSTURES}")
         duration_s = max(0.2, min(15.0, float(duration_s)))
         self._post("/posture", {"name": name, "duration_s": duration_s})
+        self._explicit_hold_until = time.time() + duration_s + 2.0
         return {"ok": True, "posture": name, "duration_s": duration_s}
 
     def actuator(self, finger, joint, side, activation, duration_s=4.0):
@@ -108,6 +114,7 @@ class ArmService:
             raise TypeError("pose spec must be a table")
         spec = dict(spec)  # accept lupa table
         self._post("/pose", spec)
+        self._explicit_hold_until = time.time() + float(spec.get("duration_s", 2.0)) + 4.0
         return {"ok": True}
 
     def emotion(self, spec):
@@ -281,10 +288,13 @@ class ArmService:
             with self._lock:
                 if now - self._last_volition < interval:
                     continue
+            # don't stomp an explicit move that is still playing out
+            if now < self._explicit_hold_until:
+                continue
             kind = self._decide(mood, stress, arousal, chaos, insane)
             if kind and kind != self._last_goal:
                 try:
-                    self.goal(kind, duration_s=4.0 + arousal * 4.0)
+                    self.goal(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
                     self._last_goal = kind
                     self._last_volition = now
                     log.debug("volition chose goal %s (mood=%s stress=%.2f)", kind, mood, stress)

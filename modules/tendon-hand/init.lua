@@ -208,8 +208,11 @@ function init(ctx)
   if hooks ~= nil then
     hooks:on("utterance", function(text)
       if text == nil then return end
+      -- One move per reply: a bridge goal preempts whatever is running, so a
+      -- second call in the same reply would just stomp the first (and extra
+      -- calls are usually lines parroted from earlier turns).
       for line in string.gmatch(tostring(text), "[^\n]+") do
-        parse_call(line)
+        if parse_call(line) then break end
       end
     end)
 

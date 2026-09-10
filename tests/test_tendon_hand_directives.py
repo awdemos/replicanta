@@ -1,5 +1,6 @@
 """Directive parsing in the tendon-hand Lua module, via the real sandbox."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,13 @@ def test_posture_call_dispatches_as_posture(rig):
     assert calls == [("posture", "open", 2.0)]
 
 
+def test_only_first_move_per_reply_dispatches(rig):
+    # A reply with several move lines (e.g. the model parroting an earlier
+    # turn) dispatches only the first — a bridge goal preempts the rest.
+    calls, _ = rig('hand.move("wave")\nWaving at you.\nhand.move("thumbs_up")')
+    assert calls == [("goal", "wave", 4.0)]
+
+
 def test_hand_service_registered_and_callable(rig):
     """The module registers a hand API other modules/extensions can call."""
     hand = rig.services.get("hand")
@@ -163,3 +171,21 @@ def test_unknown_move_falls_back_to_first_word(rig):
     calls, logs = rig("hand: cartwheel")
     assert calls == []
     assert any("unknown move 'cartwheel'" in line for line in logs)
+
+
+def test_explicit_goal_holds_off_volition():
+    """An explicit move sets a hold so volition can't stomp it mid-move."""
+    from replicanta.tendon_hand import ArmService
+
+    arm = ArmService()
+    sent = []
+    arm._post = lambda path, body: sent.append((path, body))
+
+    assert arm._explicit_hold_until == 0.0
+    arm.goal("wave", 4.0)
+    assert sent == [("/goal", {"kind": "wave", "duration_s": 4.0})]
+    hold = arm._explicit_hold_until
+    assert hold > time.time() + 4.0  # move duration + grace
+    # volitional goals go through but don't extend the hold
+    arm.goal("fist", 6.0, _volitional=True)
+    assert arm._explicit_hold_until == hold
