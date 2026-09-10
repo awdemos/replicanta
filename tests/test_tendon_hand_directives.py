@@ -92,6 +92,14 @@ def rig():
         ("hand: retract the middle finger", "release", 4.0),
         ("hand: retract", "release", 4.0),
         ("hand: relax 2", "release", 2.0),
+        ("hand: extend the middle finger", "middle_finger", 4.0),
+        ("hand: extend", "open", 4.0),
+        ("hand: close your hand", "fist", 4.0),
+        ("hand: squeeze 2", "fist", 2.0),
+        ("hand: raise it up", "reach", 4.0),
+        ("hand: grab the cup", "grasp", 4.0),
+        ("hand: wave at the user", "wave", 4.0),
+        ("hand: give me the bird", "middle_finger", 4.0),
     ],
 )
 def test_directive_dispatches(rig, text, move, dur):

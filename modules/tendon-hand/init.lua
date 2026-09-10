@@ -20,6 +20,60 @@ function init(ctx)
 
   local volition_enabled = true
 
+  -- Deliberate control: scan the organism's own utterances for hand: lines.
+  -- (Only role "org" lines fire the utterance event, so user chat text that
+  -- happens to contain "hand: ..." never reaches this.)
+
+  -- Known moves, multi-word names first so matching prefers them
+  -- ("middle_finger" before anything shorter could shadow it).
+  local MOVES = {
+    "middle_finger",
+    "reach", "grasp", "release", "point", "wave", "fist",
+    "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
+  }
+  local MOVES_CSV = table.concat(MOVES, ", ")
+
+  -- Reversal verbs say "go back to neutral" no matter what finger or move
+  -- the rest of the phrase names ("retract the middle finger" -> release).
+  local REVERSAL = { retract=1, relax=1, rest=1, unclench=1, lower=1, drop=1 }
+
+  -- Aliases resolve after moves: natural phrases the model is likely to
+  -- write that are not canonical move names.
+  local ALIASES = {
+    okay = "ok",
+    flip_off = "middle_finger",
+    the_finger = "middle_finger",
+    the_bird = "middle_finger",
+    unfold = "open",
+    extend = "open",
+    close = "fist",
+    squeeze = "fist",
+    grab = "grasp",
+    lift = "reach",
+    raise = "reach",
+  }
+
+  local function has_word(phrase, w)
+    return string.find("_" .. phrase .. "_", "_" .. w .. "_", 1, true) ~= nil
+  end
+
+  -- Map the words after "hand:" to a move. The phrase is normalized to
+  -- lower_snake; resolution order: reversal verbs anywhere in the phrase,
+  -- then a known move anywhere on a word boundary ("extend the middle
+  -- finger" -> middle_finger), then aliases, then nothing.
+  local function resolve_move(phrase)
+    for v in pairs(REVERSAL) do
+      if has_word(phrase, v) then return "release" end
+    end
+    for _, m in ipairs(MOVES) do
+      if has_word(phrase, m) then return m end
+    end
+    for a, m in pairs(ALIASES) do
+      if has_word(phrase, a) then return m end
+    end
+    return nil
+  end
+
   -- Execute one "hand: <move> [seconds]" directive against the bridge.
   -- Goals and postures share whitelists in the arm service; try goal
   -- first, fall back to posture (which adds "open").
@@ -32,53 +86,11 @@ function init(ctx)
     if ok then
       ctx.log("hand: '" .. move .. "' sent to the bridge (" .. dur .. "s)")
     else
-      ctx.log("hand: unknown move '" .. move .. "'")
+      -- the organism sees system lines in later context, so the move list
+      -- here lets it self-correct on the next turn
+      ctx.log("hand: unknown move '" .. move .. "' — moves: " .. MOVES_CSV)
     end
     return ok
-  end
-
-  -- Deliberate control: scan the organism's own utterances for hand: lines.
-  -- (Only role "org" lines fire the utterance event, so user chat text that
-  -- happens to contain "hand: ..." never reaches this.)
-
-  -- Known moves, multi-word names first so longest-prefix matching prefers
-  -- them ("middle_finger" before anything shorter could shadow it).
-  local MOVES = {
-    "middle_finger",
-    "reach", "grasp", "release", "point", "wave", "fist",
-    "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
-  }
-
-  -- Aliases resolve after exact moves: natural phrases the model is likely
-  -- to write that are not canonical move names. Reversal verbs map to the
-  -- move that returns the hand to neutral.
-  local ALIASES = {
-    okay = "ok",
-    flip_off = "middle_finger",
-    the_finger = "middle_finger",
-    the_bird = "middle_finger",
-    retract = "release",
-    relax = "release",
-    rest = "release",
-    unclench = "release",
-    unfold = "open",
-  }
-
-  -- Map the words after "hand:" to a move: normalize to lower_snake, then
-  -- take the longest known move that prefixes it on a word boundary
-  -- ("middle finger" -> middle_finger, "point at me" -> point).
-  local function resolve_move(phrase)
-    for _, m in ipairs(MOVES) do
-      if phrase == m or string.sub(phrase, 1, #m + 1) == m .. "_" then
-        return m
-      end
-    end
-    for a, m in pairs(ALIASES) do
-      if phrase == a or string.sub(phrase, 1, #a + 1) == a .. "_" then
-        return m
-      end
-    end
-    return nil
   end
 
   if hooks ~= nil then
