@@ -34,6 +34,9 @@ class _Services:
     def get(self, name):
         return self._d.get(name)
 
+    def register(self, name, svc):
+        self._d[name] = svc
+
 
 class _Hooks:
     def __init__(self):
@@ -60,7 +63,8 @@ class _Ctx:
 @pytest.fixture()
 def rig():
     arm, hooks, logs = _Arm(), _Hooks(), []
-    ctx = _Ctx(_Services({"arm": arm, "commands": _Commands(), "hooks": hooks}), logs)
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _Ctx(services, logs)
     lua = build_runtime()
     lua.globals()["_ctx"] = ctx
     lua.execute(MODULE.read_text() + "\ninit(_ctx)")
@@ -72,6 +76,8 @@ def rig():
             fn(text)
         return list(arm.calls), list(logs)
 
+    fire.arm = arm
+    fire.services = services
     return fire
 
 
@@ -104,11 +110,39 @@ def rig():
         ("hand: thumbs_up", "thumbs_up", 4.0),
         ("hand: thumb_up", "thumbs_up", 4.0),
         ("hand: give a thumbs up 6", "thumbs_up", 6.0),
+        # function-call form: the entity's primary interface
+        ('hand.move("wave")', "wave", 4.0),
+        ('hand.move("fist", 3)', "fist", 3.0),
+        ('hand.move("middle finger")', "middle_finger", 4.0),
+        ('hand.move("thumbs up", 6)', "thumbs_up", 6.0),
+        ("hand.move('point at me')", "point", 4.0),
+        ('Hand.Move("Wave")', "wave", 4.0),
+        ('hand.move "wave"', "wave", 4.0),
+        ('hand.move("fist 3")', "fist", 3.0),
+        ('  hand.move("wave")\nMaking a wave.', "wave", 4.0),
     ],
 )
 def test_directive_dispatches(rig, text, move, dur):
     calls, _ = rig(text)
     assert calls == [("goal", move, dur)] or calls == [("posture", move, dur)]
+
+
+def test_posture_call_dispatches_as_posture(rig):
+    calls, _ = rig('hand.posture("open", 2)')
+    assert calls == [("posture", "open", 2.0)]
+
+
+def test_hand_service_registered_and_callable(rig):
+    """The module registers a hand API other modules/extensions can call."""
+    hand = rig.services.get("hand")
+    assert hand is not None
+    rig.arm.calls.clear()
+    ok = hand["move"]("wave", 2)
+    assert ok
+    assert rig.arm.calls == [("goal", "wave", 2.0)]
+    assert "wave" in hand["moves"]()
+    assert hand["move"]("cartwheel") is False
+    assert rig.arm.calls == [("goal", "wave", 2.0)]  # cartwheel did not dispatch
 
 
 @pytest.mark.parametrize(
