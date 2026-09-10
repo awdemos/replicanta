@@ -1,0 +1,39 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# runtime state — the living organism's body, not its code
+state.json
+artifacts/
+organisms/
+current
+voices/
+models/
+*.log
+
+# tooling state
+.desloppify/
+scorecard.png
+wheels/
+.omo/
+.codegraph/
+.serena/
+
+# editor / os
+.DS_Store
+.idea/
+*.swp
+*~
+
+# session exports / runtime artifacts
+groups.json
+kimi-export-*.md
+session-ses_*.md
+.worktrees/

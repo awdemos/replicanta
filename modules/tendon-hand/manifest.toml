@@ -1,0 +1,5 @@
+name = "tendon-hand"
+description = "Realistic tendon-driven robot hand effector controlled by the organism's own volition"
+version = "0.1.0"
+provides = ["arm"]
+depends = ["base"]

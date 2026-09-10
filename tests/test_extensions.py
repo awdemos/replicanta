@@ -1,0 +1,225 @@
+"""Extensions feature (tier B): the organism's self-patch registry — a
+validated, versioned registry of extra learning patterns, utterance seeds
+and sentiment vocabulary in artifacts/extensions.json.
+
+By default patches require approval; manual approve/reject is available,
+and /auto-apply on allows patches to apply immediately. /revert rolls
+back the last applied entry."""
+
+from typing import ClassVar
+
+from replicanta import extensions, learning, llmclient, sentiment
+
+
+def _path(tmp_path):
+    return tmp_path / "artifacts" / "extensions.json"
+
+
+def _good_pattern():
+    return {
+        "kind": "pattern",
+        "regex": "i adore ([a-z '-]+)",
+        "template": "user:like_{x}:true",
+        "example": "i adore hiking",
+        "why": "the user says adore",
+    }
+
+
+def test_global_registry_isolation(tmp_path):
+    from replicanta import extensions
+
+    extensions.reset()
+    path_a = tmp_path / "a" / "extensions.json"
+    path_b = tmp_path / "b" / "extensions.json"
+    extensions.propose(path_a, {"kind": "seed", "text": "a quiet thought"}, auto_apply=True)
+    assert path_b.parent.exists() is False
+    # A second thread/registry must not see the first registry's entries.
+    other_reg = extensions.ExtensionRegistry()
+    assert other_reg.active_entries("seed") == []
+
+
+def test_voice_state_is_per_thread(monkeypatch):
+    from replicanta import llmclient
+
+    llmclient.reset_voice()
+
+    def other():
+        return llmclient.voice_online()
+
+    import threading
+
+    result = []
+    t = threading.Thread(target=lambda: result.append(other()))
+    t.start()
+    t.join()
+    # Each thread starts with an unknown voice state.
+    assert result[0] is None
+
+
+def test_reset_voice_clears_current_thread():
+    from replicanta import llmclient
+
+    llmclient._voice().online = True
+    llmclient.reset_voice()
+    assert llmclient.voice_online() is None
+
+
+# -- validation ---------------------------------------------------------------
+
+
+def test_validate_accepts_good_pattern():
+    ok, _reason = extensions.validate(_good_pattern())
+    assert ok
+
+
+def test_validate_rejects_bad_regex():
+    entry = _good_pattern() | {"regex": "i enjoy (["}
+    ok, reason = extensions.validate(entry)
+    assert not ok and "compile" in reason
+
+
+def test_validate_rejects_bad_template():
+    entry = _good_pattern() | {"template": "user:like"}
+    ok, reason = extensions.validate(entry)
+    assert not ok and "template" in reason
+
+
+def test_validate_rejects_pattern_not_firing_on_example():
+    entry = _good_pattern() | {"example": "the moon is full"}
+    ok, reason = extensions.validate(entry)
+    assert not ok and "example" in reason
+
+
+def test_validate_rejects_pattern_firing_on_controls():
+    entry = _good_pattern() | {
+        "regex": "the weather (.+)",
+        "example": "the weather is nice today",
+    }
+    ok, reason = extensions.validate(entry)
+    assert not ok and "unrelated" in reason
+
+
+def test_validate_rejects_nested_quantifiers():
+    # (a+)+-style ambiguity backtracks catastrophically on chat input.
+    entry = _good_pattern() | {
+        "regex": "i adore (([a-z]+)+)$",
+        "example": "i adore hiking",
+    }
+    ok, reason = extensions.validate(entry)
+    assert not ok and "nested quantifiers" in reason
+
+
+def test_validate_rejects_oversized_pattern():
+    entry = _good_pattern() | {"regex": "x" * 201}
+    ok, reason = extensions.validate(entry)
+    assert not ok and "chars" in reason
+
+
+def test_validate_seed_and_terms():
+    assert extensions.validate({"kind": "seed", "text": "a quiet thought"})[0]
+    assert not extensions.validate({"kind": "seed", "text": "x"})[0]
+    assert extensions.validate({"kind": "harsh_term", "text": "blork"})[0]
+    assert not extensions.validate({"kind": "kind_term", "text": "G00d!"})[0]
+    assert not extensions.validate({"kind": "mystery"})[0]
+
+
+# -- registry round trips -------------------------------------------------------
+
+
+def test_propose_auto_applies_by_default(tmp_path):
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is not None
+    assert applied["kind"] == "pattern"
+    assert extensions.pending() is None
+    assert extensions.registry()["version"] == 1
+    assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
+
+
+def test_propose_stages_when_not_auto_apply(tmp_path):
+    path = _path(tmp_path)
+    extensions.propose(path, _good_pattern(), auto_apply=False)
+    assert extensions.pending()["regex"] == "i adore ([a-z '-]+)"
+    applied = extensions.approve(path)
+    assert applied["kind"] == "pattern"
+    assert extensions.pending() is None
+    assert extensions.registry()["version"] == 1
+
+
+def test_reject_clears_pending(tmp_path):
+    path = _path(tmp_path)
+    extensions.propose(path, _good_pattern(), auto_apply=False)
+    rejected = extensions.reject(path)
+    assert rejected is not None
+    assert extensions.pending() is None
+    assert extensions.active_entries("pattern") == []
+
+
+def test_revert_removes_last_applied(tmp_path):
+    path = _path(tmp_path)
+    extensions.propose(path, _good_pattern(), auto_apply=False)
+    extensions.approve(path)
+    extensions.propose(
+        path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=False
+    )
+    extensions.approve(path)
+    reverted = extensions.revert_last(path)
+    assert reverted["kind"] == "seed"
+    assert len(extensions.active_entries("pattern")) == 1
+    assert extensions.registry()["version"] == 3
+    assert extensions.revert_last(path)["kind"] == "pattern"
+    assert extensions.revert_last(path) is None
+
+
+# -- consumers ------------------------------------------------------------------
+
+
+def test_learning_extract_uses_registry_pattern(tmp_path):
+    extensions.load_global(_path(tmp_path))
+    extensions.propose(_path(tmp_path), _good_pattern(), auto_apply=True)
+    facts = learning.extract("i adore hiking")
+    assert (("user", "like_hiking", "true"), False) in facts
+
+
+def test_sentiment_uses_registry_terms(tmp_path):
+    extensions.load_global(_path(tmp_path))
+    extensions.propose(
+        _path(tmp_path), {"kind": "harsh_term", "text": "blork"}, auto_apply=True
+    )
+    assert sentiment.harshness("you are a blork") > 0.0
+    assert sentiment.harshness("you are lovely") == 0.0
+
+
+def test_seed_pool_uses_registry_seeds(tmp_path):
+    from replicanta import narration
+    from replicanta.organism import BeliefStore, Lifecycle, Metrics
+
+    class FakeWindow:
+        pairs: ClassVar[set] = set()
+
+    class FakeOrg:
+        def __init__(self, tmp_path):
+            self.store = BeliefStore(tmp_path)
+            self.lifecycle = Lifecycle(self.store)
+            self.window = FakeWindow()
+
+        def metrics(self):
+            return Metrics(self.store)
+
+    extensions.load_global(_path(tmp_path))
+    extensions.propose(
+        _path(tmp_path),
+        {"kind": "seed", "text": "a question about gravity"},
+        auto_apply=True,
+    )
+    import random
+
+    snap = narration.state_snapshot(FakeOrg(tmp_path))
+    seeds = {llmclient.seed_for(snap, random.Random(i)) for i in range(80)}
+    assert "a question about gravity" in seeds
+
+
+def test_read_tolerates_corrupt_registry(tmp_path):
+    path = tmp_path / "extensions.json"
+    path.write_text("{not json")
+    assert extensions._read(path) == dict(extensions._EMPTY)

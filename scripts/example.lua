@@ -1,0 +1,53 @@
+-- Replicanta Lua hooks — template. Copy this file (or uncomment below)
+-- and edit; /reload picks changes up without restarting.
+--
+-- Every script in scripts/*.lua may define any of:
+--   on_birth(ctx)      fresh boot
+--   on_cycle(ctx)      lifecycle transition (ctx.text = "wake"|"sleep")
+--   on_learned(ctx)    the organism learned a fact from you (ctx.text = your words)
+--   on_utterance(ctx)  an utterance manifested in chat (ctx.text = its words)
+--   on_fade(ctx)       the organism faded
+--   on_mud_turn(ctx)   a MUD turn just played (ctx.text = turn summary)
+--   on_mud_win(ctx)    the organism won a MUD scenario (ctx.text = summary)
+--   on_mud_end(ctx)    the MUD session ended (ctx.text = outcome summary)
+--   main(ctx)          run on demand with /lua <thisfile>.lua (ctx.event = "lua")
+--
+-- ctx reads:  event, text, state, cycle, mood, belief_count, rule_count,
+--             score, chaos, stress, arousal, rationality, irrationality,
+--             insane, organism, activity (table of counters)
+-- ctx acts:   log(msg), set_chaos(x), focus(attr_or_nil)
+--
+-- Sandbox: no os, io, require, load. Errors are logged, never fatal.
+
+-- example: celebrate every fifth learned fact
+-- function on_learned(ctx)
+--   if ctx.activity.facts_learned % 5 == 0 then
+--     ctx.log("five facts! it really is paying attention")
+--   end
+-- end
+
+-- example: calm it down when stress runs high
+-- function on_cycle(ctx)
+--   if ctx.stress > 0.7 then
+--     ctx.set_chaos(0.2)
+--     ctx.log("stress high — turning the chaos down")
+--   end
+-- end
+
+-- example: notice when its mind comes apart (extreme stress + incoherence)
+-- function on_cycle(ctx)
+--   if ctx.insane then
+--     ctx.log("it has gone incoherent — irrationality " .. ctx.irrationality)
+--   end
+-- end
+
+-- example: run on demand with /lua example.lua
+-- function main(ctx)
+--   ctx.log("on demand: cycle " .. ctx.cycle .. ", mood " .. ctx.mood)
+-- end
+
+-- example: celebrate a MUD victory
+-- function on_mud_win(ctx)
+--   ctx.log("we won! " .. (ctx.text or ""))
+--   ctx.set_chaos(0.8)
+-- end
