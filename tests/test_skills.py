@@ -5,8 +5,6 @@ by keyword overlap, curated when stale."""
 from pathlib import Path
 from unittest.mock import patch
 
-from conftest import force_offline
-
 from replicanta import extensions, llmclient, narration, skills, tui_views, voice
 from replicanta.organism import Organism
 from replicanta.probe import SystemProbe
@@ -246,10 +244,9 @@ def test_reflect_garbage_writes_no_file(tmp_path, monkeypatch):
     assert org.skills.list() == []
 
 
-def test_reflect_offline_skips(tmp_path, monkeypatch):
+def test_reflect_offline_skips(tmp_path):
     org = _organism(tmp_path)
     llmclient._voice.online = False
-    force_offline(monkeypatch)
     assert voice.reflect(org)["action"] == "none"
     assert org.skills.list() == []
 

@@ -2,7 +2,7 @@
 outside the chat. narration.diary_entry voices entries (fallback offline),
 Organism.write_diary persists them, tick() emits want_diary on cadence."""
 
-from conftest import force_offline, patch_generate
+from conftest import patch_generate
 
 from replicanta import llmclient, voice
 from replicanta.organism import Organism
@@ -63,10 +63,9 @@ def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
     assert "diary entry" in captured["p"]
 
 
-def test_diary_entry_fallback_offline(tmp_path, monkeypatch):
+def test_diary_entry_fallback_offline(tmp_path):
     org = _organism(tmp_path)
     llmclient._voice.online = False
-    force_offline(monkeypatch)
     entry = voice.diary_entry(org)
     assert entry
     assert "cycle" in entry or "mood" in entry

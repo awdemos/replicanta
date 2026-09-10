@@ -22,20 +22,6 @@ def patch_generate(monkeypatch, fake):
     monkeypatch.setattr("replicanta.llmclient.generate_with_stats", wrapper)
 
 
-def force_offline(monkeypatch):
-    """Make every LLM generation call fail so offline fallbacks are exercised.
-
-    Setting ``llmclient._voice.online = False`` alone is not enough: arena
-    debates run on worker threads whose thread-local voice state is fresh
-    (``online=None`` → the debate is attempted), so a reachable live backend
-    answers the "offline" test and the fallback never fires."""
-
-    def _raise(*a, **k):
-        raise RuntimeError("forced offline")
-
-    patch_generate(monkeypatch, _raise)
-
-
 @pytest.fixture(autouse=True)
 def _reset_voice_state():
     llmclient.reset_voice()

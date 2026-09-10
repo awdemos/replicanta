@@ -2,7 +2,7 @@
 sessions — store persistence, tick events (want_goal / goal completion),
 narration.form_goal, and goal injection into prompts."""
 
-from conftest import force_offline, patch_generate
+from conftest import patch_generate
 
 from replicanta import llmclient, narration, voice
 from replicanta.organism import BeliefStore, Organism
@@ -108,10 +108,9 @@ def test_form_goal_prompt_branch(tmp_path, monkeypatch):
     assert "one thing you want" in captured["p"]
 
 
-def test_form_goal_fallback_deterministic(tmp_path, monkeypatch):
+def test_form_goal_fallback_deterministic(tmp_path):
     org = _organism(tmp_path)
     llmclient._voice.online = False
-    force_offline(monkeypatch)
     goal = voice.form_goal(org)
     assert goal
     assert len(goal.split()) >= 3

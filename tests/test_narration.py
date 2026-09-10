@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
-from conftest import force_offline, patch_generate
+from conftest import patch_generate
 
 from replicanta import llmclient, narration, voice
 from replicanta.narration import (
@@ -517,9 +517,8 @@ def test_ask_user_fallback_uses_user_facts(org):
     assert "what else should I know" in question
 
 
-def test_ask_user_offline_returns_fallback(org, monkeypatch):
+def test_ask_user_offline_returns_fallback(org):
     llmclient._voice.online = False
-    force_offline(monkeypatch)
     question = voice.ask_user(org)
     assert question.endswith("?") and "beyond the machine" not in question
 
@@ -551,8 +550,8 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 # -- voice quality v2: model, think-mode, prompt register --------------------
 
 
-def test_default_model_is_ternary_bonsai_f16():
-    assert llmclient.DEFAULT_MODEL == "ternary-bonsai-1.7b-f16"
+def test_default_model_is_qwen3_8_ud_hf_q3_k_m():
+    assert llmclient.DEFAULT_MODEL == "qwen3.8-ud-hf:q3_k_m"
 
 
 def test_strip_think_removes_block():

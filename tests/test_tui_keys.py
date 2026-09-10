@@ -284,18 +284,12 @@ def test_activity_shows_during_response(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "say", lambda text: None)
     monkeypatch.setattr(tui, "speech", speech)
 
-    async def wait_until(predicate, timeout=5.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if predicate():
-                return True
-            await asyncio.sleep(0.01)
-        return predicate()
-
     async def check():
         async with app.run_test():
             app._maybe_respond("hi")
-            assert await wait_until(lambda: "thinking" in app.activity_text.lower())
-            assert await wait_until(lambda: app.activity_text == "")
+            await asyncio.sleep(0.05)
+            assert "thinking" in app.activity_text.lower()
+            await asyncio.sleep(0.3)
+            assert app.activity_text == ""
 
     asyncio.run(check())
