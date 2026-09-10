@@ -1,39 +1,150 @@
 """Bundled Glasshouse client. Kept buildless so `replicanta --web` stays local."""
 
-APP_HTML = r'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Replicanta Glasshouse</title><link rel="stylesheet" href="/app.css"></head><body><header><b><i>R</i> REPLICANTA <em>glasshouse</em></b><nav><button data-view="habitat" class="on">Habitat</button><button data-view="atlas">Mind</button><button data-view="memory">Memory</button><button data-view="inner">Inner</button><button data-view="cells">Cells</button><button data-view="mud">MUD</button></nav><span id="local">● local</span><button id="still">Stillness</button></header><aside id="nursery"><small>NURSERY</small><div id="orgs"></div><button id="new">＋ Grow a new mind</button></aside><main><section id="heading"><small>HABITAT · <span data-name></span></small><h1>A mind in cultivation.</h1><p>Everything it senses, remembers, and changes remains visible to you.</p></section><section id="habitat" class="view on"><div class="specimen card"><small>LIVE SPECIMEN <span id="state"></span></small><div class="field"><div class="rings"></div><div class="orb"><span data-name></span></div></div><div class="meters"><label>Mood <b id="mood"></b></label><label>Stress <b id="stress"></b></label><label>Grounding <b id="ground"></b></label><label>Chaos <input id="chaos" type="range" min="0" max="1" step=".05"></label></div></div><div class="chat card"><h2>Conversation <button id="export-chat" type="button" title="Export chat">↓</button></h2><div id="messages"></div><div id="typing" class="typing-indicator" hidden><span></span><span></span><span></span></div><form id="chat"><textarea aria-label="Message" placeholder="Teach, ask, or wonder aloud…"></textarea><button>↑</button></form></div></section><section id="atlas" class="view"><div id="beliefs" class="card list"></div></section><section id="memory" class="view"><div id="episodes" class="card list"></div></section><section id="inner" class="view"><div id="inner-panel" class="card list"></div></section><section id="cells" class="view"><div id="cells-panel" class="card list"></div></section><section id="mud" class="view"><div id="mud-panel" class="card list"><h2>MUD Companion</h2><div id="mud-body"></div><form id="mud-form"><input id="mud-input" aria-label="MUD command" placeholder="No active game" autocomplete="off"><button>↑</button></form></div></section></main><aside id="steward"><h2>Stewardship</h2><p>You remain in control.</p><div id="activity" class="activity-strip"></div><div id="persona-panel" class="persona-strip"><small>PERSONA</small><b id="persona-active">—</b><div id="persona-list"></div></div><label>Auto-apply mutations <input id="auto" type="checkbox"></label><label>Attention <input id="focus" placeholder="Guide attention"></label><div class="row"><label>Voice</label><button id="voice-toggle">voice off</button><select id="voice-select"></select></div><button id="listen">Listen</button><button id="look">Look</button><button id="self-talk">Self-talk off</button><button id="git">Git off</button><div id="mutation"></div><button id="sleep">Sleep / wake</button><p class="warning">AI-generated output may be wrong. This interface is a playground, not a product.</p></aside><footer id="commandbar"><form id="command"><div id="hints"></div><input id="cmd" aria-label="Command" placeholder="Type / for commands, or chat…" autocomplete="off"><button>↑</button></form></footer><div id="toast"></div><dialog id="trace"><p>Beliefs are built from attention, memory, and reasoning. This trace shows how the latest utterance was grounded.</p><button id="close">Close</button></dialog><script src="/app.js"></script></body></html>'''
+APP_HTML = r'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Replicanta Glasshouse</title><link rel="stylesheet" href="/app.css"></head><body><header><b><i>R</i> REPLICANTA <em>glasshouse</em></b><nav><button data-view="habitat" class="on">Habitat</button><button data-view="atlas">Mind</button><button data-view="memory">Memory</button><button data-view="inner">Inner</button><button data-view="cells">Cells</button><button data-view="mud">MUD</button></nav><span id="local">● local</span><button id="still">Stillness</button></header><aside id="nursery"><small>NURSERY</small><div id="orgs"></div><button id="new">＋ Grow a new mind</button></aside><main><section id="heading"><small>GLASSHOUSE · <span data-name></span></small></section><section id="habitat" class="view on"><div class="specimen card"><div class="field"><div class="rings"></div><div class="orb"><span data-name></span></div></div><small>LIVE SPECIMEN <span id="state"></span></small><div class="meters"><label>Mood <b id="mood"></b></label><label>Stress <b id="stress"></b></label><label>Grounding <b id="ground"></b></label><label>Chaos <input id="chaos" type="range" min="0" max="1" step=".05"></label></div></div><div class="chat card"><h2>Conversation <button id="export-chat" type="button" title="Export chat">↓</button></h2><div id="messages"></div><div id="typing" class="typing-indicator" hidden><span></span><span></span><span></span></div><form id="chat"><textarea aria-label="Message" placeholder="Teach, ask, or wonder aloud…"></textarea><button>↑</button></form></div></section><section id="atlas" class="view"><div id="beliefs" class="card list"></div></section><section id="memory" class="view"><div id="episodes" class="card list"></div></section><section id="inner" class="view"><div id="inner-panel" class="card list"></div></section><section id="cells" class="view"><div id="cells-panel" class="card list"></div></section><section id="mud" class="view"><div id="mud-panel" class="card list"><h2>MUD Companion</h2><div id="mud-body"></div><form id="mud-form"><input id="mud-input" aria-label="MUD command" placeholder="No active game" autocomplete="off"><button>↑</button></form></div></section></main><aside id="steward"><small>STATUS</small><div id="activity" class="activity-strip"></div><div id="persona-panel" class="persona-strip"><small>PERSONA</small><b id="persona-active">—</b><div id="persona-list"></div></div><small>MIND</small><label>Auto-apply mutations <input id="auto" type="checkbox"></label><label>Attention <input id="focus" placeholder="Guide attention"></label><div id="mutation"></div><small>SENSES &amp; VOICE</small><div class="row"><label>Voice</label><button id="voice-toggle">voice off</button><select id="voice-select"></select></div><div class="btngrid"><button id="listen">Listen</button><button id="look">Look</button><button id="self-talk">Self-talk off</button><button id="git">Git off</button></div><small>LIFECYCLE</small><button id="sleep">Sleep / wake</button><p class="warning">AI-generated output may be wrong. This interface is a playground, not a product.</p></aside><footer id="commandbar"><form id="command"><div id="hints"></div><input id="cmd" aria-label="Command" placeholder="Type / for commands, or chat…" autocomplete="off"><button>↑</button></form></footer><div id="toast"></div><dialog id="trace"><p>Beliefs are built from attention, memory, and reasoning. This trace shows how the latest utterance was grounded.</p><button id="close">Close</button></dialog><script src="/app.js"></script></body></html>'''
 
-APP_CSS = r''':root{--p:#f3f0e7;--i:#17251e;--g:#174235;--m:#687068;--l:#dfe6d8}*{box-sizing:border-box}body{margin:0;background:var(--p);color:var(--i);font:14px Arial;display:grid;grid-template:64px 1fr 64px/190px 1fr 250px;height:100vh;overflow:hidden}header{grid-column:1/-1;display:flex;align-items:center;gap:20px;padding:0 20px;border-bottom:1px solid #0002}header b{letter-spacing:2px}header b i{display:inline-grid;place-items:center;background:var(--g);color:white;border-radius:50%;width:28px;height:28px;font:16px Georgia}header em{font:12px Georgia;color:var(--m);letter-spacing:0}nav{display:flex;height:100%;gap:4px}button{cursor:pointer}nav button{border:0;background:none;padding:0 14px;color:var(--m);font:13px}nav button.on{border-bottom:2px solid var(--g);color:var(--g)}#local{margin-left:auto;color:#478052;font-size:11px}#still{border:1px solid var(--g);background:none;padding:8px 12px;color:var(--g)}aside{padding:28px 15px;border-right:1px solid #0002;overflow:auto}aside#steward{border-right:0;border-left:1px solid #0002}aside small,main>section>small{letter-spacing:2px;font-size:9px;color:var(--m)}#orgs button,#new{width:100%;text-align:left;border:0;background:none;padding:12px;margin-top:8px}#orgs button.on{background:#dfe1d7}#orgs b{font:15px Georgia}#orgs span{display:block;font-size:9px;color:var(--m)}main{padding:35px;min-width:0;overflow:auto;position:relative}h1{font:34px Georgia;margin:8px 0}#heading p{font:italic 14px Georgia;color:var(--m)}.view{display:none}.view.on{display:grid}.view#habitat{grid-template-columns:.8fr 1.2fr;gap:14px}.card{border:1px solid #0002;background:#fff7}.specimen>small{display:flex;justify-content:space-between;padding:14px}.field{height:330px;display:grid;place-items:center;background:linear-gradient(#1742350b 1px,transparent 1px),linear-gradient(90deg,#1742350b 1px,transparent 1px);background-size:24px 24px;overflow:hidden}.orb{width:145px;height:145px;border-radius:45% 55%;background:radial-gradient(circle at 35% 30%,#e2ed9d,#75a16b 30%,#174235 75%);box-shadow:0 0 45px #527c5a66;display:grid;place-items:center;color:#fff;font:22px Georgia;animation:pulse 6s infinite alternate}.rings{width:240px;height:240px;border-radius:50%;border:1px solid #17423522;position:absolute}@keyframes pulse{from{transform:scale(.98)}to{transform:scale(1.02)}}.meters{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px}.meters label{display:flex;justify-content:space-between;font-size:11px;color:var(--m)}.meters input{width:80px}.chat{display:grid;grid-template-rows:auto 1fr auto}.chat h2{margin:14px 14px 0;font:18px Georgia}#messages{padding:10px 14px;overflow:auto;max-height:520px}.msg{margin:10px 0;padding:10px;background:#f6f5ef;border-left:3px solid var(--g)}.msg.org{border-left-color:#7a9a6a;background:#f0f4ea}.msg.sys{border-left-color:#b58900;background:#fbf6e9}.msg.sys>div{font:12px monospace;color:#6d5b10}.msg>div{white-space:pre-wrap}.msg small{display:block;font-size:9px;letter-spacing:1px;color:var(--m);margin-bottom:4px}.msg .why{border:0;background:none;color:var(--g);font-size:11px;padding:0;margin-top:6px;cursor:pointer}.msg .copy{float:right;border:0;background:none;color:var(--m);font-size:11px;cursor:pointer;margin-left:8px}.msg .copy:hover{color:var(--g)}#export-chat{float:right;border:1px solid var(--g);background:none;color:var(--g);padding:2px 8px;font-size:11px;border-radius:4px;cursor:pointer}#export-chat:hover{background:var(--g);color:#fff}.list{padding:14px}.list h2{margin:0 0 10px;font:18px Georgia}.list article{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid #0001}.list article h3{margin:0;font:15px Georgia}.list article p{margin:4px 0 0;font-size:12px;color:var(--m)}.list article b{white-space:nowrap;font-size:11px;color:var(--m)}.empty{font-style:italic;color:var(--m)}.gauges{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px}.gauge{padding:10px;background:#f6f5ef;border-left:3px solid var(--g)}.gauge label{display:block;font-size:10px;color:var(--m);text-transform:uppercase;letter-spacing:1px}.gauge b{font:16px Georgia}.chip{display:inline-block;background:#e6ebe0;padding:4px 8px;border-radius:12px;font-size:12px;margin:2px}.activity{white-space:pre-wrap;font:12px/1.5 monospace;background:#f6f5ef;padding:12px}#steward label{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin:12px 0}#steward input[type=text],#steward input[type=checkbox]{margin-left:8px}#steward #focus{width:100%;padding:6px;border:1px solid #0002;background:#fff7}#steward button{width:100%;margin-top:10px;padding:8px;border:1px solid var(--g);background:none;color:var(--g)}#steward .row{display:flex;gap:8px;align-items:center;margin:12px 0}#steward .row label{flex:0 0 auto;margin:0}#steward .row button{flex:0 0 auto;width:auto;margin:0;padding:4px 10px}#steward .row select{flex:1;padding:4px;border:1px solid #0002;background:#fff7}.activity-strip{font-size:11px;color:var(--m);padding:8px;background:#f6f5ef;border-left:3px solid var(--g);margin-bottom:10px}.mutation{padding:12px;background:#fff7;border:1px solid #0002;margin:10px 0}.mutation small{display:block;color:var(--m);font-size:9px;letter-spacing:1px}.mutation button{margin-right:6px;margin-top:8px}#commandbar{grid-column:2/3;grid-row:3;border-top:1px solid #0002;background:var(--p);padding:10px 35px;display:flex;align-items:center}#commandbar form{width:100%;display:flex;gap:8px;position:relative}#commandbar input{flex:1;border:1px solid #0002;padding:10px 12px;border-radius:4px;background:#fff7;font:14px Arial}#commandbar button{border:0;background:var(--g);color:#fff;padding:0 16px;border-radius:4px}#hints{position:absolute;left:0;right:46px;bottom:calc(100% + 6px);background:#fff;border:1px solid #0002;border-radius:4px;box-shadow:0 4px 12px #0002;display:none;max-height:160px;overflow:auto}#hints.on{display:block}#hints div{padding:8px 12px;font-size:12px;cursor:pointer}#hints div:hover,#hints div.active{background:#f0f4ea}#hints small{color:var(--m);float:right}#toast{position:fixed;top:16px;right:16px;background:#8a2c2c;color:#fff;padding:10px 16px;border-radius:4px;box-shadow:0 4px 12px #0003;opacity:0;pointer-events:none;transition:opacity .3s;z-index:100}#toast.on{opacity:1}dialog{border:1px solid #0002;border-radius:6px;padding:20px;max-width:420px}dialog::backdrop{background:#0003}body.still .orb{animation:none}body.still .rings{display:none}
-#mud-panel{display:grid;grid-template-rows:auto 1fr auto;gap:14px;max-height:calc(100vh - 180px)}
-#mud-body{overflow:auto;min-height:0}
-.mud-meta{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px}
-.mud-meta div{display:flex;flex-direction:column}
-.mud-meta b{font:14px Georgia}
-.mud-meta small{color:var(--m);font-size:10px;text-transform:uppercase;letter-spacing:1px}
-#mud-roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:12px 0}
-.mud-actor{padding:10px;background:#f6f5ef;border-left:3px solid var(--m)}
-.mud-actor.you{border-left-color:#7a9a6a;background:#f0f4ea}
-.mud-actor.turn{border-left-color:var(--g);box-shadow:0 0 0 1px var(--g)}
-.mud-actor b{display:block;font:14px Georgia}
-.mud-actor small{display:block;font-size:10px;color:var(--m)}
-#mud-log{white-space:pre-wrap;font:12px/1.5 monospace;background:#f6f5ef;padding:12px;max-height:260px;overflow:auto;margin:12px 0}
-#mud-form{display:flex;gap:8px}
-#mud-form input{flex:1;border:1px solid #0002;padding:10px 12px;border-radius:4px;background:#fff7;font:14px Arial}
-#mud-form button{border:0;background:var(--g);color:#fff;padding:0 16px;border-radius:4px}
-#mud-form input:disabled{background:#e6e6e6;color:var(--m)}
-
-.persona-strip{padding:10px;background:#f6f5ef;border-left:3px solid var(--g);margin-bottom:10px}
-.persona-strip small{display:block;font-size:9px;letter-spacing:1px;color:var(--m);margin-bottom:4px}
-.persona-strip b{font:14px Georgia;display:block;margin-bottom:8px}
-#persona-list{display:flex;flex-wrap:wrap;gap:6px}
-#persona-list button{font-size:11px;padding:4px 8px;border:1px solid var(--g);background:none;color:var(--g);border-radius:4px;cursor:pointer}
-#persona-list button.on{background:var(--g);color:#fff}
-.typing-indicator{display:flex;gap:4px;align-items:center;padding:8px 12px;font-size:11px;color:var(--m)}
-.typing-indicator span{width:6px;height:6px;background:var(--g);border-radius:50%;animation:bounce 1s infinite}
+APP_CSS = r''':root{--bg:#f3f0e7;--panel:#fbf9f3;--panel-2:#f0ede1;--ink:#1b281f;--muted:#67705f;--line:#ddd8c7;--accent:#174235;--accent-2:#7a9a6a;--amber:#b58900;--amber-ink:#6d5b10;--danger:#8a2c2c;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;display:grid;height:100vh;overflow:hidden;grid-template-columns:208px minmax(0,1fr) 288px;grid-template-rows:48px minmax(0,1fr) 52px;grid-template-areas:"head head head" "nursery main steward" "cmd cmd cmd"}
+header{grid-area:head;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid var(--line)}
+header b{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:1px}
+header b i{display:inline-grid;place-items:center;background:var(--accent);color:#fff;border-radius:50%;width:24px;height:24px;font:13px Georgia}
+header em{font:italic 13px Georgia;color:var(--muted);letter-spacing:0}
+nav{display:flex;height:100%;gap:2px}
+button{cursor:pointer;font-family:inherit}
+input,textarea,select{font-family:inherit;color:inherit}
+nav button{border:0;background:none;padding:0 14px;color:var(--muted);font-size:13px;height:100%}
+nav button.on{color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent)}
+#local{margin-left:auto;color:#478052;font-size:11px}
+#still{border:1px solid var(--accent);background:none;color:var(--accent);height:30px;padding:0 12px;border-radius:6px}
+aside{padding:16px 12px;overflow:auto}
+aside#nursery{grid-area:nursery;border-right:1px solid var(--line)}
+aside small{letter-spacing:1.5px;font-size:10px;color:var(--muted);text-transform:uppercase}
+#orgs{margin-top:8px}
+#orgs button{display:block;width:100%;text-align:left;border:0;background:none;padding:8px 10px;margin-top:4px;border-radius:6px;color:var(--ink)}
+#orgs button.on{background:var(--accent)}
+#orgs button.on b{color:#fff}
+#orgs button.on span{color:#ffffffb3}
+#orgs b{font-size:13px;font-weight:600}
+#orgs span{display:block;font-size:10px;color:var(--muted)}
+#new{width:100%;height:34px;margin-top:8px;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:6px}
+main{grid-area:main;padding:16px 20px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden}
+#heading{margin:0}
+#heading small{font-size:11px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase}
+.view{display:none}
+.view.on{display:grid;flex:1;min-height:0;gap:12px;grid-template-rows:minmax(0,1fr)}
+.view#habitat{grid-template-rows:auto minmax(0,1fr)}
+.card{border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.specimen{display:flex;align-items:center;gap:16px;padding:10px 14px}
+.field{position:relative;width:64px;height:64px;flex:0 0 auto;display:grid;place-items:center;background:linear-gradient(#1742350b 1px,transparent 1px),linear-gradient(90deg,#1742350b 1px,transparent 1px);background-size:16px 16px;overflow:hidden;border-radius:6px}
+.rings{width:60px;height:60px;border-radius:50%;border:1px solid #17423522;position:absolute}
+.orb{width:52px;height:52px;border-radius:45% 55%;background:radial-gradient(circle at 35% 30%,#e2ed9d,#75a16b 30%,#174235 75%);box-shadow:0 0 24px #527c5a66;display:grid;place-items:center;color:#fff;font:italic 13px Georgia;animation:pulse 6s infinite alternate}
+@keyframes pulse{from{transform:scale(.98)}to{transform:scale(1.02)}}
+.specimen>small{padding:0;position:static;font-size:10px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;white-space:nowrap}
+#state{display:inline-block;margin-left:6px;padding:1px 8px;border:1px solid var(--accent);border-radius:10px;font:11px var(--mono);color:var(--accent);letter-spacing:.5px}
+.meters{display:flex;flex:1;gap:20px;padding:0;align-items:center}
+.meters label{display:flex;flex-direction:column;gap:3px;text-transform:uppercase;font-size:10px;letter-spacing:1px;color:var(--muted)}
+.meters b{font:13px var(--mono);color:var(--ink)}
+.meters label:last-child{margin-left:auto}
+.meters input[type=range]{width:120px}
+input[type=range],input[type=checkbox]{accent-color:var(--accent)}
+.chat{display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;min-height:0}
+.chat h2{margin:0;padding:12px 14px 8px;font-size:15px;font-weight:600}
+#export-chat{float:right;width:24px;height:24px;border:1px solid var(--line);background:none;color:var(--muted);border-radius:6px;cursor:pointer;font-size:12px;line-height:1;padding:0}
+#export-chat:hover{color:var(--accent);border-color:var(--accent)}
+#messages{padding:10px 14px;overflow:auto;min-height:0}
+.msg{margin:6px 0;padding:8px 10px;background:var(--panel-2);border-left:2px solid var(--accent)}
+.msg.org{border-left-color:var(--accent-2);background:#f0f4ea}
+.msg.sys{border-left-color:var(--amber);background:#fbf6e9}
+.msg.sys>div{font:12px var(--mono);color:var(--amber-ink)}
+.msg>div{white-space:pre-wrap}
+.msg small{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.msg .why{border:0;background:none;color:var(--accent);font-size:11px;padding:0;margin-top:6px;cursor:pointer}
+.msg .copy{float:right;border:0;background:none;color:var(--muted);font-size:11px;cursor:pointer;margin-left:8px;text-transform:none}
+.msg .copy:hover{color:var(--accent)}
+#typing[hidden]{display:none}
+.typing-indicator{display:flex;gap:4px;align-items:center;padding:6px 14px;font-size:11px;color:var(--muted)}
+.typing-indicator span{width:6px;height:6px;background:var(--accent);border-radius:50%;animation:bounce 1s infinite}
 .typing-indicator span:nth-child(2){animation-delay:.15s}
 .typing-indicator span:nth-child(3){animation-delay:.3s}
 @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4}40%{transform:scale(1);opacity:1}}
 .orb.typing{animation:pulse-typing 1s infinite}
 @keyframes pulse-typing{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+form#chat{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line)}
+#chat textarea{flex:1;height:38px;resize:none;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);padding:9px 10px;font:inherit}
+#chat button{width:38px;height:38px;border:0;background:var(--accent);color:#fff;border-radius:6px}
+.list{padding:14px;max-width:860px;overflow:auto;min-height:0}
+.list h2{margin:0 0 10px;font-size:15px;font-weight:600}
+.list>h3{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin:14px 0 6px}
+.list article{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.list article h3{margin:0;font-size:13px;font-weight:600}
+.list article h3 em{color:var(--muted);font-weight:400}
+.list article p{margin:2px 0 0;font-size:12px;color:var(--muted)}
+.list article b{font:11px var(--mono);color:var(--muted);white-space:nowrap;min-width:40px;text-align:right;font-variant-numeric:tabular-nums}
+#beliefs article b{font-size:12px}
+.empty{font-style:italic;color:var(--muted)}
+.gauges{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.gauge{padding:8px 10px;background:var(--panel-2);border-left:2px solid var(--accent)}
+.gauge label{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.gauge b{font:16px var(--mono)}
+.activity{white-space:pre-wrap;font:12px/1.5 var(--mono);background:var(--panel-2);padding:12px;max-height:40vh;overflow:auto}
+.chip{display:inline-block;background:var(--panel-2);border:1px solid var(--line);padding:3px 8px;border-radius:12px;font-size:11px;margin:2px}
+aside#steward{grid-area:steward;border-right:0;border-left:1px solid var(--line);display:flex;flex-direction:column;gap:6px;padding:16px 14px}
+#steward>small{margin:10px 0 0}
+#steward>small:first-child{margin-top:0}
+#steward label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin:0}
+#steward button{height:30px;padding:0 10px;border:1px solid var(--accent);background:none;color:var(--accent);border-radius:6px;margin:0}
+#steward #focus{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);font-size:12px}
+#steward .row{display:flex;gap:6px;align-items:center;margin:0}
+#steward .row label{flex:0 0 auto;margin:0}
+#steward .row button{flex:0 0 auto;width:auto;margin:0}
+#steward .row select{flex:1;min-width:0;padding:5px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);font-size:12px}
+.btngrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.btngrid button{margin:0;width:auto}
+#sleep{width:100%}
+.activity-strip{font-size:11px;color:var(--muted);padding:8px;background:var(--panel-2);border-left:2px solid var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.persona-strip{padding:10px;background:var(--panel-2);border-left:2px solid var(--accent)}
+.persona-strip small{display:block;font-size:10px;letter-spacing:1.5px;color:var(--muted);margin-bottom:4px}
+.persona-strip b{font-size:13px;font-weight:600;display:block;margin-bottom:8px}
+#persona-list{display:flex;flex-wrap:wrap;gap:6px}
+#persona-list button{font-size:11px;padding:4px 8px;border:1px solid var(--accent);background:none;color:var(--accent);border-radius:4px;height:auto;width:auto}
+#persona-list button.on{background:var(--accent);color:#fff}
+.mutation{padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.mutation small{display:block;color:var(--muted);font-size:10px;letter-spacing:1.5px}
+.mutation button{margin:8px 6px 0 0;width:auto;height:28px}
+.warning{margin:auto 0 0;font-size:10px;color:var(--muted);line-height:1.4}
+#commandbar{grid-area:cmd;border-top:1px solid var(--line);background:var(--panel);padding:8px 16px;display:flex;align-items:center}
+#commandbar form{width:100%;display:flex;gap:8px;position:relative}
+#commandbar input{flex:1;height:36px;border:1px solid var(--line);padding:0 12px;border-radius:6px;background:var(--panel-2);font-size:13px}
+#commandbar button{border:0;background:var(--accent);color:#fff;width:36px;height:36px;border-radius:6px}
+#hints{position:absolute;left:0;right:44px;bottom:calc(100% + 6px);background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 12px #0002;display:none;max-height:160px;overflow:auto}
+#hints.on{display:block}
+#hints div{padding:8px 12px;font-size:12px;cursor:pointer}
+#hints div:hover,#hints div.active{background:var(--panel-2)}
+#hints small{color:var(--muted);float:right}
+#toast{position:fixed;top:16px;right:16px;background:var(--danger);color:#fff;padding:10px 16px;border-radius:6px;box-shadow:0 4px 12px #0003;opacity:0;pointer-events:none;transition:opacity .3s;z-index:100}
+#toast.on{opacity:1}
+dialog{border:1px solid var(--line);border-radius:8px;padding:20px;max-width:420px;background:var(--panel);color:var(--ink)}
+dialog::backdrop{background:#0003}
+body.still .orb{animation:none}
+body.still .rings{display:none}
+#mud-panel{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:12px;height:100%;max-height:none;max-width:none;overflow:hidden}
+#mud-body{display:flex;flex-direction:column;min-height:0;overflow:auto}
+#mud-body .empty{margin:auto;text-align:center}
+.mud-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.mud-meta div{display:flex;flex-direction:column}
+.mud-meta b{font-size:13px;font-weight:600}
+.mud-meta small{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+#mud-roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:0 0 10px}
+.mud-actor{padding:8px;background:var(--panel-2);border-left:2px solid var(--muted)}
+.mud-actor.you{border-left-color:var(--accent-2);background:#f0f4ea}
+.mud-actor.turn{border-left-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.mud-actor b{display:block;font-size:13px;font-weight:600}
+.mud-actor small{display:block;font-size:10px;color:var(--muted)}
+#mud-log{white-space:pre-wrap;font:12px/1.5 var(--mono);background:var(--panel-2);padding:12px;flex:1;min-height:120px;max-height:none;overflow:auto;margin:0}
+#mud-form{display:flex;gap:8px}
+#mud-form input{flex:1;height:36px;border:1px solid var(--line);padding:0 12px;border-radius:6px;background:var(--panel-2);font-size:13px}
+#mud-form button{border:0;background:var(--accent);color:#fff;width:36px;height:36px;border-radius:6px}
+#mud-form input:disabled{background:var(--panel-2);color:var(--muted)}
 '''
 
 APP_JS = r'''const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];let state;const token=location.hash.replace(/^#token=/,'');

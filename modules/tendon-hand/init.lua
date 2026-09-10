@@ -44,8 +44,12 @@ function init(ctx)
     hooks:on("utterance", function(text)
       if text == nil then return end
       for line in string.gmatch(tostring(text), "[^\n]+") do
-        local move, dur = string.match(line, "^%s*%[?%s*hand%s*:%s*(%a+)%s*([%d%.]*)%s*%]?%s*$")
+        -- directive at line start; trailing words are the organism's prose
+        -- ("hand: point at me" still moves "point"); first number on the
+        -- line, if any, is the duration
+        local move = string.match(line, "^%s*%[?%s*hand%s*:%s*(%a+)")
         if move ~= nil and move ~= "" then
+          local dur = string.match(line, "(%d+%.?%d*)")
           execute_move(string.lower(move), tonumber(dur))
         end
       end

@@ -159,9 +159,11 @@ class ArmService:
         if verb == "goal":
             return f"hand: goal '{self.goal(args[1] if len(args) > 1 else 'reach', float(args[2]) if len(args) > 2 else 4.0)['goal']}' set"
         if verb == "volition":
-            on = True
             if len(args) > 1:
                 on = args[1] in ("on", "true", "1")
+            else:
+                with self._lock:
+                    on = not self._volition  # bare "/hand volition" toggles
             self.volition(on)
             return f"hand: volition {'enabled' if on else 'disabled'}"
         if verb == "emotion":
