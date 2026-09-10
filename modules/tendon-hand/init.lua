@@ -50,12 +50,18 @@ function init(ctx)
   }
 
   -- Aliases resolve after exact moves: natural phrases the model is likely
-  -- to write that are not canonical move names.
+  -- to write that are not canonical move names. Reversal verbs map to the
+  -- move that returns the hand to neutral.
   local ALIASES = {
     okay = "ok",
     flip_off = "middle_finger",
     the_finger = "middle_finger",
     the_bird = "middle_finger",
+    retract = "release",
+    relax = "release",
+    rest = "release",
+    unclench = "release",
+    unfold = "open",
   }
 
   -- Map the words after "hand:" to a move: normalize to lower_snake, then

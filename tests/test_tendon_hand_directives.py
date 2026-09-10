@@ -89,6 +89,9 @@ def rig():
         ("hand: point at me and hold it for 8 seconds", "point", 8.0),
         ("hand: open 2\nsome prose", "open", 2.0),
         ("hand: okay then", "ok", 4.0),
+        ("hand: retract the middle finger", "release", 4.0),
+        ("hand: retract", "release", 4.0),
+        ("hand: relax 2", "release", 2.0),
     ],
 )
 def test_directive_dispatches(rig, text, move, dur):
