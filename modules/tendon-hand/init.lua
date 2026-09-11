@@ -24,8 +24,8 @@
 -- arm:set_decide(fn) at init.
 --
 -- Events: hand.move emits hand_goal on accepted moves and hand_error on
--- unknown ones; both are declared on the open bus so other modules can
--- subscribe via ctx.events:on("hand_goal", fn).
+-- unknown moves or bridge failure; both are declared on the open bus so
+-- other modules can subscribe via ctx.events:on("hand_goal", fn).
 
 function init(ctx)
   local services = ctx.services

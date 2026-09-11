@@ -25,8 +25,9 @@ requirements-ci.txt# Hash-pinned CI dependencies exported from uv.lock
 5. **Lua owns module behavior; Python provides capabilities.** Modules are pure
    Lua behind the documented ctx API (`ctx.log`, `ctx.services.get`,
    `ctx.events.declare/on/emit/known`). Python services must stay thin
-   bridges (table-in/table-out, never raising into Lua). New hooks must
-   respect the Lua sandbox in `lua_sandbox.py` — no os/io/require/load.
+   bridges: table-in/plain-data-out, raising Lua-catchable errors that
+   modules wrap in pcall. New hooks must respect the Lua sandbox in
+   `lua_sandbox.py` — no os/io/require/load.
 
 ## Build / Install Commands
 

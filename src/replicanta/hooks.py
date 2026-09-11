@@ -33,7 +33,8 @@ sandbox, one service registry, and one open event bus (any event name;
 `ctx.events:declare(name)` makes a module's custom event first-class, and
 module-emitted events also reach matching script `on_<name>` handlers).
 Python services (arm, store, persona, visual, commands) are thin
-capability bridges: table-in/table-out, never raising into Lua."""
+capability bridges: table-in/plain-data-out; failures raise Lua-catchable
+errors that module code wraps in pcall."""
 
 import threading
 from pathlib import Path

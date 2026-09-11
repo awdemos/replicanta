@@ -1,7 +1,7 @@
 # Lua-native capability hooks for the tendon hand — design
 
 Date: 2026-09-11
-Status: approved (user), pending spec review
+Status: approved (user), implemented
 Branch: `desloppify/code-health-lua-hooks`
 
 ## Goal
@@ -19,7 +19,8 @@ Lua. All policy, vocabulary, and orchestration for the robot hand
    `ModuleLoader` (modules/*/init.lua) each build their own hardened sandbox
    and never share state. They merge into a single host (below).
 2. **Python = capability providers only.** Service methods are thin bridges:
-   table-in/table-out, never raising into Lua. The sandbox stays hardened
+   table-in/plain-data-out, raising Lua-catchable errors that modules wrap
+   in pcall. The sandbox stays hardened
    (no os/io/require); HTTP and threads stay in Python because Lua cannot
    hold them here.
 3. **Lua owns decisions.** Move vocabulary, aliases, mood→gesture policy,
@@ -76,7 +77,8 @@ Every module `init(ctx)` and script hook receives the same shaped context
 - `ctx.events.on(name, fn)` — subscribe; `fn(text)`; any string accepted,
   undeclared emits log at debug level (typo guard without blocking dynamism)
 - `ctx.events.emit(name, text)` — broadcast to module subscribers and to
-  classic scripts' `on_<name>` handlers
+  classic scripts' `on_<name>` handlers (routed through LuaHost.fire so
+  scripts see it too)
 - `ctx.events.known()` — list of declared + core event names
 
 Core events (backwards compatible): `birth`, `cycle`, `learned`, `utterance`,
@@ -84,14 +86,15 @@ Core events (backwards compatible): `birth`, `cycle`, `learned`, `utterance`,
 
 ### Capability services (Python, thin)
 
-Registered in the host's registry, all table-in/table-out:
+Registered in the host's registry, all thin bridges: table-in/plain-data-out,
+raising Lua-catchable errors that module code wraps in pcall:
 
 - `arm` — `state()` (cached SSE snapshot proxy, no HTTP on hot path),
   `health()`, `moves()`, `postures()`, `goal(k,d)`, `posture(n,d)`,
   `actuator(f,j,side,a,d)`, `pose(spec)`, `emotion(spec)`,
   `summary()`, `volition(bool)`, `set_decide(fn)` (see below).
 - `store`, `persona`, `visual`, `commands` — unchanged behavior, boundary
-  contract only.
+  contract only (plain-data-out; failures raise Lua-catchable errors).
 - `organism` — the organism object (existing).
 
 All return plain data (dict-proxies/scalars) or `nil, err`-safe values; a
@@ -136,8 +139,9 @@ the caller's `pcall` (module code) or the host's per-handler guard (events).
 
 - Lua handlers: per-call `pcall` in the host; errors become system log lines.
 - Service boundary: converter (`lua_sandbox.to_py`) normalizes tables; Python
-  exceptions propagate to Lua as raised errors, caught by module `pcall` or
-  host guards. No silent swallowing: caught errors are logged once.
+  services raise Lua-catchable errors, module code wraps calls in `pcall`,
+  and the host never lets a handler error escape (per-call guards turn them
+  into system log lines). No silent swallowing: caught errors are logged once.
 - Bridge offline: `state()`/`health()` return `{connected=false, error=...}`;
   moves return `false` + reason line; volition skips ticks while offline.
 

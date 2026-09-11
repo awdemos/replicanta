@@ -352,6 +352,13 @@ For on-demand scripts, define `main(ctx)` and run with `/lua name.lua`.
 Scripts are sandboxed (no `os`/`io`/`require`/`load`) and protected; errors
 log but never crash the organism. See `scripts/example.lua`.
 
+Lua modules under `modules/` (see `modules/tendon-hand/` for a full example)
+receive the same kind of ctx plus `ctx.services` — capability bridges such as
+`arm`, `visual`, `persona`, `store`, `commands` — and `ctx.events`, the open
+event bus (`declare`/`on`/`emit`/`known`); module-emitted events also reach
+classic scripts' `on_<name>` handlers. Behavior lives in Lua; Python stays a
+thin bridge. See `AGENTS.md` rule 5.
+
 ## Develop
 
 ```bash

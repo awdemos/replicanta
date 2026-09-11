@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, lupa 2.8 (LuaRuntime), pytest, ruff. Spec: `docs/superpowers/specs/2026-09-11-lua-hooks-hand-capabilities-design.md`.
 
-**Baseline:** 938 tests passing, ruff clean, branch `desloppify/code-health-lua-hooks`. Prerequisite bug fixes (table conversion `lua_sandbox.to_py`, `ArmService.moves()/postures()`, single-HookEngine wiring) are already merged on this branch.
+**Baseline:** 970 passing at Task 7 close (971 after emit routing), ruff clean, branch `desloppify/code-health-lua-hooks`. Prerequisite bug fixes (table conversion `lua_sandbox.to_py`, `ArmService.moves()/postures()`, single-HookEngine wiring) are already merged on this branch.
 
 ---
 
@@ -18,7 +18,7 @@
 - Modify: `src/replicanta/tendon_hand.py` (after `get_state()`, ~line 128; after `_record_telemetry`, ~line 300)
 - Test: `tests/test_arm_service.py` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_arm_service.py`:
 
@@ -84,12 +84,12 @@ def test_telemetry_returns_recent_samples():
     assert len(arm.telemetry()) == 2
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_arm_service.py -q`
 Expected: FAIL — `AttributeError: 'ArmService' object has no attribute 'health'` (and `state`/`telemetry` likewise).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `src/replicanta/tendon_hand.py`, add after `get_state()`:
 
@@ -118,12 +118,12 @@ In `src/replicanta/tendon_hand.py`, add after `get_state()`:
 
 Note: `/healthz` is served by `robot-hand/bridge/server.py` (`do_GET`). No changes needed there.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_arm_service.py -q`
 Expected: 5 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/replicanta/tendon_hand.py tests/test_arm_service.py
@@ -138,7 +138,7 @@ git commit -m "arm: expose health(), cached state(), telemetry() to Lua"
 - Modify: `src/replicanta/tendon_hand.py` (`__init__` ~line 93, after `_decide` ~line 370, and the `_volition_loop` call site ~line 326)
 - Test: `tests/test_arm_service.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_arm_service.py`:
 
@@ -182,12 +182,12 @@ def test_decide_call_uses_configured_lock():
     assert arm._choose("calm", 0.1, 0.1, 0.1, False) == "ok"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_arm_service.py -q`
 Expected: FAIL — `TypeError: ArmService.__init__() got an unexpected keyword argument 'lua_lock'` / `AttributeError: ... has no attribute 'set_decide'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `ArmService.__init__`, add the parameter and fields:
 
@@ -235,12 +235,12 @@ In `_volition_loop`, replace `kind = self._decide(mood, stress, arousal, chaos, 
 
 Also update the class docstring method list to include `state(), health(), telemetry(), set_decide(fn)`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_arm_service.py tests/test_tendon_hand_directives.py -q`
 Expected: all pass (new 5 + existing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/replicanta/tendon_hand.py tests/test_arm_service.py
@@ -255,7 +255,7 @@ git commit -m "arm: set_decide() policy hook with lock-serialized Lua calls"
 - Modify: `src/replicanta/modules.py` (`HookService`, lines 29-59)
 - Test: `tests/test_module_hooks.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_module_hooks.py`:
 
@@ -295,12 +295,12 @@ def test_declare_is_idempotent():
     assert hooks.known().count("hand_goal") == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_module_hooks.py -q`
 Expected: FAIL — `on("hand_goal", ...)` logs a warning and drops the handler (dynamic test gets `called == []`); `declare`/`known` raise `AttributeError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Replace `HookService` in `src/replicanta/modules.py`:
 
@@ -351,12 +351,12 @@ class HookService:
                 logger.warning("hook handler for %s failed: %s", event, exc)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_module_hooks.py -q`
 Expected: all pass (4 new + 3 existing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/replicanta/modules.py tests/test_module_hooks.py
@@ -371,7 +371,7 @@ git commit -m "hooks: open event bus (declare/on/emit/known, dynamic events)"
 - Modify: `src/replicanta/modules.py` (`ModuleLoader.__init__` ~line 94, `_register_builtin_services` ~line 219, `_build_context` ~line 269)
 - Test: `tests/test_modules.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_modules.py` (follow that file's existing ModuleLoader-with-tmp-dir fixture patterns; if it has a helper for writing a module dir, reuse it):
 
@@ -394,12 +394,12 @@ def test_module_context_exposes_events(tmp_path):
     assert "ping" in loader.registry.get("hooks").known()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/pytest tests/test_modules.py::test_module_context_exposes_events -q`
 Expected: FAIL — the init raises inside lupa: `attempt to index field 'events' (a nil value)`; the module lands in `loader.warnings`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `ModuleLoader._build_context`, add the events field:
 
@@ -416,12 +416,12 @@ In `ModuleLoader._build_context`, add the events field:
 
 No other changes needed — the registry's `"hooks"` service is the same `HookService` instance the bus uses, and Lua already calls methods on it via the sandbox attribute handler (same mechanism as `services.get("hooks"):on(...)` in tendon-hand's init.lua).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `.venv/bin/pytest tests/test_modules.py -q`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/replicanta/modules.py tests/test_modules.py
@@ -439,7 +439,7 @@ git commit -m "modules: expose ctx.events (the open event bus) to Lua modules"
 - Modify: `src/replicanta/organism.py` (`load()` ~line 1135)
 - Test: `tests/test_lua_host.py` (new)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_lua_host.py`:
 
@@ -509,12 +509,12 @@ def test_host_run_executes_script_main(tmp_path):
     assert any("ran:lua" in line for line in logs)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_lua_host.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'replicanta.lua_host'`.
 
-- [ ] **Step 3: Write minimal implementation (LuaHost)**
+- [x] **Step 3: Write minimal implementation (LuaHost)**
 
 Create `src/replicanta/lua_host.py` (final minimal version — the loader registers the builtin services; the host only forces its own event bus and lock-armed arm service to stay authoritative):
 
@@ -676,7 +676,7 @@ class LuaHost:
 
 Note: `tendon_hand` is imported here only for the docstring cross-reference of the arm service registration path (the loader registers it); if the linter flags the unused import, drop it — the loader owns that registration.
 
-- [ ] **Step 4: Wire the facades (make tests pass)**
+- [x] **Step 4: Wire the facades (make tests pass)**
 
 In `src/replicanta/modules.py`:
 
@@ -771,12 +771,12 @@ In `src/replicanta/organism.py` `load()`, REPLACE the direct `ModuleLoader` cons
 
 (The function-local import mirrors the lazy-import style already used in this file; move it to module scope if preferred.)
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 Run: `.venv/bin/pytest tests/test_lua_host.py tests/test_hooks.py tests/test_modules.py tests/test_module_hooks.py tests/test_organism.py -q`
 Expected: all pass. Then the full suite must stay green: `.venv/bin/pytest tests -q`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/replicanta/lua_host.py src/replicanta/hooks.py src/replicanta/modules.py src/replicanta/organism.py tests/test_lua_host.py
@@ -791,7 +791,7 @@ git commit -m "lua: LuaHost — one runtime hosting scripts and modules, open bu
 - Modify: `modules/tendon-hand/init.lua`
 - Test: `tests/test_tendon_hand_directives.py` (extend the rig: fake `set_decide`, `moves`, capture `events`)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `tests/test_tendon_hand_directives.py`, extend the `_Arm` fake:
 
@@ -843,12 +843,12 @@ def test_module_declares_and_emits_hand_events(rig):
     assert ("hand_goal", "wave") in rig.events.emitted
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_tendon_hand_directives.py -q`
 Expected: FAIL — `AttributeError`/`KeyError` on missing `events` in ctx, or no `set_decide` on the arm fake (module never installs a policy); emit assertions fail.
 
-- [ ] **Step 3: Write minimal implementation (init.lua changes)**
+- [x] **Step 3: Write minimal implementation (init.lua changes)**
 
 In `modules/tendon-hand/init.lua`, inside `init(ctx)` after the arm nil-check:
 
@@ -894,12 +894,12 @@ and in the failure branch:
       if events ~= nil then events:emit("hand_error", move) end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_tendon_hand_directives.py -q`
 Expected: all pass (existing + 2 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/tendon-hand/init.lua tests/test_tendon_hand_directives.py
@@ -913,7 +913,7 @@ git commit -m "tendon-hand: Lua-owned volition policy + hand_goal/hand_error eve
 **Files:**
 - Modify: `AGENTS.md` (Lua hooks rule), `src/replicanta/hooks.py` module docstring, `modules/tendon-hand/init.lua` header comment
 
-- [ ] **Step 1: Update AGENTS.md**
+- [x] **Step 1: Update AGENTS.md**
 
 Replace the rule "Lua hooks run sandboxed. New hooks must respect the Lua sandbox in `lua_sandbox.py`." with:
 
@@ -925,21 +925,77 @@ Replace the rule "Lua hooks run sandboxed. New hooks must respect the Lua sandbo
    respect the Lua sandbox in `lua_sandbox.py` — no os/io/require/load.
 ```
 
-- [ ] **Step 2: Update docstrings**
+- [x] **Step 2: Update docstrings**
 
 `src/replicanta/hooks.py` module docstring: add a paragraph noting that a `LuaHost` (`lua_host.py`) owns the single runtime per organism when wired by `Organism.load()`, that the event bus is open (any event name; `declare` makes it first-class), and that module ctx exposes `ctx.events`.
 
 `modules/tendon-hand/init.lua` header: document the policy table (mood→move rules at the top of `init`), the new events, and `arm:set_decide` semantics.
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run: `.venv/bin/pytest tests -q` (all green) and `.venv/bin/ruff check --ignore I001,UP017 . && .venv/bin/ruff format --check .`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add AGENTS.md src/replicanta/hooks.py modules/tendon-hand/init.lua
 git commit -m "docs: Lua-first module architecture (ctx API, open bus, hand policy)"
+```
+
+---
+
+### Task 8: Module-emitted event broadcast + docs corrections (follow-up)
+
+**Files:**
+- Modify: `src/replicanta/lua_host.py` (`_LuaEventsFacade`), `src/replicanta/modules.py` (`_build_context`), `tests/test_lua_host.py`
+- Modify: `AGENTS.md`, `src/replicanta/hooks.py` docstring, `modules/tendon-hand/init.lua` header, `docs/superpowers/specs/2026-09-11-lua-hooks-hand-capabilities-design.md`, `readme.md` (scripting section)
+
+Reviewer follow-up on this branch: the spec promised that module-emitted events
+reach classic scripts' `on_<name>` handlers, but hosted modules got the raw
+`HookService`, whose emit never dispatches scripts. Also several docs overstated
+the service boundary ("never raising into Lua").
+
+- [x] **Step 1: RED — broadcast test**
+
+`test_module_emitted_event_reaches_script_handlers` in `tests/test_lua_host.py`:
+a module's `ctx.events:emit("ping", "from-mod")` must reach a classic script's
+`on_ping(ctx)`. Fails on the old wiring (module ctx exposed the raw bus;
+script dispatch lives only in `LuaHost.fire`).
+
+- [x] **Step 2: Route module emits through LuaHost.fire**
+
+`_LuaEventsFacade` in `lua_host.py`: `declare`/`on`/`known` delegate to the
+shared bus; `emit` routes through `LuaHost.fire` so module-emitted events reach
+BOTH module subscribers and classic script `on_<name>` handlers (broadcast
+semantics). Hosted `ModuleLoader._build_context` exposes the facade; standalone
+loaders keep the raw bus (no script dispatch exists there). Re-entrant emits run
+on the same thread under the host RLock; recursion depth is bounded by the
+`RecursionError` caught in fire's guards. `HookService` itself is unchanged.
+
+- [x] **Step 3: Docs corrections**
+
+"table-in/table-out, never raising into Lua" → "table-in/plain-data-out,
+raising Lua-catchable errors that modules wrap in pcall" (`AGENTS.md` rule 5,
+`hooks.py` docstring, spec principle 2); tendon-hand header notes `hand_error`
+fires on unknown moves or bridge failure; spec `ctx.events.emit` annotated as
+routed through LuaHost.fire; readme scripting section documents module ctx
+(`ctx.services`, `ctx.events`), pointing at `AGENTS.md` rule 5.
+
+- [x] **Step 4: Verify**
+
+`.venv/bin/pytest tests -q` → 971 passed (970 + 1 new); targeted
+`test_lua_host/test_modules/test_module_hooks/test_organism/test_tendon_hand_directives`
+all green. `ruff check --ignore I001,UP017 .` and `ruff format --check .` clean.
+`test_module_context_exposes_events` unchanged and passing (standalone loader
+keeps the raw bus).
+
+- [x] **Step 5: Commit**
+
+```bash
+git add src/replicanta/lua_host.py src/replicanta/modules.py tests/test_lua_host.py
+git commit -m "lua: route module-emitted events through host dispatch (broadcast semantics)"
+git add AGENTS.md src/replicanta/hooks.py modules/tendon-hand/init.lua docs/ readme.md
+git commit -m "docs: align Lua bridge wording with reality (pcall contract, broadcast emit)"
 ```
 
 ---
