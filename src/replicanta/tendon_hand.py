@@ -80,9 +80,10 @@ class ArmService:
     """Client for the tendon-hand bridge with optional volitional control.
 
     Exposed to Lua as ``services.get('arm')`` with methods:
-      get_state(), goal(kind, duration), posture(name, duration),
-      actuator(finger, joint, side, activation), pose(spec), emotion(spec),
-      summary(), moves(), postures(), volition(enabled), dispatch(args).
+      get_state(), state(), health(), telemetry(), goal(kind, duration),
+      posture(name, duration), actuator(finger, joint, side, activation),
+      pose(spec), emotion(spec), summary(), moves(), postures(),
+      volition(enabled), dispatch(args).
 
     The SSE listener and volition threads start lazily on first use.
     When volition is enabled (default), a background thread reads the
@@ -130,6 +131,27 @@ class ArmService:
         # Wrap the dict in an object so Lua can read attributes via the
         # sandbox's attribute getter (dicts are not attribute-accessible).
         return _DictProxy(raw)
+
+    def health(self):
+        """Bridge liveness probe; never raises (offline -> connected=false)."""
+        try:
+            raw = self._get_json("/healthz")
+            raw.setdefault("connected", True)
+            return raw
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "connected": False, "error": str(exc)}
+
+    def state(self):
+        """Latest hand state: the SSE-cached snapshot when available, else
+        a blocking HTTP fetch (only before the first SSE frame arrives)."""
+        if self._state is not None:
+            return _DictProxy(self._state)
+        return self.get_state()
+
+    def telemetry(self):
+        """Recent (time, key, value) samples recorded from SSE frames."""
+        with self._lock:
+            return list(self._telemetry_log)
 
     def goal(self, kind, duration_s=4.0, _volitional=False):
         kind = str(kind).lower()
