@@ -22,7 +22,11 @@ requirements-ci.txt# Hash-pinned CI dependencies exported from uv.lock
 2. **Python 3.14 only.** The Scallopy wheel is pinned to CPython 3.14; do not change `requires-python` without rebuilding the wheel.
 3. **Scallopy is not on PyPI.** Install the pinned wheel from the v0.1.0 release or place a matching wheel under `wheels/`.
 4. **Self-modification is gated.** Auto-apply of code patches is off by default; preserve that default unless the change explicitly addresses agent safety.
-5. **Lua hooks run sandboxed.** New hooks must respect the Lua sandbox in `lua_sandbox.py`.
+5. **Lua owns module behavior; Python provides capabilities.** Modules are pure
+   Lua behind the documented ctx API (`ctx.log`, `ctx.services.get`,
+   `ctx.events.declare/on/emit/known`). Python services must stay thin
+   bridges (table-in/table-out, never raising into Lua). New hooks must
+   respect the Lua sandbox in `lua_sandbox.py` — no os/io/require/load.
 
 ## Build / Install Commands
 

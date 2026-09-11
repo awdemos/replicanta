@@ -17,6 +17,15 @@
 -- form still works. Both paths funnel into hand.move, which talks to the
 -- arm service (src/replicanta/tendon_hand.py), the HTTP client of the
 -- tendon bridge server (robot-hand/bridge/server.py, 127.0.0.1:8765).
+--
+-- Volition: a POLICY table inside init() maps mood/stress/arousal/chaos to
+-- moves (fist under stress, wave when calm, release when tired, ...). The
+-- Python loop owns timing only; Lua owns the choice, installed through
+-- arm:set_decide(fn) at init.
+--
+-- Events: hand.move emits hand_goal on accepted moves and hand_error on
+-- unknown ones; both are declared on the open bus so other modules can
+-- subscribe via ctx.events:on("hand_goal", fn).
 
 function init(ctx)
   local services = ctx.services
@@ -24,6 +33,7 @@ function init(ctx)
   local commands = services.get("commands")
   local hooks = services.get("hooks")
   local ok_ev, events = pcall(function() return ctx.events end)
+  -- pcall returns the error object on failure
   if not ok_ev then events = nil end
 
   ctx.log("tendon-hand: module init starting")

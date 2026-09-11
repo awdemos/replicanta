@@ -25,7 +25,15 @@ organism), and a lock makes the single Lua runtime safe against the
 TUI's worker threads. `/reload` re-reads the scripts directory.
 `/lua name.lua` runs one script on demand: it is executed in the same
 sandbox and its `main(ctx)` (when defined) is called with ctx.event set
-to "lua"."""
+to "lua".
+
+When an organism loads, `LuaHost` (`lua_host.py`) owns the single Lua
+runtime per organism: classic scripts and `modules/*/init.lua` share one
+sandbox, one service registry, and one open event bus (any event name;
+`ctx.events:declare(name)` makes a module's custom event first-class, and
+module-emitted events also reach matching script `on_<name>` handlers).
+Python services (arm, store, persona, visual, commands) are thin
+capability bridges: table-in/table-out, never raising into Lua."""
 
 import threading
 from pathlib import Path
