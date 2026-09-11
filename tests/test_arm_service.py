@@ -57,3 +57,65 @@ def test_telemetry_returns_recent_samples():
     assert arm.telemetry() == [(1.0, "index_tension", 0.5), (1.0, "goal", "wave")]
     arm.telemetry().clear()  # a copy: mutating it must not drain the service
     assert len(arm.telemetry()) == 2
+
+
+def test_health_reports_malformed_payload_as_offline():
+    arm = ArmService()
+    _stub_request(arm, {"/healthz": ["not", "a", "dict"]})
+    result = arm.health()
+    assert result["connected"] is False
+    assert "/healthz" in result["error"]
+
+
+def test_state_cache_hit_reports_connected():
+    arm = ArmService()
+    _stub_request(arm, {})
+    arm._state = {"goal": "wave", "fingers": {}}
+    assert arm.state().connected is True
+
+
+def test_state_cold_path_failure_reports_offline():
+    arm = ArmService()
+    _stub_request(arm, {"/arm": ConnectionRefusedError("down")})
+    state = arm.state()
+    assert state.connected is False
+    assert "down" in state.error
+
+
+def test_set_decide_overrides_volition_choice():
+    arm = ArmService()
+    arm.set_decide(lambda inputs: "wave" if inputs["stress"] < 0.5 else "fist")
+    assert arm._choose("calm", 0.1, 0.1, 0.1, False) == "wave"
+    assert arm._choose("calm", 0.9, 0.1, 0.1, False) == "fist"
+
+
+def test_set_decide_none_restores_default_policy():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: "wave")
+    arm.set_decide(None)
+    # default policy: high stress -> protective fist
+    assert arm._choose("calm", 0.9, 0.0, 0.0, False) == "fist"
+
+
+def test_decide_fn_receiving_dict_returns_none_for_no_move():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: None)
+    assert arm._choose("calm", 0.1, 0.1, 0.1, False) is None
+
+
+def test_decide_fn_gets_live_state_snapshot():
+    arm = ArmService()
+    seen = []
+    arm.set_decide(lambda inputs: seen.append(inputs.get("state")) or "point")
+    arm._state = {"goal": "reach"}
+    arm._choose("calm", 0.1, 0.1, 0.1, False)
+    assert seen == [{"goal": "reach"}]
+
+
+def test_decide_call_uses_configured_lock():
+    import threading
+
+    arm = ArmService(lua_lock=threading.Lock())
+    with arm._lua_lock:
+        arm.set_decide(lambda _inputs: "ok")
+    assert arm._choose("calm", 0.1, 0.1, 0.1, False) == "ok"

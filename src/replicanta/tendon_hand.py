@@ -83,7 +83,7 @@ class ArmService:
       get_state(), state(), health(), telemetry(), goal(kind, duration),
       posture(name, duration), actuator(finger, joint, side, activation),
       pose(spec), emotion(spec), summary(), moves(), postures(),
-      volition(enabled), dispatch(args).
+      volition(enabled), set_decide(fn), dispatch(args).
 
     The SSE listener and volition threads start lazily on first use.
     When volition is enabled (default), a background thread reads the
@@ -91,12 +91,14 @@ class ArmService:
     hand without human input.
     """
 
-    def __init__(self, organism=None, bridge_url="http://127.0.0.1:8765", tick_hz=2.0):
+    def __init__(self, organism=None, bridge_url="http://127.0.0.1:8765", tick_hz=2.0, lua_lock=None):
         self.organism = organism
         self._url = urlparse(bridge_url)
         self._host = self._url.hostname or "127.0.0.1"
         self._port = self._url.port or 8765
         self._lock = threading.Lock()
+        self._lua_lock = lua_lock if lua_lock is not None else threading.Lock()
+        self._decide_fn = None  # Lua-installed volition policy (see set_decide)
         self._state = None
         self._volition = True
         self._last_volition = 0.0
@@ -136,6 +138,8 @@ class ArmService:
         """Bridge liveness probe; never raises (offline -> connected=false)."""
         try:
             raw = self._get_json("/healthz")
+            if not isinstance(raw, dict):
+                raise TypeError(f"/healthz returned {type(raw).__name__}")
             raw.setdefault("connected", True)
             return raw
         except Exception as exc:  # noqa: BLE001
@@ -145,7 +149,7 @@ class ArmService:
         """Latest hand state: the SSE-cached snapshot when available, else
         a blocking HTTP fetch (only before the first SSE frame arrives)."""
         if self._state is not None:
-            return _DictProxy(self._state)
+            return _DictProxy({**self._state, "connected": True})
         return self.get_state()
 
     def telemetry(self):
@@ -238,6 +242,31 @@ class ArmService:
             self._volition = bool(enabled)
         if enabled:
             self._ensure_started()
+
+    def set_decide(self, fn):
+        """Install (or clear, with None) the volition policy function.
+
+        Called with a dict of inputs (mood, stress, arousal, chaos, insane,
+        state); must return a move name string or None (no move this tick).
+        Invoked under ``lua_lock`` because the function usually lives in the
+        shared Lua runtime, which the host serializes with this lock.
+        """
+        self._decide_fn = fn
+
+    def _choose(self, mood, stress, arousal, chaos, insane):
+        if self._decide_fn is not None:
+            inputs = {
+                "mood": mood,
+                "stress": stress,
+                "arousal": arousal,
+                "chaos": chaos,
+                "insane": insane,
+                "state": self._state,
+            }
+            with self._lua_lock:
+                result = self._decide_fn(inputs)
+            return result if isinstance(result, str) and result else None
+        return self._decide(mood, stress, arousal, chaos, insane)
 
     def dispatch(self, args):
         """Text command dispatcher used by TUI/web slash command."""
@@ -376,7 +405,7 @@ class ArmService:
             # don't stomp an explicit move that is still playing out
             if now < self._explicit_hold_until:
                 continue
-            kind = self._decide(mood, stress, arousal, chaos, insane)
+            kind = self._choose(mood, stress, arousal, chaos, insane)
             if kind and kind != self._last_goal:
                 try:
                     self.goal(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
