@@ -57,3 +57,12 @@ def test_host_run_executes_script_main(tmp_path):
     host.reload_scripts()
     assert host.run("tool.lua", org=None) == "lua: ran tool.lua"
     assert any("ran:lua" in line for line in logs)
+
+
+def test_host_passes_its_lock_to_the_arm_service(tmp_path):
+    """The volition thread must serialize with host dispatch through the same lock."""
+    host = LuaHost(scripts_dir=tmp_path / "scripts", modules_dir=tmp_path / "mods", emit=lambda _m: None)
+    host.load_modules(modules_config={"enabled": []})
+    arm = host.registry.get("arm")
+    assert arm is not None
+    assert arm._lua_lock is host.lock

@@ -9,17 +9,26 @@ import threading
 from pathlib import Path
 
 from replicanta import lua_sandbox, telemetry
-from replicanta.modules import HookService, ModuleLoader, ServiceRegistry
+from replicanta.modules import HookService, ModuleLoader
 
 
 class LuaHost:
-    """Single runtime + registry + event bus for one organism."""
+    """Single runtime + registry + event bus for one organism.
+
+    Modules must keep their Lua in locals/closures: the runtime's global
+    table is shared with classic scripts, which own the ``on_*`` globals by
+    design. A module that writes globals can shadow script state (and a
+    stray global ``main`` would be picked up by ``run``).
+    """
 
     def __init__(self, scripts_dir=None, modules_dir=None, organism=None, emit=None, root=None):
+        # Once a HookEngine attaches, its fire/run mirror the engine's emit
+        # onto this attribute — direct assignment here is stomped on the next
+        # delegated call.
         self.emit = emit if emit is not None else (lambda _msg: None)
         self.lock = threading.RLock()  # reentrant: module handlers may emit events
         self.lua = lua_sandbox.build_runtime()
-        self.registry = ServiceRegistry()
+        self.registry = None  # adopted from the loader in load_modules()
         self.hooks = HookService(on_error=lambda msg: self.emit(msg))
         self.organism = organism
         self.root = root
@@ -57,6 +66,8 @@ class LuaHost:
     def fire(self, event, org=None, text=None):
         """Emit to module subscribers, then classic script on_<event> handlers.
 
+        Unlike standalone HookEngine, ANY event name dispatches here, so
+        module-declared events also reach matching script on_<event> fns.
         Never raises: every handler failure becomes one emitted error line."""
         with telemetry.get_tracer(__name__).start_as_current_span("hooks.fire") as span:
             span.set_attribute("hook.event", event)
