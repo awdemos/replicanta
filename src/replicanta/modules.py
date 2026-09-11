@@ -27,7 +27,13 @@ class ServiceRegistry:
 
 
 class HookService:
-    """Event bus used by modules and consumed by HookEngine."""
+    """Open event bus used by modules and consumed by HookEngine/LuaHost.
+
+    Core lifecycle events (EVENTS) are always valid; modules may additionally
+    declare custom event names (declare) and emit/subscribe any string.
+    Undeclared emits work but log at debug level so typos on core events are
+    catchable without blocking dynamism.
+    """
 
     EVENTS = (
         "birth",
@@ -42,17 +48,24 @@ class HookService:
 
     def __init__(self):
         self._handlers = {e: [] for e in self.EVENTS}
+        self._declared = set(self.EVENTS)
+
+    def declare(self, name):
+        """Register a first-class event name (idempotent)."""
+        self._declared.add(str(name))
+
+    def known(self):
+        """All event names currently known to the bus."""
+        return sorted(self._declared)
 
     def on(self, event, handler):
-        if event not in self._handlers:
-            logger.warning("unknown hook event: %s", event)
-            return
-        self._handlers[event].append(handler)
+        self._handlers.setdefault(str(event), []).append(handler)
 
     def emit(self, event, text=None):
-        if event not in self._handlers:
-            return
-        for handler in self._handlers[event]:
+        event = str(event)
+        if event not in self._declared:
+            logger.debug("undeclared hook event emitted: %s", event)
+        for handler in self._handlers.get(event, []):
             try:
                 handler(text)
             except Exception as exc:  # noqa: BLE001
