@@ -1,3 +1,5 @@
+import logging
+
 from replicanta.modules import HookService
 
 
@@ -40,8 +42,6 @@ def test_declare_marks_event_first_class_and_known_lists_it():
 
 
 def test_undeclared_event_still_emits_and_debug_logs(caplog):
-    import logging
-
     hooks = HookService()
     called = []
     hooks.on("whatever", lambda text: called.append(text))
@@ -56,3 +56,16 @@ def test_declare_is_idempotent():
     hooks.declare("hand_goal")
     hooks.declare("hand_goal")
     assert hooks.known().count("hand_goal") == 1
+
+
+def test_undeclared_subscribe_logs_debug(caplog):
+    hooks = HookService()
+    with caplog.at_level(logging.DEBUG, logger="replicanta.modules"):
+        hooks.on("cylce", lambda _text: None)  # typo of "cycle"
+    assert any("cylce" in rec.message for rec in caplog.records)
+
+
+def test_raising_handler_on_dynamic_event_does_not_escape():
+    hooks = HookService()
+    hooks.on("x", lambda _text: 1 / 0)
+    hooks.emit("x", "boom")  # must not raise

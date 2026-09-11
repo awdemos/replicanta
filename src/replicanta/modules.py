@@ -31,8 +31,8 @@ class HookService:
 
     Core lifecycle events (EVENTS) are always valid; modules may additionally
     declare custom event names (declare) and emit/subscribe any string.
-    Undeclared emits work but log at debug level so typos on core events are
-    catchable without blocking dynamism.
+    Undeclared emits/subscribes work but log at debug level so typos on core
+    events are catchable without blocking dynamism.
     """
 
     EVENTS = (
@@ -59,7 +59,10 @@ class HookService:
         return sorted(self._declared)
 
     def on(self, event, handler):
-        self._handlers.setdefault(str(event), []).append(handler)
+        event = str(event)
+        if event not in self._declared:
+            logger.debug("undeclared hook event subscribed: %s", event)
+        self._handlers.setdefault(event, []).append(handler)
 
     def emit(self, event, text=None):
         event = str(event)
