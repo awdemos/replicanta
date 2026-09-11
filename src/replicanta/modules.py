@@ -32,7 +32,9 @@ class HookService:
     Core lifecycle events (EVENTS) are always valid; modules may additionally
     declare custom event names (declare) and emit/subscribe any string.
     Undeclared emits/subscribes work but log at debug level so typos on core
-    events are catchable without blocking dynamism.
+    events are catchable without blocking dynamism. Handler failures are
+    logged at warning level and additionally reported through ``on_error``
+    (one callable taking a message string) when one is provided.
     """
 
     EVENTS = (
@@ -46,9 +48,10 @@ class HookService:
         "mud_end",
     )
 
-    def __init__(self):
+    def __init__(self, on_error=None):
         self._handlers = {e: [] for e in self.EVENTS}
         self._declared = set(self.EVENTS)
+        self._on_error = on_error
 
     def declare(self, name):
         """Register a first-class event name (idempotent)."""
@@ -73,6 +76,8 @@ class HookService:
                 handler(text)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("hook handler for %s failed: %s", event, exc)
+                if self._on_error is not None:
+                    self._on_error(f"hook handler for {event} failed: {exc}")
 
 
 class CommandService:
@@ -91,9 +96,9 @@ class CommandService:
         self._commands[name] = handler
 
     def _table_from(self, args):
-        if self._loader is None or self._loader._lua is None:
+        if self._loader is None:
             raise RuntimeError("Lua command handler without the module loader's Lua runtime")
-        return self._loader._lua.table_from(args)
+        return self._loader._runtime().table_from(args)
 
     def dispatch(self, name, args):
         handler = self._commands.get(name)
@@ -116,6 +121,7 @@ class ModuleLoader:
         root=None,
         config=None,
         persona_config=None,
+        host=None,
     ):
         self.modules_dir = Path(modules_dir)
         self.organism = organism
@@ -139,6 +145,7 @@ class ModuleLoader:
         self.modules = {}
         self.warnings = []
         self._lua = None
+        self._host = host  # LuaHost: share its runtime, bus, and lock
 
     def _discover(self):
         """Return list of manifest dicts for modules under modules_dir."""
@@ -238,7 +245,12 @@ class ModuleLoader:
             "store",
             _StoreService(self.organism.store) if self.organism else None,
         )
-        self.registry.register("hooks", HookService())
+        # Hosted loaders share the host's open bus so module subscriptions
+        # made during init land on the same bus dispatch emits through.
+        self.registry.register(
+            "hooks",
+            self._host.hooks if self._host is not None else HookService(),
+        )
         self.registry.register("commands", CommandService(self))
         self.registry.register(
             "persona",
@@ -254,7 +266,10 @@ class ModuleLoader:
         )
         self.registry.register(
             "arm",
-            tendon_hand.ArmService(self.organism),
+            tendon_hand.ArmService(
+                self.organism,
+                lua_lock=(self._host.lock if self._host is not None else None),
+            ),
         )
 
     def _init_module(self, manifest):
@@ -278,6 +293,8 @@ class ModuleLoader:
         self.modules[name] = manifest
 
     def _runtime(self):
+        if self._host is not None:
+            return self._host.lua
         if self._lua is None:
             self._lua = lua_sandbox.build_runtime()
         return self._lua

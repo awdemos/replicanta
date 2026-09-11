@@ -22,7 +22,7 @@ from replicanta.fileutil import atomic_write_text
 from replicanta.gitstate import CONDITION_TEXT as GIT_CONDITION_TEXT
 from replicanta.gitstate import GitProbe
 from replicanta.hooks import HookEngine, scripts_dir_for
-from replicanta.modules import ModuleLoader
+from replicanta.lua_host import LuaHost
 from replicanta.probe import SystemProbe
 from replicanta.skills import SkillStore
 from replicanta.threads import ThreadPool, derive_in_thread, make_self_question_thread
@@ -1132,19 +1132,21 @@ class Organism:
             for belief, conf in self.mind.beliefs().items():
                 self.store.add(belief, conf)
         cfg = project_config.load_config(self._root_dir())
-        self.module_loader = ModuleLoader(
+        self.lua_host = LuaHost(
+            scripts_dir=scripts_dir_for(self.dir_path),
             modules_dir=self._modules_dir(),
             organism=self,
-            modules_config=cfg.get("modules", {}),
-            persona_config=cfg.get("persona", {}),
             emit=self._emit_log,
             root=self._root_dir(),
         )
-        self.module_loader.load_all()
-        self.persona_service = self.module_loader.registry.get("persona")
+        self.lua_host.load_modules(modules_config=cfg.get("modules", {}), persona_config=cfg.get("persona", {}))
+        self.lua_host.reload_scripts()
+        self.module_loader = self.lua_host.loader
+        self.persona_service = self.lua_host.registry.get("persona")
         # Wire the engine created in __init__ in place so anything attached
         # to it before load() survives.
-        self.hooks.hooks_service = self.module_loader.registry.get("hooks")
+        self.hooks._host = self.lua_host
+        self.hooks.hooks_service = self.lua_host.hooks
         if self.hooks.emit is self._default_hook_emit:
             self.hooks.emit = lambda msg: self.store.record_chat("system", msg)
         if fresh:

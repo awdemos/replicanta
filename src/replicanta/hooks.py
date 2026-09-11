@@ -48,10 +48,11 @@ class HookEngine:
     """Discovers and fires Lua hooks. Pure apart from the `emit` callback
     (which the TUI points at the chat log); headless organisms work too."""
 
-    def __init__(self, scripts_dir, emit=None, hooks_service=None):
+    def __init__(self, scripts_dir, emit=None, hooks_service=None, host=None):
         self.scripts_dir = Path(scripts_dir)
         self.emit = emit if emit is not None else (lambda _msg: None)
         self.hooks_service = hooks_service
+        self._host = host
         self._lock = threading.Lock()
         self._lua = None
         self._available = None  # None = untested, False = lupa missing
@@ -59,6 +60,9 @@ class HookEngine:
 
     def reload(self):
         """Re-read the scripts directory (drop + rebuild the runtime)."""
+        if self._host is not None:
+            self._host.reload_scripts()
+            return
         self.scripts = sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
         self._lua = None
 
@@ -118,6 +122,12 @@ class HookEngine:
 
     def fire(self, event, org, text=None):
         """Call on_<event>(ctx) in every script. Never raises."""
+        if self._host is not None:
+            # Follow the engine's emit so reassigning org.hooks.emit keeps
+            # controlling where script log lines land.
+            self._host.emit = self.emit
+            self._host.fire(event, org=org, text=text)
+            return
         if self.hooks_service is not None:
             self.hooks_service.emit(event, text)
         if not self.scripts or event not in EVENTS:
@@ -159,6 +169,9 @@ class HookEngine:
         """Run one named script on demand (the /lua command): execute it in
         the shared sandbox, then call its main(ctx) when defined. Returns
         a status line for the chat log; never raises."""
+        if self._host is not None:
+            self._host.emit = self.emit
+            return self._host.run(name, org)
         if Path(name).name != name or not name.endswith(".lua"):
             return f"/lua: bad script name {name!r} (want a plain *.lua file)"
         script = self.scripts_dir / name
