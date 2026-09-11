@@ -152,3 +152,12 @@ def test_lua_sandbox_blocks_dunder_escape_via_services(tmp_path):
     loader.load_all()
     assert "dunder" in loader.modules
     assert not any("ESCAPED" in w for w in loader.warnings)
+
+
+def test_lua_sandbox_to_py_converts_nested_tables():
+    from replicanta import lua_sandbox
+
+    lua = lua_sandbox.build_runtime()
+    tbl = lua.execute("return {name = 'x', nested = {a = 1}, list = {10, 20}}")
+    assert lua_sandbox.to_py(tbl) == {"name": "x", "nested": {"a": 1}, "list": [10, 20]}
+    assert lua_sandbox.to_py({"already": "py"}) == {"already": "py"}

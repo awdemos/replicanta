@@ -37,12 +37,22 @@ function init(ctx)
 
   -- ------------------------------------------------------------ vocabulary
   -- Known moves, multi-word names first so matching prefers them
-  -- ("middle_finger" before anything shorter could shadow it).
-  local MOVES = {
-    "middle_finger", "thumbs_up",
-    "reach", "grasp", "release", "point", "wave", "fist",
-    "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
-  }
+  -- ("middle_finger" before anything shorter could shadow it). The arm
+  -- service is the single source of truth; fall back to a static list
+  -- when it doesn't provide one (e.g. older test doubles).
+  local MOVES = {}
+  local ok_moves, moves_csv = pcall(function() return arm:moves() end)
+  if ok_moves and type(moves_csv) == "string" and moves_csv ~= "" then
+    for name in string.gmatch(moves_csv, "[^,]+") do
+      MOVES[#MOVES + 1] = (string.gsub(name, "^%s*(.-)%s*$", "%1"))
+    end
+  else
+    MOVES = {
+      "middle_finger", "thumbs_up",
+      "reach", "grasp", "release", "point", "wave", "fist",
+      "ripple", "pinch", "shaka", "rock", "spock", "open", "ok",
+    }
+  end
   local MOVES_CSV = table.concat(MOVES, ", ")
 
   -- Reversal verbs say "go back to neutral" no matter what finger or move

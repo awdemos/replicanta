@@ -4,6 +4,8 @@ import logging
 import tomllib
 from pathlib import Path
 
+from lupa import lua_type
+
 from replicanta import config as project_config
 from replicanta import lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
@@ -73,16 +75,15 @@ class CommandService:
         self._commands[name] = handler
 
     def _table_from(self, args):
-        lua = self._loader._lua if self._loader else None
-        if lua is None:
-            lua = lua_sandbox.build_runtime()
-        return lua.table_from(args)
+        if self._loader is None or self._loader._lua is None:
+            raise RuntimeError("Lua command handler without the module loader's Lua runtime")
+        return self._loader._lua.table_from(args)
 
     def dispatch(self, name, args):
         handler = self._commands.get(name)
         if handler is None:
             return None
-        if handler.__class__.__name__.startswith("_Lua"):
+        if lua_type(handler) == "function":
             return handler(self._table_from(args))
         return handler(args)
 
@@ -210,8 +211,7 @@ class ModuleLoader:
                 "tendon-hand",
             ]
         enabled = set(enabled)
-        if enabled is not None:
-            discovered = [m for m in discovered if m.get("name") in enabled]
+        discovered = [m for m in discovered if m.get("name") in enabled]
         ordered = self._resolve_load_order(discovered)
         for manifest in ordered:
             self._init_module(manifest)
@@ -324,29 +324,6 @@ class VisualService:
         return out
 
 
-def _lua_to_py(obj, seen=None):
-    """Recursively convert lupa Lua tables to plain Python dicts/lists."""
-    if seen is None:
-        seen = set()
-    if isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    obj_id = id(obj)
-    if obj_id in seen:
-        return None
-    seen.add(obj_id)
-    try:
-        if hasattr(obj, "items"):
-            items = list(obj.items())
-            if items and all(isinstance(k, int) for k, _ in items):
-                keys = [k for k, _ in items]
-                if min(keys) == 1 and max(keys) == len(keys):
-                    return [_lua_to_py(v, seen) for _, v in sorted(items)]
-            return {k: _lua_to_py(v, seen) for k, v in items}
-        return obj
-    finally:
-        seen.discard(obj_id)
-
-
 class PersonaService:
     """Registry and activation for persona modules."""
 
@@ -362,7 +339,7 @@ class PersonaService:
         self._personas = {}
 
     def register(self, spec):
-        spec = _lua_to_py(spec)
+        spec = lua_sandbox.to_py(spec)
         name = spec.get("name")
         if not name:
             logger.warning("persona spec missing name; skipping")

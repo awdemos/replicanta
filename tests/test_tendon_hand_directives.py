@@ -189,3 +189,90 @@ def test_explicit_goal_holds_off_volition():
     # volitional goals go through but don't extend the hold
     arm.goal("fist", 6.0, _volitional=True)
     assert arm._explicit_hold_until == hold
+
+
+def test_arm_service_accepts_lua_tables():
+    """Lua passes lupa tables, not dicts; pose/emotion must accept them."""
+    from replicanta.lua_sandbox import build_runtime
+    from replicanta.tendon_hand import ArmService
+
+    lua = build_runtime()
+    arm = ArmService()
+    sent = []
+    arm._post = lambda path, body: sent.append((path, body))
+
+    arm.emotion(lua.execute("return {stress = 0.25, arousal = 0.55}"))
+    assert sent == [("/emotion", {"stress": 0.25, "arousal": 0.55})]
+
+    sent.clear()
+    arm.pose(lua.execute("return {fingers = {index = 0.5, thumb = 0.1}, duration_s = 2.0}"))
+    assert sent == [("/pose", {"fingers": {"index": 0.5, "thumb": 0.1}, "duration_s": 2.0})]
+
+    # plain dicts keep working (TUI/web dispatch path)
+    sent.clear()
+    arm.emotion({"stress": 0.9, "mood": "calm"})
+    assert sent == [("/emotion", {"stress": 0.9, "mood": "calm"})]
+
+
+def test_module_uses_service_provided_moves():
+    """init.lua builds its move vocabulary from arm:moves() when the
+    service provides one, so the whitelist has a single source of truth."""
+    from replicanta.lua_sandbox import build_runtime
+
+    class _VocabArm:
+        def __init__(self):
+            self.calls = []
+
+        def moves(self):
+            return "flutter, wave"  # service-side vocabulary
+
+        def goal(self, kind, dur):
+            if kind not in ("flutter", "wave"):
+                raise ValueError(f"unknown goal {kind!r}")
+            self.calls.append(("goal", kind, dur))
+            return {"ok": True}
+
+        def posture(self, name, dur):
+            if name not in ("flutter", "wave"):
+                raise ValueError(f"unknown posture {name!r}")
+            self.calls.append(("posture", name, dur))
+            return {"ok": True}
+
+    arm, hooks, logs = _VocabArm(), _Hooks(), []
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _Ctx(services, logs)
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+    hand = services.get("hand")
+    assert "flutter" in hand["moves"]()
+    assert hand["move"]("flutter", 2) is True
+    assert arm.calls == [("goal", "flutter", 2.0)]
+
+
+def test_real_module_learned_hook_delivers_emotion(tmp_path):
+    """Regression: the real init.lua wraps arm:emotion in pcall, so a
+    conversion error is silently swallowed — the payload must actually
+    reach the bridge."""
+    import shutil
+
+    from replicanta.modules import ModuleLoader
+    from replicanta.tendon_hand import ArmService
+
+    src = Path(__file__).resolve().parent.parent / "modules"
+    shutil.copytree(src, tmp_path / "modules")
+    loader = ModuleLoader(
+        tmp_path / "modules",
+        organism=None,
+        config={"modules": {"enabled": ["base", "tendon-hand"]}},
+    )
+    loader.load_all()
+    assert "tendon-hand" in loader.modules
+    assert not any("tendon-hand" in w for w in loader.warnings)
+
+    arm = loader.registry.get("arm")
+    assert isinstance(arm, ArmService)
+    sent = []
+    arm._post = lambda path, body: sent.append((path, body))
+    loader.registry.get("hooks").emit("learned", "something new")
+    assert ("/emotion", {"stress": 0.25, "arousal": 0.55}) in sent

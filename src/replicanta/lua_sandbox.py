@@ -115,3 +115,26 @@ def sandboxed_execute(lua, code, name="script"):
     ``name`` is ignored; it is accepted for caller convenience.
     """
     lua.execute(code)
+
+
+def to_py(obj, seen=None):
+    """Recursively convert lupa Lua tables to plain Python dicts/lists."""
+    if seen is None:
+        seen = set()
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    obj_id = id(obj)
+    if obj_id in seen:
+        return None
+    seen.add(obj_id)
+    try:
+        if hasattr(obj, "items"):
+            items = list(obj.items())
+            if items and all(isinstance(k, int) for k, _ in items):
+                keys = [k for k, _ in items]
+                if min(keys) == 1 and max(keys) == len(keys):
+                    return [to_py(v, seen) for _, v in sorted(items)]
+            return {k: to_py(v, seen) for k, v in items}
+        return obj
+    finally:
+        seen.discard(obj_id)

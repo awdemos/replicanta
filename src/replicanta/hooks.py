@@ -43,8 +43,6 @@ EVENTS = (
     "mud_end",
 )
 
-_BLOCKED_GLOBALS = ("os", "io", "load", "loadfile", "loadstring", "require", "dofile", "package", "debug")
-
 
 class HookEngine:
     """Discovers and fires Lua hooks. Pure apart from the `emit` callback

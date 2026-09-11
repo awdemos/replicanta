@@ -12,6 +12,8 @@ import time
 from http.client import HTTPConnection, HTTPException
 from urllib.parse import urlparse
 
+from replicanta import lua_sandbox
+
 log = logging.getLogger(__name__)
 
 GOALS = (
@@ -49,6 +51,26 @@ POSTURES = (
     "thumbs_up",
 )
 
+# Everything the hand can be told to do: GOALS plus the "open" posture.
+# Multi-word names come first so phrase matching prefers them.
+MOVES = (
+    "middle_finger",
+    "thumbs_up",
+    "reach",
+    "grasp",
+    "release",
+    "point",
+    "wave",
+    "fist",
+    "ripple",
+    "pinch",
+    "shaka",
+    "rock",
+    "spock",
+    "open",
+    "ok",
+)
+
 
 def _clamp(x, lo=0.0, hi=1.0):
     return max(lo, min(hi, float(x)))
@@ -60,7 +82,7 @@ class ArmService:
     Exposed to Lua as ``services.get('arm')`` with methods:
       get_state(), goal(kind, duration), posture(name, duration),
       actuator(finger, joint, side, activation), pose(spec), emotion(spec),
-      summary(), volition(enabled), dispatch(args).
+      summary(), moves(), postures(), volition(enabled), dispatch(args).
 
     The SSE listener and volition threads start lazily on first use.
     When volition is enabled (default), a background thread reads the
@@ -143,14 +165,15 @@ class ArmService:
         return {"ok": True}
 
     def pose(self, spec):
+        spec = lua_sandbox.to_py(spec)
         if not isinstance(spec, dict):
             raise TypeError("pose spec must be a table")
-        spec = dict(spec)  # accept lupa table
         self._post("/pose", spec)
         self._explicit_hold_until = time.time() + float(spec.get("duration_s", 2.0)) + 4.0
         return {"ok": True}
 
     def emotion(self, spec):
+        spec = lua_sandbox.to_py(spec)
         if not isinstance(spec, dict):
             raise TypeError("emotion spec must be a table")
         payload = {}
@@ -161,6 +184,14 @@ class ArmService:
             payload["mood"] = str(spec["mood"])
         self._post("/emotion", payload)
         return {"ok": True}
+
+    def moves(self):
+        """Comma-separated move names; CSV because Python sequences don't
+        cross the Lua boundary as tables."""
+        return ", ".join(MOVES)
+
+    def postures(self):
+        return ", ".join(POSTURES)
 
     def summary(self):
         """Return a human-readable hand state string (safe for Lua display)."""
