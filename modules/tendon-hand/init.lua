@@ -23,6 +23,7 @@ function init(ctx)
   local arm = services.get("arm")
   local commands = services.get("commands")
   local hooks = services.get("hooks")
+  local events = ctx.events
 
   ctx.log("tendon-hand: module init starting")
   if arm == nil then
@@ -32,6 +33,37 @@ function init(ctx)
   if hooks == nil then
     ctx.log("tendon-hand: hooks service not available; utterance parsing disabled")
   end
+
+  -- Volition policy: the organism's mood decides how the hand moves. The
+  -- Python loop owns timing only; these rules own the choice. Inputs arrive
+  -- as a host dict; the sandbox's attribute getter hides dict keys from both
+  -- dot and subscript syntax, so rules read fields through the dict's own
+  -- bound .get (a plain subscript when a Lua table is passed instead). A
+  -- missing field reads as nil.
+  local function field(inputs, key)
+    local ok, v = pcall(function()
+      local get = inputs.get
+      if get ~= nil then return get(key) end
+      return inputs[key]
+    end)
+    if ok then return v end
+    return nil
+  end
+  local POLICY = {
+    { when = function(i) return field(i, "insane") or field(i, "stress") > 0.78 or field(i, "chaos") > 0.85 end, move = "fist" },
+    { when = function(i) return field(i, "stress") > 0.55 or field(i, "arousal") > 0.75 end, move = "grasp" },
+    { when = function(i) return field(i, "mood") == "curious" or field(i, "mood") == "interested" or field(i, "arousal") > 0.5 end, move = "reach" },
+    { when = function(i) return (field(i, "mood") == "calm" or field(i, "mood") == "content") and field(i, "stress") < 0.25 end, move = "wave" },
+    { when = function(i) return field(i, "mood") == "tired" or field(i, "mood") == "sleepy" end, move = "release" },
+  }
+  pcall(function()
+    arm:set_decide(function(inputs)
+      for _, rule in ipairs(POLICY) do
+        if rule.when(inputs) then return rule.move end
+      end
+      return "point"
+    end)
+  end)
 
   local volition_enabled = true
 
@@ -125,10 +157,12 @@ function init(ctx)
     end
     if ok then
       ctx.log("hand: '" .. move .. "' sent to the bridge (" .. dur .. "s)")
+      if events ~= nil then events:emit("hand_goal", move) end
     else
       -- the organism sees system lines in later context, so the move list
       -- here lets it self-correct on the next turn
       ctx.log("hand: unknown move '" .. move .. "' — moves: " .. MOVES_CSV)
+      if events ~= nil then events:emit("hand_error", move) end
     end
     return ok
   end
@@ -168,6 +202,12 @@ function init(ctx)
 
   -- Other modules (and future entity-code extensions) get the same API.
   services:register("hand", hand)
+
+  -- Open event bus: other modules can react to accepted/rejected moves.
+  if events ~= nil then
+    events:declare("hand_goal")
+    events:declare("hand_error")
+  end
 
   -- ------------------------------------------------ entity calling path
   -- Parse one line of organism output for a hand call. Returns true when

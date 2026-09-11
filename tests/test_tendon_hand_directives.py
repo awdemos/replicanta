@@ -27,6 +27,12 @@ class _Arm:
         self.calls.append(("posture", name, dur))
         return {"ok": True}
 
+    def set_decide(self, fn):
+        self.decide = fn
+
+    def moves(self):
+        return "middle_finger, thumbs_up, reach, grasp, release, point, wave, fist, ripple, pinch, shaka, rock, spock, open, ok"
+
 
 class _Services:
     def __init__(self, d):
@@ -47,15 +53,34 @@ class _Hooks:
         self.handlers.setdefault(ev, []).append(fn)
 
 
+class _Events:
+    def __init__(self):
+        self.handlers = {}
+        self.declared = set()
+        self.emitted = []
+
+    def declare(self, name):
+        self.declared.add(name)
+
+    def on(self, ev, fn):
+        self.handlers.setdefault(ev, []).append(fn)
+
+    def emit(self, ev, text=None):
+        self.emitted.append((ev, text))
+        for fn in self.handlers.get(ev, []):
+            fn(text)
+
+
 class _Commands:
     def register(self, name, fn):
         pass
 
 
 class _Ctx:
-    def __init__(self, services, logs):
+    def __init__(self, services, logs, events):
         self.services = services
         self._logs = logs
+        self.events = events
 
     def log(self, msg):
         self._logs.append(msg)
@@ -64,8 +89,9 @@ class _Ctx:
 @pytest.fixture()
 def rig():
     arm, hooks, logs = _Arm(), _Hooks(), []
+    events = _Events()
     services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
-    ctx = _Ctx(services, logs)
+    ctx = _Ctx(services, logs, events)
     lua = build_runtime()
     lua.globals()["_ctx"] = ctx
     lua.execute(MODULE.read_text() + "\ninit(_ctx)")
@@ -79,6 +105,8 @@ def rig():
 
     fire.arm = arm
     fire.services = services
+    fire.events = events
+    fire.fire = fire
     return fire
 
 
@@ -240,7 +268,7 @@ def test_module_uses_service_provided_moves():
 
     arm, hooks, logs = _VocabArm(), _Hooks(), []
     services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
-    ctx = _Ctx(services, logs)
+    ctx = _Ctx(services, logs, _Events())
     lua = build_runtime()
     lua.globals()["_ctx"] = ctx
     lua.execute(MODULE.read_text() + "\ninit(_ctx)")
@@ -276,3 +304,17 @@ def test_real_module_learned_hook_delivers_emotion(tmp_path):
     arm._post = lambda path, body: sent.append((path, body))
     loader.registry.get("hooks").emit("learned", "something new")
     assert ("/emotion", {"stress": 0.25, "arousal": 0.55}) in sent
+
+
+def test_module_installs_lua_decide_policy(rig):
+    assert hasattr(rig.arm, "decide") and rig.arm.decide is not None
+    # calm + low stress -> wave; high stress -> fist; tired -> release
+    assert rig.arm.decide({"mood": "calm", "stress": 0.1, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "wave"
+    assert rig.arm.decide({"mood": "calm", "stress": 0.9, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "fist"
+    assert rig.arm.decide({"mood": "tired", "stress": 0.1, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "release"
+
+
+def test_module_declares_and_emits_hand_events(rig):
+    assert {"hand_goal", "hand_error"} <= rig.events.declared
+    rig.fire('hand.move("wave", 3)')
+    assert ("hand_goal", "wave") in rig.events.emitted
