@@ -70,9 +70,10 @@ class LuaHost:
     def load_modules(self, modules_config=None, persona_config=None):
         """Load modules through the facade loader on the host runtime.
 
-        The loader registers its builtin services; the host's events facade is
-        the registry's ``hooks`` entry (the loader adopts it when hosted), so
-        ``services.get`` and ``ctx.events`` see the same objects.
+        The loader registers its builtin services, including the host's
+        events facade as the registry's ``hooks`` entry when hosted (see
+        ModuleLoader._register_builtin_services), so ``services.get`` and
+        ``ctx.events`` see the same objects.
         """
         self.loader = ModuleLoader(
             self.modules_dir,
@@ -84,8 +85,28 @@ class LuaHost:
             host=self,
         )
         self.loader.load_all()
-        self.loader.registry.register("hooks", self.events)
         self.registry = self.loader.registry
+
+    def reload_modules(self, modules_config=None, persona_config=None):
+        """Re-init modules on a FRESH event bus.
+
+        ModuleLoader.load_all() alone resets the loader registry but keeps
+        the host bus stable, so every module re-init re-subscribes on top of
+        the old closures (N reloads -> handlers fire N times). Replacing
+        self.hooks first makes the old bus and its subscriptions garbage;
+        the _LuaEventsFacade delegates through self._host.hooks at call
+        time, so it picks up the new bus automatically.
+        """
+        self.hooks = HookService(on_error=lambda msg: self.emit(msg))
+        self.load_modules(modules_config=modules_config, persona_config=persona_config)
+        if self.organism is not None:
+            if hasattr(self.organism, "persona_service"):
+                self.organism.persona_service = self.registry.get("persona")
+            if hasattr(self.organism, "module_loader"):
+                self.organism.module_loader = self.loader
+            hooks_engine = getattr(self.organism, "hooks", None)
+            if hooks_engine is not None:
+                hooks_engine.hooks_service = self.hooks
 
     # -- dispatch ------------------------------------------------------------
     def fire(self, event, org=None, text=None):

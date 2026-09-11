@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from replicanta.hooks import HookEngine
 from replicanta.lua_host import LuaHost
 
 
@@ -148,3 +149,35 @@ def test_module_emit_builds_org_context_for_scripts(tmp_path):
     host.reload_scripts()
     host.fire("trigger", text="go")
     assert "org:testorg:mood:curious:cycle:7" in logs
+
+
+def test_reload_modules_does_not_duplicate_subscriptions(tmp_path):
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "dup",
+        'function init(ctx)\n  ctx.events:on("cycle", function(text) ctx.log("c:" .. tostring(text)) end)\nend\n',
+    )
+    logs = []
+    host = LuaHost(scripts_dir=tmp_path / "scripts", modules_dir=mods, emit=logs.append)
+    host.load_modules(modules_config={"enabled": ["dup"]})
+    host.fire("cycle", text="one")
+    host.reload_modules(modules_config={"enabled": ["dup"]})
+    host.fire("cycle", text="two")
+    host.reload_modules(modules_config={"enabled": ["dup"]})
+    host.fire("cycle", text="three")
+    assert logs == ["c:one", "c:two", "c:three"]
+
+
+def test_hook_engine_reload_mirrors_host_scripts(tmp_path):
+    """A hosted HookEngine.reload must refresh engine.scripts from the host."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "a.lua").write_text("function on_cycle(ctx) end\n")
+    host = LuaHost(scripts_dir=scripts, modules_dir=tmp_path / "mods", emit=lambda _m: None)
+    engine = HookEngine(scripts, host=host)
+    assert engine.scripts == host.scripts
+    (scripts / "b.lua").write_text("function on_cycle(ctx) end\n")
+    engine.reload()
+    assert engine.scripts == host.scripts
+    assert [s.name for s in engine.scripts] == ["a.lua", "b.lua"]

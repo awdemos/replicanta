@@ -520,7 +520,17 @@ class ModulesScreen(ModalScreen):
         cfg.setdefault("modules", {}).update(self._loader.modules_config)
         cfg["modules"]["enabled"] = sorted(self._enabled)
         project_config.save_config(self._loader.root, cfg)
-        self._loader.load_all()
+        host = getattr(self._loader, "_host", None)
+        if host is not None:
+            # Hosted: reload on a FRESH bus — loader.load_all() alone would
+            # re-subscribe module handlers on the stable bus (dispatch
+            # duplicates) and strand the registry/persona references.
+            host.reload_modules(
+                modules_config=self._loader.modules_config,
+                persona_config=self._loader.persona_config,
+            )
+        else:
+            self._loader.load_all()
         self.dismiss(True)
 
 

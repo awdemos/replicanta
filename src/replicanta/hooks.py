@@ -71,6 +71,7 @@ class HookEngine:
         """Re-read the scripts directory (drop + rebuild the runtime)."""
         if self._host is not None:
             self._host.reload_scripts()
+            self.scripts = self._host.scripts  # keep the mirror fresh for hosted readers
             return
         self.scripts = sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
         self._lua = None

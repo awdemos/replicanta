@@ -59,7 +59,8 @@ Owns, per organism:
 `HookEngine` and `ModuleLoader` become thin facades over `LuaHost` so existing
 callers (`organism.hooks`, TUI module screen, tests) keep working while the
 implementation is unified. They are deprecated in comments, not removed, in
-this change.
+this change: standalone construction (no `host=`) is retained for tests and
+tools, while organism wiring goes through `LuaHost`.
 
 Why one host: halves sandbox startup cost, removes the split where modules
 and scripts cannot see each other, and gives one place to document the Lua
@@ -121,8 +122,8 @@ the caller's `pcall` (module code) or the host's per-handler guard (events).
   after the table fix); `cycle` wake/sleep → wave/release; `utterance` →
   gesture parsing (existing one-move-per-reply rule unchanged).
 - **New events**: the module `declare`s `hand_goal` (emitted after each
-  accepted move, text = move name) and `hand_error` (text = reason), so other
-  modules can react to the hand without polling.
+  accepted move, text = move name) and `hand_error` (text = the attempted
+  move name), so other modules can react to the hand without polling.
 
 ### Data flow
 
@@ -143,7 +144,8 @@ the caller's `pcall` (module code) or the host's per-handler guard (events).
   and the host never lets a handler error escape (per-call guards turn them
   into system log lines). No silent swallowing: caught errors are logged once.
 - Bridge offline: `state()`/`health()` return `{connected=false, error=...}`;
-  moves return `false` + reason line; volition skips ticks while offline.
+  moves return `false` + reason line; volition moves fail fast and the
+  cadence advances (evaluate-and-retry next tick).
 
 ### Testing (TDD, pytest)
 
