@@ -635,34 +635,24 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         moves = ", ".join(sorted(set(tendon_hand.GOALS) | set(tendon_hand.POSTURES)))
         return [
             "",
-            "### ROBOT HAND — USE THIS WHEN THE USER ASKS FOR A GESTURE",
+            "### ROBOT HAND — USE WHEN THE USER ASKS FOR A GESTURE",
             "",
-            "You have a real tendon-driven robot hand connected through a",
-            "local bridge server. It actually moves when you tell it to.",
-            "To move it, write a Lua function call on its own line in your",
-            "reply, BEFORE any prose:",
+            "You have a real robot hand. To move it, start your reply with",
+            "this Lua call on its own line, BEFORE any prose:",
             '  hand.move("wave")',
             "",
-            f"Valid moves: {moves}.",
+            f"Moves: {moves}.",
             "",
             "Examples:",
-            '  user: "make a fist" → your reply:',
-            '    hand.move("fist")',
-            "    Making a fist for you.",
-            '  user: "wave for 3 seconds" → your reply:',
-            '    hand.move("wave", 3)',
-            "    Waving at you.",
-            '  user: "middle finger" → your reply:',
-            '    hand.move("middle_finger")',
-            "    There it is.",
+            '  user: "make a fist" → hand.move("fist")',
+            '  user: "wave for 3"  → hand.move("wave", 3)',
+            '  user: "flip off"    → hand.move("middle_finger")',
             "",
-            "Rules:",
-            "- Put the hand.move line FIRST, before your words.",
-            "- Use the move that matches the FINAL gesture requested.",
-            "- If the user asks for something not in the list, pick the closest",
-            '  valid move (e.g. "relax" or "retract" -> hand.move("release")).',
-            "- Call hand.move at most ONCE per reply.",
-            "- Never say you cannot move the hand — you can, at any time.",
+            "Rules: pick the closest valid move if the request is not in the",
+            "list; one hand.move per reply; never say you cannot move the hand.",
+            "",
+            "FINAL INSTRUCTION: if the user's last message asks for a gesture,",
+            'your reply MUST begin with hand.move("...").',
         ]
 
     lines = list(intro)
@@ -677,7 +667,6 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         if snapshot.get("chat"):
             lines += ["", "recent conversation:"]
             lines.extend(f"- {c}" for c in snapshot["chat"])
-        lines += hand_lines()
         if user_message:
             lines += ["", f"The user just said: {user_message}"]
         lines += [
@@ -686,6 +675,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "ramble about your own state, feelings, or existence. No preamble,",
             "no quotes, no emoji.",
         ]
+        lines += hand_lines()
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.
@@ -759,7 +749,6 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         lines.append("")
         lines.append("recent conversation:")
         lines.extend(f"- {c}" for c in snapshot["chat"])
-    lines += hand_lines()
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
@@ -788,6 +777,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "peaceful, hush, empty, emptiness, void, hollow, absence."
         ),
     ]
+    lines += hand_lines()
     return "\n".join(lines)
 
 
