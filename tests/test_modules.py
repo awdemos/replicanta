@@ -161,3 +161,21 @@ def test_lua_sandbox_to_py_converts_nested_tables():
     tbl = lua.execute("return {name = 'x', nested = {a = 1}, list = {10, 20}}")
     assert lua_sandbox.to_py(tbl) == {"name": "x", "nested": {"a": 1}, "list": [10, 20]}
     assert lua_sandbox.to_py({"already": "py"}) == {"already": "py"}
+
+
+def test_module_context_exposes_events(tmp_path):
+    mod = tmp_path / "mods" / "evt"
+    mod.mkdir(parents=True)
+    (mod / "manifest.toml").write_text('name = "evt"\n')
+    (mod / "init.lua").write_text(
+        "function init(ctx)\n"
+        '  ctx.events:declare("ping")\n'
+        '  ctx.events:on("ping", function(text) ctx.log("pong:" .. tostring(text)) end)\n'
+        "end\n"
+    )
+    logs = []
+    loader = ModuleLoader(tmp_path / "mods", emit=logs.append, modules_config={"enabled": ["evt"]})
+    loader.load_all()
+    loader.registry.get("hooks").emit("ping", "hello")
+    assert "pong:hello" in logs
+    assert "ping" in loader.registry.get("hooks").known()

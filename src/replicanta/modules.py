@@ -288,6 +288,7 @@ class ModuleLoader:
             module_name=module_name,
             log=lambda msg: self.emit(str(msg)),
             services=self.registry,
+            events=self.registry.get("hooks"),
         )
 
 
