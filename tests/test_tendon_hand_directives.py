@@ -312,9 +312,37 @@ def test_module_installs_lua_decide_policy(rig):
     assert rig.arm.decide({"mood": "calm", "stress": 0.1, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "wave"
     assert rig.arm.decide({"mood": "calm", "stress": 0.9, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "fist"
     assert rig.arm.decide({"mood": "tired", "stress": 0.1, "arousal": 0.1, "chaos": 0.1, "insane": False}) == "release"
+    # nothing matches -> point
+    assert rig.arm.decide({"mood": "bored", "stress": 0.3, "arousal": 0.3, "chaos": 0.3, "insane": False}) == "point"
 
 
 def test_module_declares_and_emits_hand_events(rig):
     assert {"hand_goal", "hand_error"} <= rig.events.declared
     rig.fire('hand.move("wave", 3)')
     assert ("hand_goal", "wave") in rig.events.emitted
+    rig.fire('hand.move("cartwheel")')
+    assert ("hand_error", "cartwheel") in rig.events.emitted
+
+
+def test_module_inits_when_ctx_lacks_events():
+    """Older ctx shapes have no events attribute at all; init must not blow
+    up, and hand.move must still dispatch without the bus."""
+    arm, hooks, logs = _Arm(), _Hooks(), []
+
+    class _OldCtx:  # pre-events ctx shape: services + log only
+        def __init__(self, services, log_fn):
+            self.services = services
+            self._log = log_fn
+
+        def log(self, msg):
+            self._log(msg)
+
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _OldCtx(services, logs.append)
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+    hand = services.get("hand")
+    assert hand is not None
+    assert hand["move"]("wave", 2) is True
+    assert arm.calls == [("goal", "wave", 2.0)]

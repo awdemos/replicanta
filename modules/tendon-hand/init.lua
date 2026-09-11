@@ -23,7 +23,8 @@ function init(ctx)
   local arm = services.get("arm")
   local commands = services.get("commands")
   local hooks = services.get("hooks")
-  local events = ctx.events
+  local ok_ev, events = pcall(function() return ctx.events end)
+  if not ok_ev then events = nil end
 
   ctx.log("tendon-hand: module init starting")
   if arm == nil then
