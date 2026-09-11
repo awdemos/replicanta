@@ -629,38 +629,43 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "Short sentences. Specific images. No purple prose.",
         ]
 
-    lines = list(intro)
-
-    if snapshot.get("arm"):
+    def hand_lines():
+        if not snapshot.get("arm"):
+            return []
         moves = ", ".join(sorted(set(tendon_hand.GOALS) | set(tendon_hand.POSTURES)))
-        lines += [
+        return [
             "",
-            "You have a physical body part: a tendon-driven robot hand,",
-            "connected through a local bridge server. It really moves when",
-            "you tell it to. To move it, call a Lua function on its own",
-            "line in your reply, like this:",
+            "### ROBOT HAND — USE THIS WHEN THE USER ASKS FOR A GESTURE",
+            "",
+            "You have a real tendon-driven robot hand connected through a",
+            "local bridge server. It actually moves when you tell it to.",
+            "To move it, write a Lua function call on its own line in your",
+            "reply, BEFORE any prose:",
             '  hand.move("wave")',
-            f"Moves: {moves}.",
-            "Pass a duration in seconds as the second argument:",
-            '  hand.move("fist", 3)',
-            'Multi-word moves are written naturally: hand.move("middle finger").',
-            "If asked for a motion outside this list, call the closest",
-            'move from it — e.g. "retract" or "relax" -> hand.move("release").',
-            "Your tendon-hand module executes the call against the bridge.",
-            "Never claim you cannot move the hand — you can, at any time.",
-            "When the user asks you to move the hand, ALWAYS put the",
-            "function call on its own line first, then your words. Example —",
-            'user: "make a fist" → your reply:',
-            '  hand.move("fist")',
-            "  Making a fist for you.",
-            "Choose the move that matches the FINAL gesture requested, not",
-            "the current one. Example —",
-            'user: "change the middle finger to a thumbs up" → your reply:',
-            '  hand.move("thumbs_up")',
-            "  Switching to a thumbs up.",
-            "Call hand.move at most ONCE per reply: one move, for the",
-            "gesture the user just asked for.",
+            "",
+            f"Valid moves: {moves}.",
+            "",
+            "Examples:",
+            '  user: "make a fist" → your reply:',
+            '    hand.move("fist")',
+            "    Making a fist for you.",
+            '  user: "wave for 3 seconds" → your reply:',
+            '    hand.move("wave", 3)',
+            "    Waving at you.",
+            '  user: "middle finger" → your reply:',
+            '    hand.move("middle_finger")',
+            "    There it is.",
+            "",
+            "Rules:",
+            "- Put the hand.move line FIRST, before your words.",
+            "- Use the move that matches the FINAL gesture requested.",
+            "- If the user asks for something not in the list, pick the closest",
+            '  valid move (e.g. "relax" or "retract" -> hand.move("release")).',
+            "- Call hand.move at most ONCE per reply.",
+            "- Never say you cannot move the hand — you can, at any time.",
         ]
+
+    lines = list(intro)
 
     if task_focused:
         # Minimal context: put the user's request right up front and skip
@@ -672,6 +677,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         if snapshot.get("chat"):
             lines += ["", "recent conversation:"]
             lines.extend(f"- {c}" for c in snapshot["chat"])
+        lines += hand_lines()
         if user_message:
             lines += ["", f"The user just said: {user_message}"]
         lines += [
@@ -753,6 +759,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         lines.append("")
         lines.append("recent conversation:")
         lines.extend(f"- {c}" for c in snapshot["chat"])
+    lines += hand_lines()
     if user_message:
         lines += ["", f"The user just said: {user_message}"]
     lines += [""]
