@@ -12,6 +12,30 @@ from replicanta import lua_sandbox, telemetry
 from replicanta.modules import HookService, ModuleLoader
 
 
+class _LuaEventsFacade:
+    """Lua-facing view of the open event bus.
+
+    declare/on/known delegate to the shared bus; emit routes through
+    LuaHost.fire so module-emitted events reach BOTH module subscribers
+    and classic script on_<name> handlers (the spec's broadcast semantics).
+    """
+
+    def __init__(self, host):
+        self._host = host
+
+    def declare(self, name):
+        self._host.hooks.declare(name)
+
+    def known(self):
+        return self._host.hooks.known()
+
+    def on(self, event, handler):
+        self._host.hooks.on(event, handler)
+
+    def emit(self, event, text=None):
+        self._host.fire(event, org=self._host.organism, text=text)
+
+
 class LuaHost:
     """Single runtime + registry + event bus for one organism.
 
@@ -30,6 +54,7 @@ class LuaHost:
         self.lua = lua_sandbox.build_runtime()
         self.registry = None  # adopted from the loader in load_modules()
         self.hooks = HookService(on_error=lambda msg: self.emit(msg))
+        self.events = _LuaEventsFacade(self)
         self.organism = organism
         self.root = root
         self.scripts_dir = Path(scripts_dir) if scripts_dir else None

@@ -66,3 +66,25 @@ def test_host_passes_its_lock_to_the_arm_service(tmp_path):
     arm = host.registry.get("arm")
     assert arm is not None
     assert arm._lua_lock is host.lock
+
+
+def test_module_emitted_event_reaches_script_handlers(tmp_path):
+    """Broadcast semantics: a module's ctx.events:emit must also fire classic
+    script on_<event> handlers through the host (spec contract)."""
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "emitter",
+        "function init(ctx)\n"
+        '  ctx.events:on("trigger", function(_text) ctx.events:emit("ping", "from-mod") end)\n'
+        "end\n",
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "s.lua").write_text('function on_ping(ctx) ctx.log("script-ping:" .. tostring(ctx.text)) end\n')
+    logs = []
+    host = LuaHost(scripts_dir=scripts, modules_dir=mods, emit=logs.append)
+    host.load_modules(modules_config={"enabled": ["emitter"]})
+    host.reload_scripts()
+    host.fire("trigger", text="go")
+    assert "script-ping:from-mod" in logs
