@@ -24,9 +24,13 @@ function init(ctx)
   local commands = services.get("commands")
   local hooks = services.get("hooks")
 
+  ctx.log("tendon-hand: module init starting")
   if arm == nil then
     ctx.log("tendon-hand: arm service not available; is the bridge running on 127.0.0.1:8765?")
     return
+  end
+  if hooks == nil then
+    ctx.log("tendon-hand: hooks service not available; utterance parsing disabled")
   end
 
   local volition_enabled = true
@@ -208,11 +212,15 @@ function init(ctx)
   if hooks ~= nil then
     hooks:on("utterance", function(text)
       if text == nil then return end
+      ctx.log("tendon-hand: utterance received")
       -- One move per reply: a bridge goal preempts whatever is running, so a
       -- second call in the same reply would just stomp the first (and extra
       -- calls are usually lines parroted from earlier turns).
       for line in string.gmatch(tostring(text), "[^\n]+") do
-        if parse_call(line) then break end
+        if parse_call(line) then
+          ctx.log("tendon-hand: dispatched from line: " .. line)
+          break
+        end
       end
     end)
 
