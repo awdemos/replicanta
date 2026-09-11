@@ -249,7 +249,10 @@ class ArmService:
         Called with a dict of inputs (mood, stress, arousal, chaos, insane,
         state); must return a move name string or None (no move this tick).
         Invoked under ``lua_lock`` because the function usually lives in the
-        shared Lua runtime, which the host serializes with this lock.
+        shared Lua runtime, which the host serializes with this lock. The
+        lock is held across the policy call, so the policy must not call
+        back into ``arm`` service methods (that would serialize HTTP I/O
+        with all Lua dispatch).
         """
         self._decide_fn = fn
 
@@ -405,15 +408,28 @@ class ArmService:
             # don't stomp an explicit move that is still playing out
             if now < self._explicit_hold_until:
                 continue
-            kind = self._choose(mood, stress, arousal, chaos, insane)
+            kind = self._volition_tick(mood, stress, arousal, chaos, insane, now)
             if kind and kind != self._last_goal:
                 try:
                     self.goal(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
                     self._last_goal = kind
-                    self._last_volition = now
                     log.debug("volition chose goal %s (mood=%s stress=%.2f)", kind, mood, stress)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("volition goal error: %s", exc)
+
+    def _volition_tick(self, mood, stress, arousal, chaos, insane, now):
+        """Run one volition decision; never raises.
+
+        Advances ``_last_volition`` on every evaluation (a raising policy, a
+        repeated move, or no move) so re-evaluations stay on the 8-16 s
+        arousal-scaled cadence instead of hot-looping on each 0.5 s tick.
+        """
+        self._last_volition = now
+        try:
+            return self._choose(mood, stress, arousal, chaos, insane)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("volition decide error: %s", exc)
+            return None
 
     @staticmethod
     def _decide(mood, stress, arousal, chaos, insane):

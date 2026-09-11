@@ -117,5 +117,36 @@ def test_decide_call_uses_configured_lock():
 
     arm = ArmService(lua_lock=threading.Lock())
     with arm._lua_lock:
-        arm.set_decide(lambda _inputs: "ok")
+        arm.set_decide(lambda _inputs: "ok" if arm._lua_lock.locked() else "unlocked")
     assert arm._choose("calm", 0.1, 0.1, 0.1, False) == "ok"
+
+
+def test_volition_tick_survives_raising_decide_fn():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: 1 / 0)
+    assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) is None
+    assert arm._last_volition == 1000.0  # cadence advances: no 0.5s hot loop
+
+
+def test_volition_tick_recovers_after_raising_fn():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: 1 / 0)
+    assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) is None
+    arm.set_decide(lambda _inputs: "wave")
+    assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1010.0) == "wave"
+    assert arm._last_volition == 1010.0
+
+
+def test_volition_tick_updates_cadence_when_move_repeats():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: "wave")
+    arm._last_goal = "wave"  # policy keeps choosing the same move
+    assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) == "wave"
+    assert arm._last_volition == 1000.0
+
+
+def test_volition_tick_updates_cadence_on_no_move():
+    arm = ArmService()
+    arm.set_decide(lambda _inputs: None)
+    assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) is None
+    assert arm._last_volition == 1000.0
