@@ -60,12 +60,29 @@ def test_declare_is_idempotent():
 
 def test_undeclared_subscribe_logs_debug(caplog):
     hooks = HookService()
+    received = []
     with caplog.at_level(logging.DEBUG, logger="replicanta.modules"):
-        hooks.on("cylce", lambda _text: None)  # typo of "cycle"
+        hooks.on("cylce", lambda text: received.append(text))  # typo of "cycle"
     assert any("cylce" in rec.message for rec in caplog.records)
+    hooks.emit("cylce", "hi")  # subscription still registered despite the typo log
+    assert received == ["hi"]
 
 
-def test_raising_handler_on_dynamic_event_does_not_escape():
+def test_raising_handler_on_dynamic_event_does_not_escape(caplog):
     hooks = HookService()
     hooks.on("x", lambda _text: 1 / 0)
-    hooks.emit("x", "boom")  # must not raise
+    with caplog.at_level(logging.WARNING, logger="replicanta.modules"):
+        hooks.emit("x", "boom")  # must not raise
+    assert any("hook handler for x failed" in rec.message for rec in caplog.records)
+
+
+def test_bus_never_raises_on_weird_input():
+    hooks = HookService()
+    hooks.declare(None)  # str-coerced to "None"; must not raise
+    hooks.declare(object())
+    hooks.on({}, lambda _text: None)  # unhashable pre-coercion; str() makes it hashable
+    hooks.on("cycle", None)  # non-callable handler contained per-handler on emit
+    hooks.emit(None)
+    hooks.emit(object(), "text")
+    hooks.emit("cycle")  # delivers to the None handler -> contained warning
+    assert "None" in hooks.known()
