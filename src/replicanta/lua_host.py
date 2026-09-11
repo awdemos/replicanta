@@ -70,7 +70,7 @@ class LuaHost:
     def load_modules(self, modules_config=None, persona_config=None):
         """Load modules through the facade loader on the host runtime.
 
-        The loader registers its builtin services; the host's event bus is
+        The loader registers its builtin services; the host's events facade is
         the registry's ``hooks`` entry (the loader adopts it when hosted), so
         ``services.get`` and ``ctx.events`` see the same objects.
         """
@@ -84,7 +84,7 @@ class LuaHost:
             host=self,
         )
         self.loader.load_all()
-        self.loader.registry.register("hooks", self.hooks)
+        self.loader.registry.register("hooks", self.events)
         self.registry = self.loader.registry
 
     # -- dispatch ------------------------------------------------------------

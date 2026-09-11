@@ -178,7 +178,8 @@ def test_hooks_attached_before_load_survive_load(tmp_path):
     org.load()
     assert org.hooks.preload_marker == "attached before load"
     assert org.hooks.emit is custom_emit
-    assert org.hooks.hooks_service is org.module_loader.registry.get("hooks")
+    assert org.hooks.hooks_service is org.lua_host.hooks
+    assert org.module_loader.registry.get("hooks") is org.lua_host.events
 
 
 def test_hooks_fire_reaches_module_hook_service_after_load(tmp_path):
@@ -186,7 +187,8 @@ def test_hooks_fire_reaches_module_hook_service_after_load(tmp_path):
     org.load()
     service = org.module_loader.registry.get("hooks")
     assert service is not None
-    assert org.hooks.hooks_service is service
+    assert service is org.lua_host.events
+    assert org.hooks.hooks_service is org.lua_host.hooks
     received = []
     service.on("utterance", received.append)
     org.hooks.fire("utterance", org, text="hello there")

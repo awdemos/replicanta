@@ -150,3 +150,20 @@ def test_volition_tick_updates_cadence_on_no_move():
     arm.set_decide(lambda _inputs: None)
     assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) is None
     assert arm._last_volition == 1000.0
+
+
+def test_volition_loop_survives_raising_policy():
+    class _Store:
+        def belief_value(self, _obj, _attr, default):
+            return "calm"
+
+    org = type("Org", (), {"store": _Store()})()
+    arm = ArmService(organism=org)
+
+    def boom(_inputs):
+        arm._alive = False  # stop the loop after this tick
+        raise RuntimeError("policy exploded")
+
+    arm.set_decide(boom)
+    arm._volition_loop()  # must return without propagating the policy error
+    assert arm._alive is False  # proves the loop reached and ran the tick

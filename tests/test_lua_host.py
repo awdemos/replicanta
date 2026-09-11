@@ -88,3 +88,63 @@ def test_module_emitted_event_reaches_script_handlers(tmp_path):
     host.reload_scripts()
     host.fire("trigger", text="go")
     assert "script-ping:from-mod" in logs
+
+
+def test_hosted_registry_hooks_entry_is_the_facade(tmp_path):
+    host = LuaHost(scripts_dir=tmp_path / "scripts", modules_dir=tmp_path / "mods", emit=lambda _m: None)
+    host.load_modules(modules_config={"enabled": []})
+    assert host.registry.get("hooks") is host.events
+
+
+def test_module_emit_builds_org_context_for_scripts(tmp_path):
+    """A module emit must give script handlers the full organism ctx."""
+    from types import SimpleNamespace
+
+    class _Metrics:
+        belief_count = 3
+        rule_count = 1
+
+        def score(self):
+            return 0.5
+
+    class _Store:
+        cycle = 7
+        chaos = 0.5
+        stress = 0.2
+        arousal = 0.4
+        rationality = 0.9
+        irrationality = 0.1
+        insane = False
+
+        def __init__(self):
+            self.activity = {"ticks": 7}
+
+        def belief_value(self, _obj, _attr, default):
+            return "curious"
+
+    org = SimpleNamespace(
+        metrics=lambda: _Metrics(),
+        store=_Store(),
+        lifecycle=SimpleNamespace(state="awake"),
+        dir_path=SimpleNamespace(name="testorg"),
+        window=None,
+    )
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "emitter",
+        'function init(ctx)\n  ctx.events:on("trigger", function(_text) ctx.events:emit("ping", "x") end)\nend\n',
+    )
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "s.lua").write_text(
+        "function on_ping(ctx)\n"
+        '  ctx.log("org:" .. tostring(ctx.organism) .. ":mood:" .. tostring(ctx.mood) .. ":cycle:" .. tostring(ctx.cycle))\n'
+        "end\n"
+    )
+    logs = []
+    host = LuaHost(scripts_dir=scripts, modules_dir=mods, organism=org, emit=logs.append)
+    host.load_modules(modules_config={"enabled": ["emitter"]})
+    host.reload_scripts()
+    host.fire("trigger", text="go")
+    assert "org:testorg:mood:curious:cycle:7" in logs

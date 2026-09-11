@@ -245,11 +245,12 @@ class ModuleLoader:
             "store",
             _StoreService(self.organism.store) if self.organism else None,
         )
-        # Hosted loaders share the host's open bus so module subscriptions
-        # made during init land on the same bus dispatch emits through.
+        # Hosted loaders register the host's events facade so services.get
+        # and ctx.events are the same object: declare/on/known delegate to
+        # the shared bus, and emit gains the host's script broadcast.
         self.registry.register(
             "hooks",
-            self._host.hooks if self._host is not None else HookService(),
+            self._host.events if self._host is not None else HookService(),
         )
         self.registry.register("commands", CommandService(self))
         self.registry.register(
