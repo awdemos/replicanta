@@ -247,8 +247,16 @@ function init(ctx)
   --       | goal <kind> [dur] | volition [on|off] | emotion s a mood
   if commands ~= nil then
     commands:register("/hand", function(args)
-      local verb = (args[1] or "state")
-      if verb == "state" or verb == "" then
+      local verb = normalize(args[1] or "state")
+      -- Friendly shortcut: /hand wave, /hand fist 3
+      if verb ~= "" and resolve_move(verb) ~= nil then
+        local dur = tonumber(args[2]) or 4.0
+        local move = resolve_move(verb)
+        if hand.move(move, dur) then
+          return "hand: " .. move .. " for " .. dur .. "s"
+        end
+        return "hand move failed for '" .. move .. "'"
+      elseif verb == "state" or verb == "" then
         return hand.state()
       elseif verb == "posture" then
         local name = args[2] or "open"
