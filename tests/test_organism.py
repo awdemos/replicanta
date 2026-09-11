@@ -1,6 +1,9 @@
+import gc
 import random
 import shutil
 import subprocess
+import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -47,6 +50,157 @@ def test_mind_beliefs_returns_float_confidences():
     for conf in mind.beliefs().values():
         assert isinstance(conf, float)
         assert 0.0 <= conf <= 1.0
+
+
+# -- Mind thread affinity -----------------------------------------------------
+#
+# Scallop contexts are thread-affine: they must be created and dropped on the
+# same thread. The belief store holds reference cycles (its on_utterance
+# callback closes over the organism), so a Mind is cleaned up by the cyclic
+# GC — which may run on any thread.
+
+
+def _tiny_scl(tmp_path):
+    scl = tmp_path / "organism.scl"
+    scl.write_text('rel 0.9::bel("apple", "color", "red")\n')
+    return scl
+
+
+def _collect_on_worker():
+    """Run the cyclic GC on a short-lived worker thread (not the test thread)."""
+    worker = threading.Thread(target=gc.collect)
+    worker.start()
+    worker.join()
+
+
+def _captured_unraisables(fn):
+    """Run ``fn`` with ``sys.unraisablehook`` captured; return what it caught."""
+    caught = []
+    old_hook = sys.unraisablehook
+    sys.unraisablehook = caught.append
+    try:
+        fn()
+    finally:
+        sys.unraisablehook = old_hook
+    return caught
+
+
+def _wrong_thread_drops(caught):
+    return [u for u in caught if "unsendable" in str(u.exc_value)]
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_mind_collected_on_another_thread_never_drops_context(tmp_path):
+    def scenario():
+        mind = Mind(_tiny_scl(tmp_path))
+        mind.beliefs()  # build the context on the test thread
+        mind._cycle = [mind]  # reference cycle: the cyclic GC must collect it
+        del mind
+        _collect_on_worker()
+
+    caught = _captured_unraisables(scenario)
+    Mind(_tiny_scl(tmp_path)).close()  # owner thread releases parked contexts
+    assert _wrong_thread_drops(caught) == []
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_mind_close_from_another_thread_parks_context_until_owner_releases(tmp_path):
+    def scenario():
+        mind = Mind(_tiny_scl(tmp_path))
+        mind.rebuild()
+        closer = threading.Thread(target=mind.close)
+        closer.start()
+        closer.join()
+        assert mind.ctx is None  # the cross-thread close detached it
+        assert mind.beliefs()[("apple", "color", "red")] == pytest.approx(0.9)
+        mind._cycle = [mind]
+        del mind
+        _collect_on_worker()
+
+    caught = _captured_unraisables(scenario)
+    Mind(_tiny_scl(tmp_path)).close()  # owner thread releases parked contexts
+    assert _wrong_thread_drops(caught) == []
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_mind_rebuild_on_another_thread_reparents_context(tmp_path):
+    owner_before = threading.current_thread()
+
+    def scenario():
+        mind = Mind(_tiny_scl(tmp_path))
+        mind.rebuild()  # context owned by the test thread
+        worker = threading.Thread(target=mind.rebuild)
+        worker.start()
+        worker.join()
+        assert mind._owner_thread is not owner_before
+        assert mind._owner_thread is worker
+        assert mind.beliefs()[("apple", "color", "red")] == pytest.approx(0.9)
+        mind._cycle = [mind]
+        del mind
+        _collect_on_worker()
+
+    caught = _captured_unraisables(scenario)
+    Mind(_tiny_scl(tmp_path)).close()  # owner thread releases parked contexts
+    assert _wrong_thread_drops(caught) == []
+
+
+@pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning")
+def test_mind_beliefs_off_owner_thread_returns_facts(tmp_path):
+    mind = Mind(_tiny_scl(tmp_path))
+    mind.rebuild()
+    found = {}
+
+    def ask():
+        found.update(mind.beliefs())
+
+    worker = threading.Thread(target=ask)
+    worker.start()
+    worker.join()
+    assert found[("apple", "color", "red")] == pytest.approx(0.9)
+    mind.close()
+
+
+# -- HookEngine wiring --------------------------------------------------------
+#
+# The organism creates one engine up front so callers can attach to it before
+# load(); load() wires that same engine to the module hooks service instead of
+# replacing it.
+
+
+def test_hooks_attached_before_load_survive_load(tmp_path):
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.hooks.preload_marker = "attached before load"
+
+    def custom_emit(msg):
+        org.store.record_chat("system", msg)
+
+    org.hooks.emit = custom_emit
+    org.load()
+    assert org.hooks.preload_marker == "attached before load"
+    assert org.hooks.emit is custom_emit
+    assert org.hooks.hooks_service is org.module_loader.registry.get("hooks")
+
+
+def test_hooks_fire_reaches_module_hook_service_after_load(tmp_path):
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    service = org.module_loader.registry.get("hooks")
+    assert service is not None
+    assert org.hooks.hooks_service is service
+    received = []
+    service.on("utterance", received.append)
+    org.hooks.fire("utterance", org, text="hello there")
+    assert received == ["hello there"]
+
+
+def test_hooks_scripts_dir_still_fired_after_load(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "notify.lua").write_text("function on_utterance(ctx)\n  ctx.log('lua heard: ' .. ctx.text)\nend\n")
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    org.hooks.fire("utterance", org, text="hi")
+    assert ["system", "lua heard: hi"] in org.store.chat_log
 
 
 @pytest.fixture

@@ -439,3 +439,33 @@ def test_settings_voice_and_git(live):
         assert state["git_enabled"] is False
     finally:
         speech.set_enabled(False)
+
+
+def test_swap_closes_previous_organism_mind(glasshouse, tmp_path, monkeypatch):
+    """web.py must release the swapped-out organism's thread-affine Scallop
+    context instead of leaving it for the cyclic GC to drop on a random thread."""
+    from replicanta import organism as organism_module
+
+    nursery.create(tmp_path, "fern", SEED)
+    old_mind = glasshouse.org.mind
+    closed = []
+    monkeypatch.setattr(organism_module.Mind, "close", lambda self: closed.append(self))
+    glasshouse.swap("fern")
+    assert closed == [old_mind]
+
+
+def test_release_mud_org_closes_throwaway_but_not_live(glasshouse, tmp_path, monkeypatch):
+    """Throwaway MUD organisms get their minds closed; the live organism and
+    None are left alone."""
+    from replicanta import organism as organism_module
+
+    nursery.create(tmp_path, "fern", SEED)
+    throwaway = glasshouse._mud_organism_for("fern")
+    assert throwaway is not None and throwaway is not glasshouse.org
+    closed = []
+    monkeypatch.setattr(organism_module.Mind, "close", lambda self: closed.append(self))
+    glasshouse._release_mud_org(throwaway)
+    assert closed == [throwaway.mind]
+    glasshouse._release_mud_org(glasshouse.org)
+    glasshouse._release_mud_org(None)
+    assert closed == [throwaway.mind]

@@ -400,7 +400,9 @@ class Glasshouse:
         nursery.set_current(self.root, name)
         org = Organism(nursery.organism_dir(self.root, name), **self.spawn)
         org.load()
+        old = self.org
         self.org = org
+        old.mind.close()
         return self.snapshot()
 
     def command(self, text):
@@ -852,13 +854,21 @@ class Glasshouse:
         org = self._mud_organism_for(actor.name)
         if org is None:
             return f"mud: cannot find organism {actor.name}"
-        choice = mud.choose_action(game, org=org, actor_name=actor.name)
-        result = game.act_event(choice.command or "look", actor_name=actor.name)
+        try:
+            choice = mud.choose_action(game, org=org, actor_name=actor.name)
+            result = game.act_event(choice.command or "look", actor_name=actor.name)
+        finally:
+            self._release_mud_org(org)
         host = self._mud_host_for(self.org)
         if host and host in self._mud_games:
             self._mud_games[host].session = game.session
         self.org.store.save_mud_session(game.session)
         return f"mud: {actor.name} {result.text}"
+
+    def _release_mud_org(self, org):
+        """Close a throwaway MUD organism's mind; the live organism stays open."""
+        if org is not None and org is not self.org:
+            org.mind.close()
 
     def _mud_organism_for(self, name):
         """Load an organism by name for taking a MUD turn."""
@@ -898,8 +908,11 @@ class Glasshouse:
                 if next_actor.kind == "organism" and next_actor.name != actor_name:
                     org = self._mud_organism_for(next_actor.name)
                     if org is not None:
-                        choice = mud.choose_action(game, org=org, actor_name=next_actor.name)
-                        next_result = game.act_event(choice.command or "look", actor_name=next_actor.name)
+                        try:
+                            choice = mud.choose_action(game, org=org, actor_name=next_actor.name)
+                            next_result = game.act_event(choice.command or "look", actor_name=next_actor.name)
+                        finally:
+                            self._release_mud_org(org)
                         messages.append(f"{next_actor.name}: {next_result.text}")
                         if host and host in self._mud_games:
                             self._mud_games[host].session = game.session

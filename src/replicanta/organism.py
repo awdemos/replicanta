@@ -2,10 +2,12 @@
 BeliefStore that persists beliefs/state.json/genome per organism directory.
 The TUI (tui.py) renders this; the arena (arena.py) debates it."""
 
+import contextlib
 import json
 import logging
 import random
 import re
+import threading
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -481,6 +483,43 @@ class BeliefStore:
                 self.activity[k] = int(v)
 
 
+# Scallop contexts are thread-affine: they must be created and dropped on the
+# same thread. Minds form reference cycles (the store's on_utterance callback
+# closes over the organism), so the cyclic GC may collect a Mind on any
+# thread. Contexts that would be dropped on the wrong thread are parked here,
+# keyed by their owning Thread, and released by the next Mind operation or
+# close() running on that thread. Thread idents are recycled after a thread
+# exits, so ownership is keyed by the Thread object itself, never by ident. A
+# context parked for a thread that has exited leaks silently — there is no
+# safe thread left to drop it on.
+_ORPHAN_CONTEXTS: dict[threading.Thread, list] = {}
+
+
+def _release_context(ref, owner_thread):
+    """Release the context held by the one-element list ``ref`` on the thread
+    that created it.
+
+    ``ref`` must hold the sole remaining reference (callers detach every
+    other one first) so the drop happens inside this function. On the owning
+    thread the context drops before this returns; from any other thread it is
+    parked until the owner drains it (see ``Mind.close``).
+    """
+    import threading
+
+    if threading.current_thread() is owner_thread:
+        ref.clear()
+    else:
+        _ORPHAN_CONTEXTS.setdefault(owner_thread, []).append(ref[0])
+        ref.clear()
+
+
+def _drain_orphan_contexts(owner_thread):
+    """Drop contexts parked for ``owner_thread``. Caller must be on it."""
+    parked = _ORPHAN_CONTEXTS.pop(owner_thread, None)
+    if parked:
+        parked.clear()
+
+
 class Mind:
     """The Scallop program. Rebuilds the context from the .scl genome, runs it,
     and exposes belief facts with their minmaxprob confidences.
@@ -496,20 +535,25 @@ class Mind:
 
         self.scl_path = scl_path
         self.ctx = None
-        self._owner_thread = threading.current_thread().ident
+        self._owner_thread = threading.current_thread()
 
     def _thread_context(self):
         """Return a ScallopContext usable on the current thread.
 
         On the owning thread, reuse ``self.ctx`` (rebuilding if needed). On
         any other thread, build a fresh context from the .scl file without
-        touching ``self.ctx``.
+        touching ``self.ctx``. Both front-ends reason on the owning thread
+        (the TUI ticks on one thread; the web server is single-threaded per
+        organism), so the per-call import cost off-thread is a safety
+        fallback, not a hot path.
         """
         import threading
 
-        if threading.current_thread().ident == self._owner_thread:
+        me = threading.current_thread()
+        if me is self._owner_thread:
             if self.ctx is None:
                 self.rebuild()
+            _drain_orphan_contexts(me)
             return self.ctx
         ctx = scallopy.ScallopContext(provenance=PROVENANCE)
         if self.scl_path.exists():
@@ -518,11 +562,23 @@ class Mind:
         return ctx
 
     def rebuild(self):
-        """Re-import the .scl genome and run the Scallop program."""
+        """Re-import the .scl genome and run the Scallop program.
+
+        The calling thread becomes the context owner (scallopy contexts are
+        thread-affine). A previous context owned by another thread is handed
+        back to that thread for release rather than dropped here.
+        """
+        import threading
+
+        me = threading.current_thread()
+        ref, self.ctx = [self.ctx], None
+        _release_context(ref, self._owner_thread)
         self.ctx = scallopy.ScallopContext(provenance=PROVENANCE)
+        self._owner_thread = me
         if self.scl_path.exists():
             self.ctx.import_file(str(self.scl_path))
         self.ctx.run()
+        _drain_orphan_contexts(me)
 
     def beliefs(self):
         """Return the current genome beliefs as ``(obj, attr, val): conf`` dict."""
@@ -549,11 +605,32 @@ class Mind:
         return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
 
     def close(self):
-        """Release the owning-thread context safely. Called from the owner."""
+        """Release the context. Safe to call from any thread.
+
+        On the owning thread the context drops immediately, along with any
+        contexts parked for this thread; from any other thread the context is
+        parked until the owner releases it.
+        """
         import threading
 
-        if threading.current_thread().ident == self._owner_thread:
+        me = threading.current_thread()
+        if me is self._owner_thread:
             self.ctx = None
+            _drain_orphan_contexts(me)
+        else:
+            ref, self.ctx = [self.ctx], None
+            _release_context(ref, self._owner_thread)
+
+    def __del__(self):
+        # The cyclic GC may collect the Mind on any thread; never let it drop
+        # a thread-affine context outside the owning thread.
+        try:
+            ref, self.ctx = [self.ctx], None
+            owner = self._owner_thread
+        except AttributeError:
+            return  # partially initialised Mind
+        with contextlib.suppress(Exception):  # interpreter teardown must stay quiet
+            _release_context(ref, owner)
 
 
 class ChaosKnob:
@@ -1065,12 +1142,9 @@ class Organism:
         )
         self.module_loader.load_all()
         self.persona_service = self.module_loader.registry.get("persona")
-        hooks_service = self.module_loader.registry.get("hooks")
-        self.hooks = HookEngine(
-            scripts_dir_for(self.dir_path),
-            emit=self.hooks.emit,
-            hooks_service=hooks_service,
-        )
+        # Wire the engine created in __init__ in place so anything attached
+        # to it before load() survives.
+        self.hooks.hooks_service = self.module_loader.registry.get("hooks")
         if self.hooks.emit is self._default_hook_emit:
             self.hooks.emit = lambda msg: self.store.record_chat("system", msg)
         if fresh:
