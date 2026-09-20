@@ -71,6 +71,9 @@ ENEMY_FIREBALL_DAMAGE = 20
 GUN_MAX_DAMAGE = 15
 PLAYER_MAX_HEALTH = 100
 
+# Gameplay tuning: fewer enemies makes the GIF readable and keeps the entity alive longer.
+MAX_ENEMIES_ON_START = 2
+
 # ASCII wall/floor gradient. Lower index = darker/farther.
 GRADIENT = " .-=#@"
 GRADIENT_COUNT = len(GRADIENT)
@@ -181,12 +184,13 @@ class _DoomGame:
         self._initialize_level()
 
     def _initialize_level(self):
+        enemy_spawn_positions = []
         for y, row in enumerate(self.world_map):
             for x, ch in enumerate(row):
                 if ch == "P":
                     self.player.pos = Coords(x + 0.5, y + 0.5)
                 elif ch == "E":
-                    self._spawn_entity(E_ENEMY, x, y)
+                    enemy_spawn_positions.append((x, y))
                 elif ch == "M":
                     self._spawn_entity(E_MEDIKIT, x, y)
                 elif ch == "K":
@@ -195,6 +199,11 @@ class _DoomGame:
                     self._add_static(E_DOOR, x, y)
                 elif ch == "L":
                     self._add_static(E_LOCKEDDOOR, x, y)
+        # Limit enemies for clarity in demos; keep the closest ones to the player.
+        px, py = self.player.pos.x, self.player.pos.y
+        enemy_spawn_positions.sort(key=lambda xy: math.hypot(xy[0] - px, xy[1] - py))
+        for x, y in enemy_spawn_positions[:MAX_ENEMIES_ON_START]:
+            self._spawn_entity(E_ENEMY, x, y)
 
     def _create_uid(self, etype: int, x: int, y: int) -> int:
         return (etype << 16) | (x << 8) | y
