@@ -2988,11 +2988,14 @@ class OrganismApp(App):
         thoughts = self._safe_query("#doom-thoughts", Static)
         if thoughts is None:
             return
+        # Normalize: strip a stale live-typing "> " prefix before re-stamping.
+        current = str(getattr(thoughts, "_Static__content", "") or "")
+        if current.startswith("> "):
+            current = ""
         # Render the final reply as one or more timestamped "> " lines.
         stamped = "\n".join(
             f"[{datetime.now(UTC).strftime('%H:%M:%S')}] > {line}" for line in text.splitlines() if line.strip()
         )
-        current = str(getattr(thoughts, "_Static__content", "") or "")
         lines = (current.splitlines() if current else []) + stamped.splitlines()
         # Keep the last ~8 entries so the pane stays readable.
         trimmed = "\n".join(lines[-8:])
