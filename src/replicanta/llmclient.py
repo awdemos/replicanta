@@ -127,8 +127,8 @@ ENV_OBJECTS = {"cpu", "mem", "disk", "temp", "battery", "system", "time"}
 
 class _Voice:
     def __init__(self):
-        self.online = None
-        self.failures = 0
+        self.online: bool | None = None
+        self.failures: int = 0
 
 
 _VOICE = _Voice()

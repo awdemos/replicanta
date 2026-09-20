@@ -1948,6 +1948,9 @@ class OrganismApp(App):
     def _probe_voice_worker(self):
         try:
             llmclient.probe_voice()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("voice probe failed: %s", exc)
+            llmclient._voice().online = False
         finally:
             self._probing_voice = False
         self.call_from_thread(self._announce_voice)
