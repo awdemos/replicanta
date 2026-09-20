@@ -36,6 +36,12 @@ COMMANDS = [
         "drive the tendon-hand effector; with no args show state",
         "State",
     ),
+    (
+        "/brain",
+        "/brain [status|optimize <task> [budget] [level]|adapt|bank]",
+        "evolve or inspect the fly-brain reservoir (rsi-wetware-rs)",
+        "State",
+    ),
     # Voice
     (
         "/voice",
