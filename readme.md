@@ -59,6 +59,9 @@ For the web interface: `.venv/bin/replicanta --web`
   on by default (`/auto-apply off` to require approval).
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
   utterances, and fades.
+- **Fly brain** — ask the organism to evolve its own reservoir computer: the
+  larval *Drosophila* connectome from `rsi-wetware-rs`. Say
+  `brain.optimize("digits")` or use `/brain status|optimize|adapt|bank`.
 
 ## Installation
 
@@ -253,7 +256,8 @@ container-use checkout <env-id>
 | `/swap default` | Switch organism |
 | `/organisms` | List organisms |
 | `/group start fern willow` | Group chat |
-|| `/git on\|off` | Sense git worktree state |
+| `/brain [status|optimize <task> [budget] [level]|adapt|bank]` | Evolve or inspect the fly-brain reservoir |
+| `/git on\|off` | Sense git worktree state |
 || `/visualize [kind]` | Render a live-updating RDD chart of organism state |
 || `/help` (F1, ctrl+p) | Full command list |
 

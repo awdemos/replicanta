@@ -117,6 +117,42 @@ def sandboxed_execute(lua, code, name="script"):
     lua.execute(code)
 
 
+class DictProxy:
+    """Expose Python dict keys as Lua-compatible attributes.
+
+    Lupa does not expose dict keys as table pairs, and the sandbox's
+    attribute getter hides dict keys from dot access; wrapping results in
+    this proxy lets Lua modules read ``svc.info().neurons`` naturally.
+    """
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getattr__(self, name):
+        try:
+            val = self._data[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+        if isinstance(val, dict):
+            return DictProxy(val)
+        return val
+
+    def __contains__(self, name):
+        return name in self._data
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def items(self):
+        return [(k, DictProxy(v) if isinstance(v, dict) else v) for k, v in self._data.items()]
+
+    def __len__(self):
+        return len(self._data)
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+
 def to_py(obj, seen=None):
     """Recursively convert lupa Lua tables to plain Python dicts/lists."""
     if seen is None:

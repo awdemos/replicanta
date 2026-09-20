@@ -16,6 +16,10 @@ from replicanta import lua_sandbox
 
 log = logging.getLogger(__name__)
 
+# Backward-compatible alias; the class now lives in lua_sandbox so other
+# capability bridges (fly_brain) can share it.
+_DictProxy = lua_sandbox.DictProxy
+
 GOALS = (
     "reach",
     "grasp",
@@ -447,34 +451,3 @@ class ArmService:
 
     def stop(self):
         self._alive = False
-
-
-class _DictProxy:
-    """Expose Python dict keys as Lua-compatible attributes."""
-
-    def __init__(self, data):
-        self._data = data
-
-    def __getattr__(self, name):
-        try:
-            val = self._data[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-        if isinstance(val, dict):
-            return _DictProxy(val)
-        return val
-
-    def __contains__(self, name):
-        return name in self._data
-
-    def __iter__(self):
-        return iter(self._data)
-
-    def items(self):
-        return [(k, _DictProxy(v) if isinstance(v, dict) else v) for k, v in self._data.items()]
-
-    def __len__(self):
-        return len(self._data)
-
-    def __getitem__(self, key):
-        return self._data[key]

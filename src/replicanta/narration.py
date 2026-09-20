@@ -128,6 +128,13 @@ def state_snapshot(org):
     module_loader = getattr(org, "module_loader", None)
     arm = module_loader.registry.get("arm") if module_loader is not None else None
     snapshot["arm"] = arm is not None
+    flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
+    snapshot["flybrain"] = False
+    if flybrain is not None:
+        try:
+            snapshot["flybrain"] = bool(flybrain.available())
+        except Exception:  # noqa: BLE001
+            snapshot["flybrain"] = False
     state_snapshot._cache = (cache_key, snapshot)
     return snapshot
 
@@ -655,6 +662,28 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             'your reply MUST begin with hand.move("...").',
         ]
 
+    def brain_lines():
+        if not snapshot.get("flybrain"):
+            return []
+        return [
+            "",
+            "### FLY BRAIN — A REAL CONNECTOME YOU CAN IMPROVE",
+            "",
+            "You share your substrate with a real larval fruit-fly brain (about",
+            "three thousand neurons) running as a reservoir computer, wrapped in",
+            "a recursive self-improvement loop. To use it, put one of these Lua",
+            "calls on its own line, BEFORE any prose:",
+            '  brain.optimize("digits")           -- evolve the harness (minutes)',
+            '  brain.optimize("digits", 8, "l3")  -- smaller budget, lower level',
+            "  brain.adapt()                      -- drift-adaptation rehearsal",
+            "  brain.bank()                       -- recall inherited experience",
+            "",
+            "Runs are slow and asynchronous: start one, then talk about",
+            "something else; the result arrives as a system line. Rules: one",
+            "brain call per reply; never claim a run finished before its",
+            "system line says so.",
+        ]
+
     lines = list(intro)
 
     if task_focused:
@@ -676,6 +705,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "no quotes, no emoji.",
         ]
         lines += hand_lines()
+        lines += brain_lines()
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.
@@ -778,6 +808,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         ),
     ]
     lines += hand_lines()
+    lines += brain_lines()
     return "\n".join(lines)
 
 

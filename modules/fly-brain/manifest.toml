@@ -1,0 +1,5 @@
+name = "fly-brain"
+description = "Recursive-self-improvement access to a real fly brain (rsi-wetware-rs connectome reservoir)"
+version = "0.1.0"
+provides = ["flybrain"]
+depends = ["base"]

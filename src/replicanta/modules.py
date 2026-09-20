@@ -7,7 +7,7 @@ from pathlib import Path
 from lupa import lua_type
 
 from replicanta import config as project_config
-from replicanta import lua_sandbox, rdd, tendon_hand
+from replicanta import fly_brain, lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -232,6 +232,7 @@ class ModuleLoader:
                 "socratic-philosopher",
                 "visual-state",
                 "tendon-hand",
+                "fly-brain",
             ]
         enabled = set(enabled)
         discovered = [m for m in discovered if m.get("name") in enabled]
@@ -269,6 +270,13 @@ class ModuleLoader:
             "arm",
             tendon_hand.ArmService(
                 self.organism,
+                lua_lock=(self._host.lock if self._host is not None else None),
+            ),
+        )
+        self.registry.register(
+            "flybrain",
+            fly_brain.FlyBrainService(
+                root=self.root,
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
         )
