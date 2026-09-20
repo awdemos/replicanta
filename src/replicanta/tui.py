@@ -2504,6 +2504,8 @@ class OrganismApp(App):
             self._visualize_command(parts[1:])
         elif name == "/hand":
             self._hand_command(parts[1:])
+        elif name == "/brain":
+            self._brain_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
             self.show_toast(f"Invalid command: {name}")
@@ -2528,6 +2530,27 @@ class OrganismApp(App):
             result = svc.dispatch(args if args else ["state"])
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"hand command failed: {exc}", STYLE_WARN)
+            return
+        for line in str(result or "").splitlines():
+            self._append_log(line, STYLE_DIM)
+
+    def _brain_command(self, args):
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
+            return
+        svc = loader.registry.get("brain")
+        if svc is None:
+            self._append_log("fly-brain module not loaded (enable it via /modules)", STYLE_WARN)
+            return
+        commands = loader.registry.get("commands")
+        if commands is None:
+            self._append_log("command service unavailable", STYLE_WARN)
+            return
+        try:
+            result = commands.dispatch("/brain", args if args else [])
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"brain command failed: {exc}", STYLE_WARN)
             return
         for line in str(result or "").splitlines():
             self._append_log(line, STYLE_DIM)

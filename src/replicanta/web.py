@@ -496,6 +496,19 @@ class Glasshouse:
                 result = svc.dispatch(args if args else ["state"])
                 if result:
                     messages.extend(str(result).splitlines())
+            elif name == "/brain":
+                loader = getattr(self.org, "module_loader", None)
+                if loader is None:
+                    raise WebError("module loader unavailable")
+                svc = loader.registry.get("brain")
+                if svc is None:
+                    raise WebError("fly-brain module not loaded (enable it via /modules)")
+                commands = loader.registry.get("commands")
+                if commands is None:
+                    raise WebError("command service unavailable")
+                result = commands.dispatch("/brain", args if args else [])
+                if result:
+                    messages.extend(str(result).splitlines())
             elif name == "/persona":
                 messages.append(self._persona_command(args))
             elif name == "/modules":
