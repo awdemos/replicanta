@@ -698,7 +698,7 @@ class OrganismApp(App):
     #inner { overflow-y: auto; }
     #visual { padding: 1 2; }
     #doom { padding: 1 2; height: auto; }
-    #doom-thoughts { padding: 1 2; height: auto; color: $success; }
+    #doom-thoughts { padding: 1 2; height: auto; max-height: 6; color: $success; }
     #command-hints { height: auto; max-height: 4; padding: 0 1;
                       color: $text-muted; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
@@ -848,12 +848,12 @@ class OrganismApp(App):
                             markup=False,
                         )
                     with TabPane("doom", id="doom-pane"), VerticalScroll():
+                        yield Static("", id="doom-thoughts", markup=False)
                         yield Static(
                             "Run /doom start to play the nano-Doom mini-game.",
                             id="doom",
                             markup=False,
                         )
-                        yield Static("", id="doom-thoughts", markup=False)
         yield CommandHints("", id="command-hints")
         yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
