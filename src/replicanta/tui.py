@@ -3017,41 +3017,42 @@ class OrganismApp(App):
         svc = loader.registry.get("doom") if loader is not None else None
         if svc is None or not svc.running():
             return
-        if self._responding:
-            # another response is already in flight; reschedule
-            self._schedule_doom_turn()
-            return
-        # Ensure the voice backend is probed before spending a generation;
-        # the background mount probe may not have finished yet.
-        if llmclient.voice_online() is not True:
-            try:
-                llmclient.probe_voice()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("doom voice probe failed: %s", exc)
+        # Mark this turn as in-flight so later ticks don't stack another one.
+        self._responding = True
+        try:
+            # Ensure the voice backend is probed before spending a generation;
+            # the background mount probe may not have finished yet.
             if llmclient.voice_online() is not True:
-                self._set_doom_thought("inner voice offline — waiting for ollama before playing.")
+                try:
+                    llmclient.probe_voice()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("doom voice probe failed: %s", exc)
+                if llmclient.voice_online() is not True:
+                    self._set_doom_thought("inner voice offline — waiting for ollama before playing.")
+                    self._schedule_doom_turn()
+                    return
+
+            def on_token(tok):
+                self.call_from_thread(self._doom_token, tok)
+
+            reply = voice.doom_move(self.org, on_token=on_token)
+            if reply is None:
                 self._schedule_doom_turn()
                 return
-
-        def on_token(tok):
-            self.call_from_thread(self._doom_token, tok)
-
-        reply = voice.doom_move(self.org, on_token=on_token)
-        if reply is None:
+            doom_cmd = _extract_doom_command(reply)
+            if doom_cmd is not None:
+                self._append_log(
+                    f'doom.command("{doom_cmd}")',
+                    STYLE_SELF,
+                    stamp=True,
+                )
+                self._doom_command([doom_cmd])
+                with contextlib.suppress(Exception):
+                    self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
+            self._set_doom_thought(reply)
             self._schedule_doom_turn()
-            return
-        doom_cmd = _extract_doom_command(reply)
-        if doom_cmd is not None:
-            self._append_log(
-                f'doom.command("{doom_cmd}")',
-                STYLE_SELF,
-                stamp=True,
-            )
-            self._doom_command([doom_cmd])
-            with contextlib.suppress(Exception):
-                self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
-        self._set_doom_thought(reply)
-        self._schedule_doom_turn()
+        finally:
+            self._responding = False
 
     def _doom_token(self, tok):
         """Stream a single token into the DOOM thought pane during generation."""
