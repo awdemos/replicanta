@@ -512,9 +512,11 @@ def test_ask_user_fallback_uses_user_facts(org):
 
 
 def test_ask_user_offline_returns_fallback(org):
-    llmclient._voice.online = False
+    v = llmclient._voice()
+    v.online = False
     question = voice.ask_user(org)
     assert question.endswith("?") and "beyond the machine" not in question
+    v.online = None
 
 
 def test_ask_user_prompt_carries_a_seed(org, monkeypatch):

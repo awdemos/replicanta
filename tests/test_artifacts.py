@@ -61,7 +61,9 @@ def test_diary_entry_prompt_branch(tmp_path, monkeypatch):
 
 def test_diary_entry_fallback_offline(tmp_path):
     org = _organism(tmp_path)
-    llmclient._voice.online = False
+    v = llmclient._voice()
+    v.online = False
     entry = voice.diary_entry(org)
     assert entry
     assert "cycle" in entry or "mood" in entry
+    v.online = None

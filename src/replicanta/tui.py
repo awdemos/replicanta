@@ -845,7 +845,7 @@ class OrganismApp(App):
                             id="mud",
                             markup=False,
                         )
-                    with TabPane("doom", id="doom-pane"), VerticalScroll(), Vertical():
+                    with TabPane("doom", id="doom-pane"), VerticalScroll():
                         yield Static(
                             "Run /doom start to play the nano-Doom mini-game.",
                             id="doom",
@@ -2984,10 +2984,14 @@ class OrganismApp(App):
         if thoughts is None:
             return
         current = str(getattr(thoughts, "_Static__content", "") or "")
-        lines = [current, text] if current else [text]
+        lines = (current.splitlines() if current else []) + [f"> {line}" for line in text.splitlines() if line.strip()]
         # Keep the last ~20 lines so the pane stays readable.
         trimmed = "\n".join(lines[-20:])
         thoughts.update(trimmed)
+        # Also update the pending token area so the streaming reasoning is visible.
+        pending = self._safe_query("#pending", Static)
+        if pending is not None:
+            pending.update(trimmed)
 
     def _schedule_doom_turn(self):
         loader = getattr(self.org, "module_loader", None)
