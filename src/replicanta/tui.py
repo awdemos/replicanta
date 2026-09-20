@@ -610,7 +610,7 @@ def _extract_doom_command(reply):
     Also tolerate a bare move word as a fallback for sloppy model output."""
     if not reply:
         return None
-    valid = {"w", "a", "s", "d", "q", "e", "shoot"}
+    valid = {"w", "a", "s", "d", "q", "e", "shoot", "use"}
     for line in reply.strip().splitlines():
         line = line.strip()
         if line.startswith("doom.command("):

@@ -50,32 +50,40 @@ def test_move_and_bump(service):
     assert "hp=" in out2
 
 
-def test_shoot_reduces_ammo(service):
-    service.start("default")
-    before = service._game.player.ammo
+def test_shoot(service):
+    service.start("box")
+    # Turn toward the enemy so it's in the firing cone, then shoot.
+    for _ in range(10):
+        service.command("d")
+        if service.can_shoot():
+            break
+    before = service._game.entities[0].health
     out = service.command("shoot")
-    assert service._game.player.ammo == before - 1
-    assert "ammo=" in out
+    assert service._game.entities[0].health < before
+    assert "hp=" in out
 
 
 def test_turn(service):
     service.start("box")
-    start_angle = service._game.player.angle
-    service.command("e")
-    assert service._game.player.angle > start_angle
+    start_dir = service._game.player.dir.x
+    service.command("d")
+    assert service._game.player.dir.x != start_dir
 
 
 def test_enemy_hits_player(service):
     service.start("box")
-    # On the small box map, strafe/move toward the enemy until adjacent;
-    # the enemy turn should then bite the player. Weaker bite (1 hp) makes the
-    # loop longer, so just assert hp dropped below the starting 15.
-    for _ in range(12):
+    # On the small box map, turn toward the enemy, walk forward until adjacent;
+    # the enemy turn should then bite the player.
+    for _ in range(20):
         service.command("d")
-        if service._game.player.hp < 15:
+        if service.can_shoot():
             break
-    hp = service._game.player.hp
-    assert hp < 15
+    for _ in range(120):
+        service.command("w")
+        if service._game.player.health < nano_doom.PLAYER_MAX_HEALTH:
+            break
+    hp = service._game.player.health
+    assert hp < nano_doom.PLAYER_MAX_HEALTH
 
 
 def test_module_loads_and_registers_doom(tmp_path):
@@ -96,7 +104,7 @@ def test_module_slash_command_start(tmp_path):
     commands = loader.registry.get("commands")
     result = commands.dispatch("/doom", ["start"])
     assert "hp=" in result
-    assert "target=" in result
+    assert "enemies=" in result
 
 
 def test_module_slash_command_direct_move(tmp_path):
