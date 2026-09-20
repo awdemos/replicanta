@@ -944,6 +944,9 @@ class OrganismApp(App):
             # If no game is running, start one immediately when opening the pane.
             if not svc.running():
                 self._doom_command(["start"])
+            # Once the game is started, kick the entity into auto-play.
+            if svc.running():
+                self.set_timer(1.0, self._doom_take_turn)
             return
         # Already on the DOOM pane: pressing F10 again stops the game and leaves the pane.
         if svc.running():
