@@ -237,6 +237,57 @@ def _strip_special(text):
     return text.strip()
 
 
+def _generate_ollama_stream(prompt, model, timeout, temperature, on_token):
+    """POST to ollama /api/generate, streaming tokens via on_token callback."""
+    payload = json.dumps(
+        {
+            "model": model,
+            "prompt": prompt,
+            "stream": True,
+            "think": False,
+            "options": {
+                "num_predict": MAX_TOKENS,
+                "temperature": temperature,
+                "repeat_penalty": 1.1,
+                "stop": _STOP_TOKENS,
+            },
+        }
+    ).encode()
+    req = urllib.request.Request(ollama_url(), data=payload, headers={"Content-Type": "application/json"})
+    pieces = []
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
+        for raw in resp:
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw.decode())
+            except json.JSONDecodeError:
+                continue
+            if data.get("error"):
+                raise RuntimeError(data["error"])
+            token = data.get("response", "")
+            if token:
+                pieces.append(token)
+                on_token(token)
+    text = _strip_special(_strip_think("".join(pieces)))
+    return text
+
+
+def generate_stream(prompt, model, timeout=None, temperature=0.95, on_token=None):
+    """Streaming generation; returns final cleaned text after calling on_token."""
+    if timeout is None:
+        timeout = default_timeout()
+    if on_token is None:
+        return generate(prompt, model, timeout, temperature)
+    if llm_backend() == "llama_cpp":
+        # llama.cpp streaming left for a later pass; fall back to non-streaming.
+        text = generate(prompt, model, timeout, temperature)
+        for piece in re.findall(r"\S+\s*", text):
+            on_token(piece)
+        return text
+    return _generate_ollama_stream(prompt, model, timeout, temperature, on_token)
+
+
 def _generate_ollama(prompt, model, timeout, temperature):
     """POST to ollama /api/generate, non-streaming."""
     payload = json.dumps(

@@ -164,10 +164,11 @@ def form_goal(org, model=None, timeout=None, rng=None):
 
 
 def doom_move(org, model=None, timeout=None, rng=None, on_token=None):
-    """Generate one nano-doom move from the current frame.
+    """Generate one nano-doom move from the current frame, streaming tokens.
 
     Returns the raw model reply (which should contain a doom.command(...) line).
-    Does not record in the chat log so auto-play turns stay out of the conversation.
+    Tokens are streamed through ``on_token`` so the DOOM pane can show the
+    entity's reasoning as it is produced. Does not record in the chat log.
     """
     return _emerge(
         org,

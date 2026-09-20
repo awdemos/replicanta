@@ -2985,10 +2985,14 @@ class OrganismApp(App):
         thoughts = self._safe_query("#doom-thoughts", Static)
         if thoughts is None:
             return
+        # Render the final reply as one or more timestamped "> " lines.
+        stamped = "\n".join(
+            f"[{datetime.now(UTC).strftime('%H:%M:%S')}] > {line}" for line in text.splitlines() if line.strip()
+        )
         current = str(getattr(thoughts, "_Static__content", "") or "")
-        lines = (current.splitlines() if current else []) + [f"> {line}" for line in text.splitlines() if line.strip()]
-        # Keep the last ~20 lines so the pane stays readable.
-        trimmed = "\n".join(lines[-20:])
+        lines = (current.splitlines() if current else []) + stamped.splitlines()
+        # Keep the last ~8 entries so the pane stays readable.
+        trimmed = "\n".join(lines[-8:])
         thoughts.update(trimmed)
         # Also update the pending token area so the streaming reasoning is visible.
         pending = self._safe_query("#pending", Static)
@@ -3014,7 +3018,11 @@ class OrganismApp(App):
             # another response is already in flight; reschedule
             self._schedule_doom_turn()
             return
-        reply = voice.doom_move(self.org)
+
+        def on_token(tok):
+            self.call_from_thread(self._doom_token, tok)
+
+        reply = voice.doom_move(self.org, on_token=on_token)
         if reply is None:
             self._schedule_doom_turn()
             return
@@ -3030,6 +3038,23 @@ class OrganismApp(App):
                 self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
         self._set_doom_thought(reply)
         self._schedule_doom_turn()
+
+    def _doom_token(self, tok):
+        """Stream a single token into the DOOM thought pane during generation."""
+        thoughts = self._safe_query("#doom-thoughts", Static)
+        if thoughts is None:
+            return
+        current = str(getattr(thoughts, "_Static__content", "") or "")
+        # Strip the leading "> " marker while typing; it will be added when the turn finishes.
+        base = current.lstrip("> ") if current.startswith("> ") else current
+        updated = (base + tok).replace("\n", " ")
+        # Clamp to a reasonable window so the pane doesn't overflow.
+        if len(updated) > 200:
+            updated = "..." + updated[-197:]
+        thoughts.update("> " + updated)
+        pending = self._safe_query("#pending", Static)
+        if pending is not None:
+            pending.update("> " + updated)
 
     # -- group chat -------------------------------------------------------
     GROUP_STYLES: ClassVar[list[str]] = [

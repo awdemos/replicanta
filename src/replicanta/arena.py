@@ -209,7 +209,7 @@ class ThoughtArena:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"task": task, "user_message": user_message, "question": question}
         try:
-            result = self._quick_take(org, snapshot, build, model, timeout, temperature)
+            result = self._quick_take(org, snapshot, build, model, timeout, temperature, on_token=on_token)
         except NoUsableCandidateError:
             return self._fallback(org.store, snapshot, user_message, fallback)
         except json.JSONDecodeError:
@@ -231,19 +231,26 @@ class ThoughtArena:
             }
             for skill in snapshot.get("relevant_skills", []):
                 skill_store.record_use(skill.name, cycle=org.store.cycle, outcome=outcome)
-        if on_token is not None:
-            for piece in re.findall(r"\S+\s*", result):
-                on_token(piece)
         return result
 
-    # -- debate ----------------------------------------------------------
-    def _quick_take(self, org, snapshot, build, model, timeout, temperature):
+    # -- debate helpers --------------------------------------------------
+    def _quick_take(self, org, snapshot, build, model, timeout, temperature, on_token=None):
         """One proposer, no debate: a single generation cleaned down to
         the candidate. Empty or degenerate output fails the take so the
         caller falls back, exactly like a failed debate."""
         base = narration.build_prompt(snapshot, **build)
-        draft = self._generate(self._proposal(base), model, timeout, temperature, org=org)
-        draft = _clean_candidate(draft)
+        if on_token is not None:
+            # Stream tokens into the UI while generating.
+            def _on_token(tok):
+                on_token(tok)
+
+            draft = llmclient.generate_stream(
+                self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token
+            )
+            draft = _clean_candidate(draft)
+        else:
+            draft = self._generate(self._proposal(base), model, timeout, temperature, org=org)
+            draft = _clean_candidate(draft)
         if not draft:
             raise NoUsableCandidateError("quick take produced no usable candidate")
         return draft
