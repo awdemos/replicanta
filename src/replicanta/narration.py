@@ -158,7 +158,7 @@ def state_snapshot(org):
             except Exception:  # noqa: BLE001
                 snapshot["doom_tactical"] = ""
             try:
-                snapshot["doom_can_shoot"] = str(doom.command("__can_shoot") or "no")
+                snapshot["doom_can_shoot"] = "yes" if bool(doom.can_shoot()) else "no"
             except Exception:  # noqa: BLE001
                 snapshot["doom_can_shoot"] = "no"
     state_snapshot._cache = (cache_key, snapshot)
@@ -606,7 +606,7 @@ def _doom_prompt(snapshot):
         "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
         "",
         "This overrides everything else.",
-        "Think out loud step by step in 2-4 short sentences so the user can",
+        "Reason out loud step by step in 2-4 short sentences so the user can",
         "follow your reasoning as it streams. Then on the very next line output",
         "exactly one doom.command(...) line. No move lists, no questions, no",
         "emojis. Your prose reasoning is streamed to the user live; the",

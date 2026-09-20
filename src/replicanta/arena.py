@@ -12,6 +12,7 @@ whose output contract a rogue candidate would break). Any ollama failure
 at any stage falls back to the local deterministic answers, so the
 organism always has a voice."""
 
+import logging
 import json
 import os
 import random
@@ -20,6 +21,8 @@ import urllib.error
 
 from replicanta import activity, llmclient, narration
 from replicanta.llmclient import clean_candidate as _clean_candidate
+
+logger = logging.getLogger(__name__)
 
 VOTE_PREFIX = "VOTE: "
 VOTE_RE = re.compile(r"(?:^|\b)VOTE\s*[:=-]?\s*([12])\b", re.IGNORECASE)
@@ -239,18 +242,22 @@ class ThoughtArena:
         the candidate. Empty or degenerate output fails the take so the
         caller falls back, exactly like a failed debate."""
         base = narration.build_prompt(snapshot, **build)
-        if on_token is not None:
-            # Stream tokens into the UI while generating.
-            def _on_token(tok):
-                on_token(tok)
+        try:
+            if on_token is not None:
+                # Stream tokens into the UI while generating.
+                def _on_token(tok):
+                    on_token(tok)
 
-            draft = llmclient.generate_stream(
-                self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token, max_tokens=60
-            )
-            draft = _clean_candidate(draft)
-        else:
-            draft = self._generate(self._proposal(base), model, timeout, temperature, org=org)
-            draft = _clean_candidate(draft)
+                draft = llmclient.generate_stream(
+                    self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token, max_tokens=80
+                )
+                draft = _clean_candidate(draft)
+            else:
+                draft = self._generate(self._proposal(base), model, timeout, temperature, org=org)
+                draft = _clean_candidate(draft)
+        except Exception:
+            logger.exception("_quick_take generate failed")
+            raise
         if not draft:
             raise NoUsableCandidateError("quick take produced no usable candidate")
         return draft

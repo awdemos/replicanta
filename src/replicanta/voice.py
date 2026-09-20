@@ -1,9 +1,9 @@
 """Voice: the organism's public utterance API. Every manifest utterance —
-idle thoughts, replies, questions, self-talk, goals, diary entries,
-reflections — is assembled here by running the thought arena (arena.py)
-over narration.py's prompts and fallbacks. This module is the seam that
-keeps the dependency graph acyclic: arena imports narration (prompts),
-voice imports both, narration imports neither."""
+idle thoughts, replies, questions to the user, self-talk, goals, diary entries,
+reflections — is assembled here by running the thought arena (arena.py) over
+narration.py's prompts and fallbacks. This module is the seam that keeps the
+dependency graph acyclic: arena imports narration (prompts), voice imports both,
+narration imports neither."""
 
 from replicanta import extensions, narration, telemetry
 from replicanta.arena import ThoughtArena

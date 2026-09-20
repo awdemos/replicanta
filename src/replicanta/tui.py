@@ -3042,7 +3042,14 @@ class OrganismApp(App):
                     return
 
             def on_token(tok):
-                self.call_from_thread(self._doom_token, tok)
+                # voice.doom_move may run in the main UI thread (auto-play
+                # timer) or in a background worker (_maybe_respond). When we are
+                # already in the app's thread, call_from_thread is not allowed,
+                # so fall back to a direct update.
+                try:
+                    self.call_from_thread(self._doom_token, tok)
+                except RuntimeError:
+                    self._doom_token(tok)
 
             reply = voice.doom_move(self.org, on_token=on_token)
             if reply is None:
@@ -3060,6 +3067,8 @@ class OrganismApp(App):
                     self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
             self._set_doom_thought(reply)
             self._schedule_doom_turn()
+        except Exception:
+            logger.exception("DOOM turn failed")
         finally:
             self._responding = False
 
