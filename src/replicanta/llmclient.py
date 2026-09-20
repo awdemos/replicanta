@@ -235,8 +235,27 @@ def _strip_special(text):
     return text.strip()
 
 
-def _generate_ollama_stream(prompt, model, timeout, temperature, on_token):
+def generate_stream(prompt, model, timeout=None, temperature=0.95, on_token=None, max_tokens=None):
+    """Streaming generation; returns final cleaned text after calling on_token."""
+    if timeout is None:
+        timeout = default_timeout()
+    if on_token is None:
+        return generate(prompt, model, timeout, temperature)
+    if max_tokens is None:
+        max_tokens = MAX_TOKENS
+    if llm_backend() == "llama_cpp":
+        # llama.cpp streaming left for a later pass; fall back to non-streaming.
+        text = generate(prompt, model, timeout, temperature)
+        for piece in re.findall(r"\S+\s*", text):
+            on_token(piece)
+        return text
+    return _generate_ollama_stream(prompt, model, timeout, temperature, on_token, max_tokens)
+
+
+def _generate_ollama_stream(prompt, model, timeout, temperature, on_token, max_tokens=None):
     """POST to ollama /api/generate, streaming tokens via on_token callback."""
+    if max_tokens is None:
+        max_tokens = MAX_TOKENS
     payload = json.dumps(
         {
             "model": model,
@@ -244,7 +263,7 @@ def _generate_ollama_stream(prompt, model, timeout, temperature, on_token):
             "stream": True,
             "think": False,
             "options": {
-                "num_predict": MAX_TOKENS,
+                "num_predict": max_tokens,
                 "temperature": temperature,
                 "repeat_penalty": 1.1,
                 "stop": _STOP_TOKENS,
@@ -269,21 +288,6 @@ def _generate_ollama_stream(prompt, model, timeout, temperature, on_token):
                 on_token(token)
     text = _strip_special(_strip_think("".join(pieces)))
     return text
-
-
-def generate_stream(prompt, model, timeout=None, temperature=0.95, on_token=None):
-    """Streaming generation; returns final cleaned text after calling on_token."""
-    if timeout is None:
-        timeout = default_timeout()
-    if on_token is None:
-        return generate(prompt, model, timeout, temperature)
-    if llm_backend() == "llama_cpp":
-        # llama.cpp streaming left for a later pass; fall back to non-streaming.
-        text = generate(prompt, model, timeout, temperature)
-        for piece in re.findall(r"\S+\s*", text):
-            on_token(piece)
-        return text
-    return _generate_ollama_stream(prompt, model, timeout, temperature, on_token)
 
 
 def _generate_ollama(prompt, model, timeout, temperature):

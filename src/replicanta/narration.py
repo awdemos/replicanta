@@ -599,7 +599,6 @@ def _lines_mud_decision():
 
 def _doom_prompt(snapshot):
     """Standalone DOOM directive used as a fast-path in build_prompt."""
-    status = snapshot.get("doom_status", "")
     tactical = snapshot.get("doom_tactical", "")
     can_shoot = snapshot.get("doom_can_shoot", "no")
     lines = [
@@ -607,19 +606,20 @@ def _doom_prompt(snapshot):
         "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
         "",
         "This overrides everything else.",
-        "Reason out loud in one short sentence (10-25 words), then on the",
-        "very next line output exactly one doom.command(...) line.",
-        "No move lists, no questions, no emojis. Your prose reasoning goes",
-        "to the user as a self-reasoning stream; the command line is parsed",
-        "and executed by the game.",
+        "Think out loud step by step in 2-4 short sentences so the user can",
+        "follow your reasoning as it streams. Then on the very next line output",
+        "exactly one doom.command(...) line. No move lists, no questions, no",
+        "emojis. Your prose reasoning is streamed to the user live; the",
+        "command line is parsed and executed by the game.",
         "",
         "Example:",
-        "The enemy is close and straight ahead, so I should move toward it.",
+        "The enemy is close and straight ahead. I should close the gap before",
+        "it fires, then I'll be in range to shoot.",
         'doom.command("w")',
         "",
         "Valid commands: w, s, a, d, q, e, shoot, use.",
         "",
-        "Tactical summary (use this instead of reading ASCII art):",
+        "Tactical summary:",
     ]
     if tactical:
         lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
@@ -628,18 +628,13 @@ def _doom_prompt(snapshot):
     lines.append(f"  shoot would hit right now: {can_shoot}")
     lines += [
         "",
-        "Current frame:",
-    ]
-    lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
-    lines += [
-        "",
-        "Now go — reason, then command.",
+        "Now go — reason out loud, then command.",
     ]
     return lines
 
 
 def _doom_move_lines():
-    return _doom_prompt({"doom_status": "", "doom_tactical": "", "doom_can_shoot": "no"})[:-2]
+    return _doom_prompt({"doom_status": "", "doom_tactical": "", "doom_can_shoot": "no"})
 
 
 _TASK_LINES = {

@@ -698,7 +698,7 @@ class OrganismApp(App):
     #inner { overflow-y: auto; }
     #visual { padding: 1 2; }
     #doom { padding: 1 2; height: auto; }
-    #doom-thoughts { padding: 1 2; height: auto; max-height: 6; color: $success; }
+    #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
     #command-hints { height: auto; max-height: 4; padding: 0 1;
                       color: $text-muted; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
@@ -946,7 +946,7 @@ class OrganismApp(App):
                 self._doom_command(["start"])
             # Once the game is started, kick the entity into auto-play.
             if svc.running():
-                self.set_timer(1.0, self._doom_take_turn)
+                self.set_timer(0.3, self._doom_take_turn)
             return
         # Already on the DOOM pane: pressing F10 again stops the game and leaves the pane.
         if svc.running():
@@ -993,7 +993,7 @@ class OrganismApp(App):
             self._doom_command([cmd])
         # After the human moves, let the entity respond and take its turn.
         if svc.running():
-            self.set_timer(0.5, self._doom_take_turn)
+            self.set_timer(0.3, self._doom_take_turn)
 
     def _doom_cancel_auto(self):
         """Cancel pending auto-play timers so manual control wins."""
@@ -1187,26 +1187,28 @@ class OrganismApp(App):
             topbar.update(text)
 
     def _refresh_sidebar(self):
-        """Rebuild the nursery sidebar, highlighting the current organism.
-
-        For demo recordings the sidebar is filtered to a single target
-        organism so the GIF stays focused on the entity playing DOOM.
-        """
+        """Rebuild the nursery sidebar, highlighting the current organism."""
         lv = self._safe_query("#sidebar-list", ListView)
         if not isinstance(lv, ListView):
             return
         lv.clear()
         current = self.org.dir_path.name
         names = nursery.list_organisms(self.root)
-        # DEMO FILTER: only show the target organism in the sidebar.
-        target = "fruitflybrain"
-        names = [n for n in names if n == target]
         if not names:
             lv.append(ListItem(Label("(no organisms)")))
             return
+        groups = nursery.load_groups(self.root)
+        grouped = {m for members in groups.values() for m in members}
         for name in names:
+            if name in grouped:
+                continue
             marker = "● " if name == current else "  "
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
+        for gname in sorted(groups):
+            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
+            for member in groups[gname]:
+                marker = "● " if member == current else "  "
+                lv.append(ListItem(Label(f"   {marker}{member}"), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection opens a dropdown (left click or Enter): an
@@ -2793,9 +2795,9 @@ class OrganismApp(App):
         # can watch its streaming thought process. Multiple staggered timers
         # bootstrap auto-play even if the first generation is slow or fails.
         if args and args[0] == "start" and svc.running():
-            self.set_timer(0.5, self._doom_take_turn)
-            self.set_timer(2.5, self._doom_take_turn)
-            self.set_timer(4.5, self._doom_take_turn)
+            self.set_timer(0.2, self._doom_take_turn)
+            self.set_timer(0.7, self._doom_take_turn)
+            self.set_timer(1.5, self._doom_take_turn)
 
     def _refresh_doom(self):
         """Refresh the DOOM pane when a game is running."""
@@ -3016,8 +3018,8 @@ class OrganismApp(App):
             return
         if self._responding or self._self_talking:
             return
-        # small delay so the UI is readable and human input can interleave
-        self.set_timer(2.0, self._doom_take_turn)
+        # short delay so the UI is readable and human input can interleave
+        self.set_timer(0.3, self._doom_take_turn)
 
     def _doom_take_turn(self):
         loader = getattr(self.org, "module_loader", None)
@@ -3067,12 +3069,15 @@ class OrganismApp(App):
         if thoughts is None:
             return
         current = str(getattr(thoughts, "_Static__content", "") or "")
-        # Strip the leading "> " marker while typing; it will be added when the turn finishes.
-        base = current.lstrip("> ") if current.startswith("> ") else current
+        # Keep only the latest streaming line; final reply will replace it with stamped lines.
+        if current.startswith("> "):
+            base = current[2:]
+        else:
+            base = ""
         updated = (base + tok).replace("\n", " ")
-        # Clamp to a reasonable window so the pane doesn't overflow.
-        if len(updated) > 200:
-            updated = "..." + updated[-197:]
+        # Allow a longer reasoning window now that the pane is taller.
+        if len(updated) > 400:
+            updated = "..." + updated[-397:]
         thoughts.update("> " + updated)
         pending = self._safe_query("#pending", Static)
         if pending is not None:

@@ -245,7 +245,7 @@ class ThoughtArena:
                 on_token(tok)
 
             draft = llmclient.generate_stream(
-                self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token
+                self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token, max_tokens=60
             )
             draft = _clean_candidate(draft)
         else:
