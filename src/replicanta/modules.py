@@ -7,7 +7,7 @@ from pathlib import Path
 from lupa import lua_type
 
 from replicanta import config as project_config
-from replicanta import fly_brain, lua_sandbox, rdd, tendon_hand
+from replicanta import fly_brain, lua_sandbox, nano_doom, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,8 @@ class CommandService:
 
     Handlers registered from Lua receive args as a Lua table, while callers
     pass plain Python lists. Dispatch coerces the list via the Lua runtime
-    when the handler is a lupa function.
+    that originally registered the handler so modules can safely use their
+    own Lua runtimes without cross-runtime object leakage.
     """
 
     def __init__(self, loader=None):
@@ -93,19 +94,30 @@ class CommandService:
         self._loader = loader
 
     def register(self, name, handler):
-        self._commands[name] = handler
+        """Store the handler along with the Lua runtime it belongs to."""
+        runtime = None
+        if self._loader is not None and lua_type(handler) == "function":
+            runtime = getattr(self._loader, "_current_lua", None)
+        self._commands[name] = (handler, runtime)
 
-    def _table_from(self, args):
-        if self._loader is None:
-            raise RuntimeError("Lua command handler without the module loader's Lua runtime")
-        return self._loader._runtime().table_from(args)
+    def _table_from(self, runtime, args):
+        if runtime is None:
+            if self._loader is None:
+                raise RuntimeError("Lua command handler without the module loader's Lua runtime")
+            runtime = self._loader._runtime()
+        return runtime.table_from(args)
 
     def dispatch(self, name, args):
-        handler = self._commands.get(name)
-        if handler is None:
+        item = self._commands.get(name)
+        if item is None:
             return None
+        if isinstance(item, tuple):
+            handler, runtime = item
+        else:
+            # Legacy callers stored raw handlers directly.
+            handler, runtime = item, None
         if lua_type(handler) == "function":
-            return handler(self._table_from(args))
+            return handler(self._table_from(runtime, args))
         return handler(args)
 
 
@@ -233,6 +245,7 @@ class ModuleLoader:
                 "visual-state",
                 "tendon-hand",
                 "fly-brain",
+                "nano-doom",
             ]
         enabled = set(enabled)
         discovered = [m for m in discovered if m.get("name") in enabled]
@@ -280,6 +293,13 @@ class ModuleLoader:
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
         )
+        self.registry.register(
+            "doom",
+            nano_doom.DoomService(
+                organism=self.organism,
+                lua_lock=(self._host.lock if self._host is not None else None),
+            ),
+        )
 
     def _init_module(self, manifest):
         name = manifest.get("name")
@@ -289,6 +309,10 @@ class ModuleLoader:
             return
         try:
             lua = self._runtime()
+            # Track the runtime that will own this module's Lua callbacks
+            # (command handlers, event subscriptions) so dispatch can build
+            # arguments in the correct runtime and avoid cross-runtime leaks.
+            self._current_lua = lua
             lua_sandbox.sandboxed_execute(lua, init_path.read_text(), name=name)
             init = lua.globals()["init"]
             if init is None:
@@ -299,17 +323,23 @@ class ModuleLoader:
         except Exception as exc:  # noqa: BLE001
             self.warnings.append(f"{name}: init failed: {exc}")
             return
+        finally:
+            self._current_lua = None
         self.modules[name] = manifest
 
     def _runtime(self):
-        if self._host is not None:
-            return self._host.lua
-        if self._lua is None:
-            self._lua = lua_sandbox.build_runtime()
-        return self._lua
+        # Each module gets its own hardened Lua runtime.  Sharing a runtime
+        # across modules caused lupa to confuse local variables / attribute
+        # lookups after several modules loaded, breaking later modules (e.g.
+        # nano-doom failing with "'DoomService' object has no attribute
+        # 'register'").  Per-module runtimes avoid that state leakage.
+        return lua_sandbox.build_runtime()
 
     def _build_context(self, module_name):
-        lua = self._runtime()
+        # Use the runtime assigned to the module currently being initialised
+        # so the context table lives in the same Lua world as the init()
+        # function that receives it.
+        lua = self._current_lua or self._runtime()
         return lua.table(
             module_name=module_name,
             log=lambda msg: self.emit(str(msg)),
