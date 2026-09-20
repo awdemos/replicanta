@@ -11,7 +11,6 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-
 LOAD_LOW = 0.5  # load1/ncpu below this -> "low"
 LOAD_MID = 1.0  # load1/ncpu below this -> "mid", else "high"
 MEM_LOW = 50.0  # percent used below this -> "low"
