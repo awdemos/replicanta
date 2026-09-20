@@ -697,6 +697,8 @@ class OrganismApp(App):
     #mind, #memory, #inner { padding: 1 2; }
     #inner { overflow-y: auto; }
     #visual { padding: 1 2; }
+    #doom { padding: 1 2; height: auto; }
+    #doom-thoughts { padding: 1 2; height: auto; color: $success; }
     #command-hints { height: auto; max-height: 4; padding: 0 1;
                       color: $text-muted; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
