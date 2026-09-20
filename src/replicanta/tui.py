@@ -1187,28 +1187,26 @@ class OrganismApp(App):
             topbar.update(text)
 
     def _refresh_sidebar(self):
-        """Rebuild the nursery sidebar, highlighting the current organism."""
+        """Rebuild the nursery sidebar, highlighting the current organism.
+
+        For demo recordings the sidebar is filtered to a single target
+        organism so the GIF stays focused on the entity playing DOOM.
+        """
         lv = self._safe_query("#sidebar-list", ListView)
         if not isinstance(lv, ListView):
             return
         lv.clear()
         current = self.org.dir_path.name
         names = nursery.list_organisms(self.root)
+        # DEMO FILTER: only show the target organism in the sidebar.
+        target = "fruitflybrain"
+        names = [n for n in names if n == target]
         if not names:
             lv.append(ListItem(Label("(no organisms)")))
             return
-        groups = nursery.load_groups(self.root)
-        grouped = {m for members in groups.values() for m in members}
         for name in names:
-            if name in grouped:
-                continue
             marker = "● " if name == current else "  "
             lv.append(ListItem(Label(f"{marker}{name}"), name=name))
-        for gname in sorted(groups):
-            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}", classes="group-header"))
-            for member in groups[gname]:
-                marker = "● " if member == current else "  "
-                lv.append(ListItem(Label(f"  {marker}{member}"), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection opens a dropdown (left click or Enter): an
@@ -2792,9 +2790,12 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001
             logger.warning("doom observe failed: %s", exc)
         # After starting, wake the entity so it immediately plays and the user
-        # can watch its streaming thought process.
+        # can watch its streaming thought process. Multiple staggered timers
+        # bootstrap auto-play even if the first generation is slow or fails.
         if args and args[0] == "start" and svc.running():
             self.set_timer(0.5, self._doom_take_turn)
+            self.set_timer(2.5, self._doom_take_turn)
+            self.set_timer(4.5, self._doom_take_turn)
 
     def _refresh_doom(self):
         """Refresh the DOOM pane when a game is running."""
@@ -3211,6 +3212,15 @@ def main():
     import argparse
 
     telemetry.init_telemetry()
+    # Send warnings and errors to a rotating log so we can diagnose TUI
+    # behavior (especially background workers) without cluttering the terminal.
+    log_path = Path.home() / ".local" / "share" / "replicanta" / "replicanta.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=str(log_path),
+        level=logging.WARNING,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
 
     parser = argparse.ArgumentParser(description="Replicanta TUI")
     parser.add_argument("--dir", default=str(Path(__file__).parent))
