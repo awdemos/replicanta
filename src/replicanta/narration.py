@@ -603,7 +603,7 @@ def _doom_move_lines():
         "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
         "",
         "This overrides everything else. Start your reply with exactly one",
-        "doom.command(...) line on its own line. Then one short sentence.",
+        "doom.command(...) line on its own first line. Then one short sentence.",
         "No other commands. No questions. No emojis.",
     ]
 
@@ -909,6 +909,8 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     lines += [""]
     if task in _TASK_LINES:
         lines += _TASK_LINES[task]()
+    elif task == "doom":
+        lines += doom_lines()
     elif task == "ask_user":
         lines += _lines_ask_user(snapshot)
     elif task == "self_ask":
