@@ -3018,6 +3018,17 @@ class OrganismApp(App):
             # another response is already in flight; reschedule
             self._schedule_doom_turn()
             return
+        # Ensure the voice backend is probed before spending a generation;
+        # the background mount probe may not have finished yet.
+        if llmclient.voice_online() is not True:
+            try:
+                llmclient.probe_voice()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("doom voice probe failed: %s", exc)
+            if llmclient.voice_online() is not True:
+                self._set_doom_thought("inner voice offline — waiting for ollama before playing.")
+                self._schedule_doom_turn()
+                return
 
         def on_token(tok):
             self.call_from_thread(self._doom_token, tok)
