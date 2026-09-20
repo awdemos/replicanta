@@ -131,21 +131,19 @@ class _Voice:
         self.failures = 0
 
 
-_VOICE_LOCAL = threading.local()
+_VOICE = _Voice()
+_VOICE_LOCK = threading.Lock()
 
 
 def _voice():
-    try:
-        return _VOICE_LOCAL.voice
-    except AttributeError:
-        v = _Voice()
-        _VOICE_LOCAL.voice = v
-        return v
+    return _VOICE
 
 
 def reset_voice():
-    """Forget the cached voice state for the current thread (test isolation)."""
-    _VOICE_LOCAL.voice = _Voice()
+    """Forget the cached voice state (test isolation, manual reset)."""
+    with _VOICE_LOCK:
+        global _VOICE
+        _VOICE = _Voice()
 
 
 def _tags_url():
