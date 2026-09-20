@@ -163,7 +163,22 @@ def form_goal(org, model=None, timeout=None, rng=None):
     )
 
 
-# -- artifacts ----------------------------------------------------------------
+def doom_move(org, model=None, timeout=None, rng=None, on_token=None):
+    """Generate one nano-doom move from the current frame.
+
+    Returns the raw model reply (which should contain a doom.command(...) line).
+    Does not record in the chat log so auto-play turns stay out of the conversation.
+    """
+    return _emerge(
+        org,
+        task="doom",
+        model=model,
+        timeout=timeout,
+        rng=rng,
+        on_token=on_token,
+        quick=True,
+        temperature=0.2,
+    )
 
 
 def diary_entry(org, model=None, timeout=None, rng=None):
@@ -172,7 +187,7 @@ def diary_entry(org, model=None, timeout=None, rng=None):
         org,
         task="diary",
         structured=True,
-        fallback=narration.fallback_diary_entry,
+        fallback=lambda snap: narration.fallback_diary_entry(snap),
         model=model,
         timeout=timeout,
         rng=rng,
@@ -187,7 +202,7 @@ def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
     return _emerge(
         org,
         task="ask_user",
-        fallback=narration.fallback_ask_user,
+        fallback=lambda snap: narration.fallback_ask_user_legacy(snap),
         on_token=on_token,
         model=model,
         timeout=timeout,

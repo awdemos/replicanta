@@ -988,11 +988,7 @@ class OrganismApp(App):
             self._doom_command([cmd])
         # After the human moves, let the entity respond and take its turn.
         if svc.running():
-            self._maybe_respond(
-                f"you are playing nano-doom. the human just sent command '{cmd}'. what is your next move? start with exactly one doom.command(...) line.",
-                quick=True,
-                temperature=0.2,
-            )
+            self.set_timer(0.5, self._doom_take_turn)
 
     def _doom_cancel_auto(self):
         """Cancel pending auto-play timers so manual control wins."""
@@ -2790,11 +2786,7 @@ class OrganismApp(App):
         # After starting, wake the entity so it immediately plays and the user
         # can watch its streaming thought process.
         if args and args[0] == "start" and svc.running():
-            self._maybe_respond(
-                "you are now playing nano-doom. take the first move. start with exactly one doom.command(...) line.",
-                quick=True,
-                temperature=0.2,
-            )
+            self.set_timer(0.5, self._doom_take_turn)
 
     def _refresh_doom(self):
         """Refresh the DOOM pane when a game is running."""
@@ -3016,11 +3008,22 @@ class OrganismApp(App):
             # another response is already in flight; reschedule
             self._schedule_doom_turn()
             return
-        self._maybe_respond(
-            "you are playing nano-doom. the game just updated. look at the current frame and choose your next move. start with exactly one doom.command(...) line.",
-            quick=True,
-            temperature=0.2,
-        )
+        reply = voice.doom_move(self.org)
+        if reply is None:
+            self._schedule_doom_turn()
+            return
+        doom_cmd = _extract_doom_command(reply)
+        if doom_cmd is not None:
+            self._append_log(
+                f'doom.command("{doom_cmd}")',
+                STYLE_SELF,
+                stamp=True,
+            )
+            self._doom_command([doom_cmd])
+            with contextlib.suppress(Exception):
+                self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
+        self._set_doom_thought(reply)
+        self._schedule_doom_turn()
 
     # -- group chat -------------------------------------------------------
     GROUP_STYLES: ClassVar[list[str]] = [

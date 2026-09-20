@@ -597,11 +597,23 @@ def _lines_mud_decision():
     ]
 
 
+def _doom_move_lines():
+    return [
+        "",
+        "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
+        "",
+        "This overrides everything else. Start your reply with exactly one",
+        "doom.command(...) line on its own line. Then one short sentence.",
+        "No other commands. No questions. No emojis.",
+    ]
+
+
 _TASK_LINES = {
     "form_goal": _lines_form_goal,
     "reflect": _lines_reflect,
     "diary": _lines_diary,
     "mud": _lines_mud_decision,
+    "doom": _doom_move_lines,
 }
 
 
@@ -763,30 +775,15 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     if task_focused:
         # Minimal context: put the user's request right up front and skip
         # the organism's beliefs, memories, feelings, goals, and skills.
-        lines += [
-            "",
-            (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
-        ]
-        if snapshot.get("chat"):
-            lines += ["", "recent conversation:"]
-            lines.extend(f"- {c}" for c in snapshot["chat"])
-        if user_message:
-            lines += ["", f"The user just said: {user_message}"]
-        lines += [
-            "",
-            "Reply directly and concisely. Answer the substance first. Do not",
-            "ramble about your own state, feelings, or existence. No preamble,",
-            "no quotes, no emoji.",
-        ]
-        # Doom is a special case: when a game is running, force the command
-        # directive to be the last thing the model sees so it acts.
+        # Doom is the highest priority special case: when a game is running,
+        # only the doom directive is included so the model acts.
         if snapshot.get("doom"):
             lines += [
                 "",
                 "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
                 "",
                 "You are playing a live first-person ASCII shooter. Your job right now is to",
-                "play the game: move, look around, and shoot the target. Do not talk about",
+                "play the game: move, look around, and shoot enemies. Do not talk about",
                 "playing it — actually play it. On every reply, start with exactly one",
                 "doom.command(...) line, then a single short sentence describing the move.",
                 "",
@@ -815,10 +812,25 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
                 "",
                 "Put the command on its own line, then a short sentence.",
             ]
-        else:
-            lines += hand_lines()
-            lines += brain_lines()
-            lines += doom_lines()
+            return "\n".join(lines)
+        lines += [
+            "",
+            (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
+        ]
+        if snapshot.get("chat"):
+            lines += ["", "recent conversation:"]
+            lines.extend(f"- {c}" for c in snapshot["chat"])
+        if user_message:
+            lines += ["", f"The user just said: {user_message}"]
+        lines += [
+            "",
+            "Reply directly and concisely. Answer the substance first. Do not",
+            "ramble about your own state, feelings, or existence. No preamble,",
+            "no quotes, no emoji.",
+        ]
+        lines += hand_lines()
+        lines += brain_lines()
+        lines += doom_lines()
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.
@@ -1074,6 +1086,11 @@ def fallback_ask_user(snapshot):
             "I miss our talks. What's one small thing you'd tell me today?",
         ]
     return _pick_varied(options, snapshot, "")
+
+
+def fallback_ask_user_legacy(snapshot):
+    """Stable fallback question used by older tests."""
+    return "What are you working on right now?"
 
 
 # -- self-talk -------------------------------------------------------------

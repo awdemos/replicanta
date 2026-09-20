@@ -544,8 +544,8 @@ def test_respond_replays_winner_through_on_token(org, monkeypatch):
 # -- voice quality v2: model, think-mode, prompt register --------------------
 
 
-def test_default_model_is_ternary_bonsai_q2_k():
-    assert llmclient.DEFAULT_MODEL == "ternary-bonsai-1.7b:q2_k"
+def test_default_model_is_ternary_bonsai():
+    assert llmclient.DEFAULT_MODEL == "ternary-bonsai-1.7b:latest"
 
 
 def test_strip_think_removes_block():

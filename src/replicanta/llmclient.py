@@ -26,7 +26,7 @@ from replicanta import extensions, telemetry
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "ternary-bonsai-1.7b:q2_k"
+DEFAULT_MODEL = "ternary-bonsai-1.7b:latest"
 MAX_TOKENS = 180
 
 
