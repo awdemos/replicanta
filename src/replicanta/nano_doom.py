@@ -738,6 +738,8 @@ class DoomService:
             return self.tactical()
         if cmd == "__can_shoot":
             return "yes" if self.can_shoot() else "no"
+        if cmd == "start":
+            return self.start()
         if self._game is None:
             raise RuntimeError("no game running")
         return self._game.tick(cmd)

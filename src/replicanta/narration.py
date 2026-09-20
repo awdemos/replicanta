@@ -597,8 +597,12 @@ def _lines_mud_decision():
     ]
 
 
-def _doom_move_lines():
-    return [
+def _doom_prompt(snapshot):
+    """Standalone DOOM directive used as a fast-path in build_prompt."""
+    status = snapshot.get("doom_status", "")
+    tactical = snapshot.get("doom_tactical", "")
+    can_shoot = snapshot.get("doom_can_shoot", "no")
+    lines = [
         "",
         "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
         "",
@@ -614,7 +618,28 @@ def _doom_move_lines():
         'doom.command("w")',
         "",
         "Valid commands: w, s, a, d, q, e, shoot, use.",
+        "",
+        "Tactical summary (use this instead of reading ASCII art):",
     ]
+    if tactical:
+        lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
+    else:
+        lines.append("  (no target data)")
+    lines.append(f"  shoot would hit right now: {can_shoot}")
+    lines += [
+        "",
+        "Current frame:",
+    ]
+    lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
+    lines += [
+        "",
+        "Now go — reason, then command.",
+    ]
+    return lines
+
+
+def _doom_move_lines():
+    return _doom_prompt({"doom_status": "", "doom_tactical": "", "doom_can_shoot": "no"})[:-2]
 
 
 _TASK_LINES = {
@@ -630,6 +655,12 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     """Assemble the inner-voice prompt for one task: 'idle' thought,
     'reply' (user_message), 'ask_user', 'self_ask', 'self_answer'
     (question), 'form_goal', 'diary', 'reflect' or 'mud'."""
+    # Doom is the highest-priority special case: when a game is running,
+    # the model must output a move, regardless of persona, state, or other
+    # modules. This fast-path keeps the prompt short and the format strict.
+    if task == "doom" or snapshot.get("doom"):
+        return "\n".join(_doom_prompt(snapshot))
+
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
     task_focused = bool(snapshot.get("persona")) and not faded and not dreaming
@@ -734,50 +765,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     def doom_lines():
         if not snapshot.get("doom"):
             return []
-        status = snapshot.get("doom_status", "")
-        tactical = snapshot.get("doom_tactical", "")
-        can_shoot = snapshot.get("doom_can_shoot", "no")
-        lines = [
-            "",
-            "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
-            "",
-            "You are playing a live first-person ASCII shooter. Output exactly one",
-            "doom.command(...) line and nothing else. Do not list moves. Do not explain.",
-            "Valid commands: w (forward), s (back), a (turn left), d (turn right),",
-            "q (strafe left), e (strafe right), shoot, use.",
-            "",
-            "Tactical summary (use this instead of reading ASCII art):",
-        ]
-        if tactical:
-            lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
-        else:
-            lines.append("  (no target data)")
-        lines.append(f"  shoot would hit right now: {can_shoot}")
-        lines += [
-            "",
-            "Current frame:",
-        ]
-        lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
-        lines += [
-            "",
-            "Valid moves (one per reply, on its own first line):",
-            '  doom.command("w")                  -- move forward',
-            '  doom.command("s")                  -- move back',
-            '  doom.command("a")                  -- turn left',
-            '  doom.command("d")                  -- turn right',
-            '  doom.command("q")                  -- strafe left',
-            '  doom.command("e")                  -- strafe right',
-            '  doom.command("shoot")              -- fire in the facing direction',
-            '  doom.command("use")                 -- open a door in front of you',
-            "",
-            "Rules: one doom command per reply, on its own line, before any prose.",
-            "Do not output hand.move or brain commands while the game is running.",
-            "",
-            "Examples:",
-            '  doom.command("w")\nI step forward, scanning the corridor.',
-            '  doom.command("shoot")\nI fire at the shape in front of me.',
-        ]
-        return lines
+        return _doom_prompt(snapshot)
 
     lines = list(intro)
 
@@ -787,39 +775,14 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         # Doom is the highest priority special case: when a game is running,
         # only the doom directive is included so the model acts.
         if snapshot.get("doom"):
+            # Handled by the build_prompt fast-path; this fallback only
+            # runs if something bypassed that guard.
+            lines += _doom_prompt(snapshot)
             lines += [
                 "",
-                "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
-                "",
-                "You are playing a live first-person ASCII shooter. Output exactly one",
-                "doom.command(...) line and nothing else. Do not list moves. Do not explain.",
-                "Valid commands: w (forward), s (back), a (turn left), d (turn right),",
-                "q (strafe left), e (strafe right), shoot, use.",
-                "",
-                "Tactical summary (use this instead of reading ASCII art):",
-            ]
-            tactical = snapshot.get("doom_tactical", "")
-            if tactical:
-                lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
-            else:
-                lines.append("  (no target data)")
-            lines.append(f"  shoot would hit right now: {snapshot.get('doom_can_shoot', 'no')}")
-            lines += ["", "Current frame:"]
-            status = snapshot.get("doom_status", "")
-            lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
-            lines += [
-                "",
-                "Valid moves (one per reply, on its own first line):",
-                '  doom.command("w")',
-                '  doom.command("s")',
-                '  doom.command("a")',
-                '  doom.command("d")',
-                '  doom.command("q")',
-                '  doom.command("e")',
-                '  doom.command("shoot")',
-                '  doom.command("use")',
-                "",
-                "Put the command on its own line, then a short sentence.",
+                "Reply directly and concisely. Answer the substance first. Do not",
+                "ramble about your own state, feelings, or existence. No preamble,",
+                "no quotes, no emoji.",
             ]
             return "\n".join(lines)
         lines += [
@@ -918,8 +881,6 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     lines += [""]
     if task in _TASK_LINES:
         lines += _TASK_LINES[task]()
-    elif task == "doom":
-        lines += doom_lines()
     elif task == "ask_user":
         lines += _lines_ask_user(snapshot)
     elif task == "self_ask":
