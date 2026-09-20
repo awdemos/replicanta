@@ -26,6 +26,10 @@ wheels/
 .codegraph/
 .serena/
 
+# generated runtime template / symlink artifacts
+src/replicanta/organism.scl
+src/replicanta/modules
+
 # editor / os
 .DS_Store
 .idea/

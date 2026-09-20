@@ -42,6 +42,12 @@ COMMANDS = [
         "evolve or inspect the fly-brain reservoir (rsi-wetware-rs)",
         "State",
     ),
+    (
+        "/doom",
+        "/doom [start [map]|stop|status|maps|help|w/a/s/d/shoot/q/e]",
+        "play the nano-doom ASCII shooter",
+        "State",
+    ),
     # Voice
     (
         "/voice",
@@ -226,6 +232,10 @@ def help_text():
         "/mud map|story|quest show the world; /mud pause|resume|step",
         "control auto-turns; /mud scenario <description> dreams up a new",
         "adventure; /mud reset restarts the current one.",
+        "",
+        "nano-doom: /doom start [map] begins a tiny ASCII shooter in the",
+        "chat log. while playing, /doom w/a/s/d moves, q/e turns, shoot",
+        "fires, and status reprints the map. /doom stop ends it.",
         "",
         "group: /group start fern willow (or 'all', or a nursery group",
         "name) opens a shared chat; everything you type is broadcast to",

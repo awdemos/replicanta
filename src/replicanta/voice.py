@@ -25,6 +25,7 @@ def _emerge(
     model=None,
     timeout=None,
     rng=None,
+    temperature=None,
 ):
     """Build a ThoughtArena and run the requested utterance path.
 
@@ -46,6 +47,7 @@ def _emerge(
         structured=structured,
         fallback=fallback,
         on_token=on_token,
+        temperature=temperature,
     )
 
 
@@ -56,7 +58,9 @@ def narrate(org, model=None, timeout=None, rng=None):
 
 
 @telemetry.span("voice.respond")
-def respond(org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True):
+def respond(
+    org, message, model=None, timeout=None, rng=None, on_token=None, quick=False, record=True, temperature=None
+):
     """First-person reply to the user; quick=True skips the debate.
 
     Records both the incoming message and the generated reply in the
@@ -80,6 +84,7 @@ def respond(org, message, model=None, timeout=None, rng=None, on_token=None, qui
         model=model,
         timeout=timeout,
         rng=rng,
+        temperature=temperature,
     )
     if record and reply:
         org.store.record_chat("org", reply)

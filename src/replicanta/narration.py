@@ -42,6 +42,9 @@ def state_snapshot(org):
         id(getattr(org, "persona_service", None)),
         id(getattr(org, "module_loader", None)),
         id(getattr(org, "probe", None)),
+        # Doom frame changes through beliefs and memory; include their ids.
+        id(org.store.beliefs_map),
+        id(org.store.memory),
     )
     existing = getattr(state_snapshot, "_cache", None)
     if existing is not None and existing[0] == cache_key:
@@ -135,6 +138,19 @@ def state_snapshot(org):
             snapshot["flybrain"] = bool(flybrain.available())
         except Exception:  # noqa: BLE001
             snapshot["flybrain"] = False
+    doom = module_loader.registry.get("doom") if module_loader is not None else None
+    snapshot["doom"] = False
+    snapshot["doom_status"] = ""
+    if doom is not None:
+        try:
+            snapshot["doom"] = bool(doom.running())
+        except Exception:  # noqa: BLE001
+            snapshot["doom"] = False
+        if snapshot["doom"]:
+            try:
+                snapshot["doom_status"] = str(doom.status() or "")
+            except Exception:  # noqa: BLE001
+                snapshot["doom_status"] = ""
     state_snapshot._cache = (cache_key, snapshot)
     return snapshot
 
@@ -684,6 +700,43 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "system line says so.",
         ]
 
+    def doom_lines():
+        if not snapshot.get("doom"):
+            return []
+        status = snapshot.get("doom_status", "")
+        return (
+            [
+                "",
+                "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
+                "",
+                "You are playing a live first-person ASCII shooter. Your job right now is to",
+                "play the game: move, look around, and shoot the target. Do not talk about",
+                "playing it — actually play it. On every reply, start with exactly one",
+                "doom.command(...) line, then a single short sentence describing the move.",
+                "",
+                "Current frame:",
+            ]
+            + [f"  {line}" for line in status.splitlines() if line.strip()]
+            + [
+                "",
+                "Valid moves (one per reply, on its own first line):",
+                '  doom.command("w")                  -- move forward',
+                '  doom.command("a")                  -- strafe left',
+                '  doom.command("s")                  -- move back',
+                '  doom.command("d")                  -- strafe right',
+                '  doom.command("q")                  -- turn left',
+                '  doom.command("e")                  -- turn right',
+                '  doom.command("shoot")              -- fire in the facing direction',
+                "",
+                "Rules: one doom command per reply, on its own line, before any prose.",
+                "Do not output hand.move or brain commands while the game is running.",
+                "",
+                "Examples:",
+                '  doom.command("w")\\nI step forward, scanning the corridor.',
+                '  doom.command("shoot")\\nI fire at the shape in front of me.',
+            ]
+        )
+
     lines = list(intro)
 
     if task_focused:
@@ -704,8 +757,39 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "ramble about your own state, feelings, or existence. No preamble,",
             "no quotes, no emoji.",
         ]
-        lines += hand_lines()
-        lines += brain_lines()
+        # Doom is a special case: when a game is running, force the command
+        # directive to be the last thing the model sees so it acts.
+        if snapshot.get("doom"):
+            lines += [
+                "",
+                "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
+                "",
+                "You are playing a live first-person ASCII shooter. Your job right now is to",
+                "play the game: move, look around, and shoot the target. Do not talk about",
+                "playing it — actually play it. On every reply, start with exactly one",
+                "doom.command(...) line, then a single short sentence describing the move.",
+                "",
+                "Current frame:",
+            ]
+            status = snapshot.get("doom_status", "")
+            lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
+            lines += [
+                "",
+                "Valid moves (one per reply, on its own first line):",
+                '  doom.command("w")',
+                '  doom.command("a")',
+                '  doom.command("s")',
+                '  doom.command("d")',
+                '  doom.command("q")',
+                '  doom.command("e")',
+                '  doom.command("shoot")',
+                "",
+                "Put the command on its own line, then a short sentence.",
+            ]
+        else:
+            lines += hand_lines()
+            lines += brain_lines()
+            lines += doom_lines()
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.
@@ -809,6 +893,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     ]
     lines += hand_lines()
     lines += brain_lines()
+    lines += doom_lines()
     return "\n".join(lines)
 
 

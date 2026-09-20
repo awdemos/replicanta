@@ -337,6 +337,7 @@ class BeliefStore:
         if len(self.memory) > MEMORY_LIMIT:
             del self.memory[: len(self.memory) - MEMORY_LIMIT]
         self.dirty = True
+        return entry
 
     # -- cognitive threads ---------------------------------------------------
     def queue_thread(self, thread):

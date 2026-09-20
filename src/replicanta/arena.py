@@ -90,6 +90,7 @@ class ThoughtArena:
         fallback=None,
         structured=False,
         on_token=None,
+        temperature=None,
     ):
         """Run a full debate and return the winning candidate.
 
@@ -131,8 +132,13 @@ class ThoughtArena:
         effective = getattr(org, "chaos_effective", lambda: snapshot["chaos"])()
         surprise = 0.0 if structured else self._surprise_for(effective)
         # temperature=0 in the snapshot means deterministic probe mode
-        # (tests); anything else jitters per round
-        temperature = 0.0 if snapshot.get("temperature") == 0 else None
+        # (tests); anything else jitters per round. Caller-provided
+        # temperature overrides the jitter (used for deterministic
+        # tool-like generation such as doom commands).
+        if temperature is not None:
+            temperature = float(temperature)
+        elif snapshot.get("temperature") == 0:
+            temperature = 0.0
         # voice known-offline: skip the debate entirely so replies stay
         # instant instead of paying an ollama timeout on every utterance
         if llmclient.voice_online() is False:
@@ -178,6 +184,7 @@ class ThoughtArena:
         fallback=None,
         structured=False,
         on_token=None,
+        temperature=None,
     ):
         """Single-generation shortcut for many-speaker contexts.
 
@@ -194,7 +201,10 @@ class ThoughtArena:
             recent_seeds = org._recent_seeds = deque(maxlen=6)
         snapshot["seed"] = llmclient.seed_for(snapshot, self._rng, exclude=recent_seeds)
         recent_seeds.append(snapshot["seed"])
-        temperature = 0.0 if snapshot.get("temperature") == 0 else None
+        if temperature is not None:
+            temperature = float(temperature)
+        elif snapshot.get("temperature") == 0:
+            temperature = 0.0
         if llmclient.voice_online() is False:
             return self._fallback(org.store, snapshot, user_message, fallback)
         build = {"task": task, "user_message": user_message, "question": question}

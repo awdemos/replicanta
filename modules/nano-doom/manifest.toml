@@ -1,0 +1,5 @@
+name = "nano-doom"
+description = "Tiny keyboard-controlled DOOM-style shooter inside the chat window"
+version = "0.1.0"
+provides = ["doom"]
+depends = ["base"]

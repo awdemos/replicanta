@@ -818,6 +818,7 @@ def test_tui_has_four_tabs(monkeypatch, tmp_path):
                 "cells-pane",
                 "visual-pane",
                 "mud-pane",
+                "doom-pane",
             }
 
     asyncio.run(check())

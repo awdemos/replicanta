@@ -2,6 +2,7 @@
 the thought arena (arena.py) and the MUD engine (mud.py) to the terminal,
 delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
 
+import contextlib
 import json
 import logging
 import os
@@ -141,6 +142,7 @@ class TabBar(Horizontal):
         ("Cells", "cells-pane"),
         ("Visual", "visual-pane"),
         ("MUD", "mud-pane"),
+        ("DOOM", "doom-pane"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -228,12 +230,12 @@ class CommandPalette(Screen):
 
     def on_show(self):
         self.query_one("#palette-input", Input).focus()
-        self._render("")
+        self._refresh_palette("")
 
     def on_input_changed(self, event):
-        self._render(event.value)
+        self._refresh_palette(event.value)
 
-    def _render(self, query):
+    def _refresh_palette(self, query):
         results = self.query_one("#palette-results", ListView)
         results.clear()
         items = tui_commands.filter_commands(query)
@@ -453,16 +455,55 @@ class ModulesScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         """Build the title, module list, and detail label."""
-        yield Label(
-            "Modules — space/enter toggles · s saves & reloads · esc closes",
-            id="modules-title",
-        )
-        yield ListView(id="module-list")
-        yield Label("", id="module-detail")
+        with Vertical(id="modules-box"):
+            yield Label(
+                "Modules — space/enter toggles · s saves & reloads · esc closes",
+                id="modules-title",
+            )
+            yield ListView(id="module-list")
+            yield Label("", id="module-detail")
 
     def on_mount(self):
-        """Populate the list once the DOM is ready."""
+        """Populate the list once the DOM is ready and focus it."""
         self._refresh_list()
+        self.set_timer(0.05, self._ensure_focus)
+
+    def _ensure_focus(self):
+        list_view = self.query_one("#module-list", ListView)
+        if list_view.children:
+            list_view.focus()
+            if list_view.index is None:
+                list_view.index = 0
+            self._show_detail_from_index()
+
+    def _show_detail_from_index(self):
+        list_view = self.query_one("#module-list", ListView)
+        idx = list_view.index
+        if idx is not None and 0 <= idx < len(list_view.children):
+            item = list_view.children[idx]
+            if item.id:
+                self._show_detail(item.id.split("-", 1)[1])
+
+    def on_key(self, event):
+        """Make the list respond to up/down before other handlers."""
+        list_view = self.query_one("#module-list", ListView)
+        if event.key in ("up", "down"):
+            list_view.focus()
+            return
+        if event.key in ("enter", "space"):
+            event.stop()
+            event.prevent_default()
+            idx = list_view.index
+            if idx is not None and 0 <= idx < len(list_view.children):
+                self.on_list_view_selected(type("E", (), {"item": list_view.children[idx]})())
+            return
+        if event.key == "s":
+            event.stop()
+            self.action_save()
+            return
+        if event.key == "escape":
+            event.stop()
+            self.action_dismiss()
 
     def _discovered(self):
         """Return discovered manifests sorted by name."""
@@ -497,6 +538,12 @@ class ModulesScreen(ModalScreen):
         text = f"{marker} {name}" + (f" — {desc}" if desc else "")
         label.update(text)
         self._show_detail(name)
+
+    def on_list_view_highlighted(self, event):
+        """Show detail for the highlighted item as the cursor moves."""
+        item = event.item
+        if item.id:
+            self._show_detail(item.id.split("-", 1)[1])
 
     def _show_detail(self, name):
         manifest = next((m for m in self._discovered() if m.get("name") == name), {})
@@ -544,6 +591,45 @@ ASK_USER_ODDS = 0.35  # chance an idle wake utterance asks the user instead
 MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
 
 
+def _doom_player_command(text):
+    """User chat input -> normalized nano-doom command, or None if not a move."""
+    if not text:
+        return None
+    words = [w for w in text.strip().lower().split()]
+    if not words:
+        return None
+    # Obsolete: prefer arrow keys when the DOOM pane is active so chat typing
+    # is not confused with movement commands.
+    if len(words) == 1 and words[0] in ("shoot", "look", "start", "stop", "status"):
+        return words[0]
+    return None
+
+
+def _extract_doom_command(reply):
+    """Look for a line that looks like doom.command(...) and return the inner arg.
+    Also tolerate a bare move word as a fallback for sloppy model output."""
+    if not reply:
+        return None
+    valid = {"w", "a", "s", "d", "q", "e", "shoot"}
+    for line in reply.strip().splitlines():
+        line = line.strip()
+        if line.startswith("doom.command("):
+            if line.endswith(")"):
+                inner = line[len("doom.command(") : -1].strip()
+                inner = inner.strip('"').strip("'")
+                if inner in valid:
+                    return inner
+            continue
+        # Fallback: a line that is just one of the valid moves.
+        lowered = line.lower()
+        if lowered in valid:
+            return lowered
+        # 'shoot' may appear as a single word anywhere.
+        if lowered == "shoot":
+            return "shoot"
+    return None
+
+
 class OrganismApp(App):
     """Replicanta's terminal front-end, conversation-first: a workspace
     chrome with a top organism bar, a nursery sidebar, a bottom status
@@ -569,6 +655,13 @@ class OrganismApp(App):
         Binding("f8", "show_tab('cells-pane')", "cells"),
         Binding("shift+f8", "show_tab('visual-pane')", "visual"),
         Binding("f9", "modules", "modules"),
+        Binding("f10", "show_tab('doom-pane')", "doom"),
+        Binding("up", "doom_up", "doom forward", show=False),
+        Binding("down", "doom_down", "doom back", show=False),
+        Binding("left", "doom_left", "doom turn left", show=False),
+        Binding("right", "doom_right", "doom turn right", show=False),
+        Binding("space", "doom_shoot", "doom shoot", show=False),
+        Binding("escape", "doom_stop", "doom stop", show=False),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
@@ -635,6 +728,13 @@ class OrganismApp(App):
     #palette-results > ListItem.--highlight { background: $primary; color: $text; }
     .palette-usage { text-style: bold; }
     .palette-desc { color: $text-muted; }
+    ModulesScreen { align: center middle; }
+    #modules-box { width: 60; height: 24; border: round $primary; background: $surface; padding: 0 1; }
+    #modules-title { width: 100%; height: 1; padding: 0 1; background: $surface; color: $text; text-style: bold; }
+    #module-list { width: 100%; height: 1fr; min-height: 12; border: none; background: $surface; padding: 0; }
+    #module-list > ListItem { height: auto; padding: 0 1; color: $text; }
+    #module-list > ListItem.--highlight { background: $primary; color: $text; }
+    #module-detail { width: 100%; height: auto; min-height: 4; padding: 1 2; color: $text-muted; border-top: solid $primary; }
     """
 
     def __init__(self, organism, root=None, spawn=None):
@@ -696,6 +796,7 @@ class OrganismApp(App):
         self._mind_text = ""
         self._memory_text = ""
         self._visual_text = ""
+        self._doom_text = ""
         self._topbar_text = ""
         self._bottombar_text = ""
         self._rendered_topbar_text = None
@@ -719,6 +820,7 @@ class OrganismApp(App):
                             wrap=True,
                             markup=True,
                             highlight=False,
+                            auto_scroll=True,
                         )
                         dreams.can_focus = False
                         yield dreams
@@ -743,6 +845,13 @@ class OrganismApp(App):
                             id="mud",
                             markup=False,
                         )
+                    with TabPane("doom", id="doom-pane"), VerticalScroll(), Vertical():
+                        yield Static(
+                            "Run /doom start to play the nano-Doom mini-game.",
+                            id="doom",
+                            markup=False,
+                        )
+                        yield Static("", id="doom-thoughts", markup=False)
         yield CommandHints("", id="command-hints")
         yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
@@ -821,6 +930,51 @@ class OrganismApp(App):
         # keep typing in the chat line, never stranded by a pane switch
         if self.chat_input is not None:
             self.chat_input.focus()
+
+    def action_doom_up(self):
+        self._doom_key_command("w")
+
+    def action_doom_down(self):
+        self._doom_key_command("s")
+
+    def action_doom_left(self):
+        self._doom_key_command("q")
+
+    def action_doom_right(self):
+        self._doom_key_command("e")
+
+    def action_doom_shoot(self):
+        self._doom_key_command("shoot")
+
+    def action_doom_stop(self):
+        self._doom_key_command("stop")
+
+    def _doom_key_command(self, cmd):
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        if svc is None or not svc.running():
+            return
+        # When on the DOOM pane, arrow/space keys drive the game; otherwise ignore.
+        active = self.query_one(TabbedContent).active
+        if active != "doom-pane":
+            return
+        # Human took manual control: cancel any queued auto-turn and run the
+        # command immediately so the player feels in charge.
+        self._doom_cancel_auto()
+        self._doom_command([cmd])
+        # After the human moves, let the entity respond and take its turn.
+        if svc.running():
+            self._maybe_respond(
+                f"you are playing nano-doom. the human just sent command '{cmd}'. what is your next move? start with exactly one doom.command(...) line.",
+                quick=True,
+                temperature=0.2,
+            )
+
+    def _doom_cancel_auto(self):
+        """Cancel pending auto-play timers so manual control wins."""
+        for timer in list(getattr(self, "_timers", [])):
+            if getattr(timer, "_callback", None) is self._doom_take_turn:
+                timer.stop()
 
     def on_button_pressed(self, event):
         """Route tab-bar, mutation, and quick-action button presses."""
@@ -1849,6 +2003,7 @@ class OrganismApp(App):
             sig = self._visual_signature()
             if sig != getattr(self, "_visual_sig", None):
                 self._render_visual(self._visual_kind, log=False)
+        self._refresh_doom()
         self._update_mutation_banner()
 
     def _update_mutation_banner(self):
@@ -1942,6 +2097,10 @@ class OrganismApp(App):
             playing = ""
         if self._group is not None:
             playing += f" · 👥 group ({len(self._group.names())})"
+        loader = getattr(self.org, "module_loader", None)
+        doom_svc = loader.registry.get("doom") if loader is not None else None
+        if doom_svc is not None and doom_svc.running():
+            playing += " · 💀 doom"
         text = (
             f"{m.belief_count} beliefs · {m.rule_count} rules · "
             f"inner voice {llmclient.voice_status()}{playing}  │  "
@@ -2016,6 +2175,16 @@ class OrganismApp(App):
         dreams = self._safe_query("#dreams", RichLog)
         if dreams is not None:
             dreams.write(line)
+            return True
+        return False
+
+    def _append_log_lines(self, text, style=None, stamp=False):
+        """Append multiple lines, returning whether any line was written."""
+        written = False
+        for line in (text or "").splitlines():
+            if self._append_log(line, style=style, stamp=stamp):
+                written = True
+        return written
 
     def _org_name(self):
         """Card title for the organism: its learned name (the user can give
@@ -2506,6 +2675,8 @@ class OrganismApp(App):
             self._hand_command(parts[1:])
         elif name == "/brain":
             self._brain_command(parts[1:])
+        elif name == "/doom":
+            self._doom_command(parts[1:])
         else:
             self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
             self.show_toast(f"Invalid command: {name}")
@@ -2554,6 +2725,69 @@ class OrganismApp(App):
             return
         for line in str(result or "").splitlines():
             self._append_log(line, STYLE_DIM)
+
+    def _doom_command(self, args):
+        """Dispatch /doom subcommands: bare = status, start/stop, or direct
+        movement/shoot while a game is running."""
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
+            return
+        svc = loader.registry.get("doom")
+        if svc is None:
+            self._append_log("nano-doom module not loaded (enable it via /modules)", STYLE_WARN)
+            return
+        commands = loader.registry.get("commands")
+        if commands is None:
+            self._append_log("command service unavailable", STYLE_WARN)
+            return
+        try:
+            result = commands.dispatch("/doom", args if args else [])
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"doom command failed: {exc}", STYLE_WARN)
+            return
+        # Render into the dedicated DOOM pane instead of the chat log.
+        lines = str(result or "").splitlines()
+        if lines:
+            self._doom_text = "\n".join(lines)
+            doom = self._safe_query("#doom", Static)
+            if doom is not None:
+                doom.update(self._doom_text)
+        # Switch to the DOOM pane when a game starts or renders.
+        if args and args[0] in ("start", "status"):
+            self.action_show_tab("doom-pane")
+        # Nudge the organism to observe any game frame it produced.
+        try:
+            status = svc.status()
+            self.org.store.add(("doom", "frame", "running" if svc.running() else "idle"), 0.9)
+            self.org.store.remember("doom", status[:200])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("doom observe failed: %s", exc)
+        # After starting, wake the entity so it immediately plays and the user
+        # can watch its streaming thought process.
+        if args and args[0] == "start" and svc.running():
+            self._maybe_respond(
+                "you are now playing nano-doom. take the first move. start with exactly one doom.command(...) line.",
+                quick=True,
+                temperature=0.2,
+            )
+
+    def _refresh_doom(self):
+        """Refresh the DOOM pane when a game is running."""
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        if svc is None or not svc.running():
+            return
+        try:
+            text = svc.status()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("doom refresh failed: %s", exc)
+            return
+        if text != self._doom_text:
+            self._doom_text = text
+            doom = self._safe_query("#doom", Static)
+            if doom is not None:
+                doom.update(self._doom_text)
 
     def _render_visual(self, kind, log=False):
         """Render or re-render the active visual chart."""
@@ -2632,8 +2866,24 @@ class OrganismApp(App):
         self.action_modules()
 
     def handle_chat(self, text):
-        """Route ordinary user chat to MUD, group chat, or the organism."""
+        """Route ordinary user chat to DOOM, MUD, group chat, or the organism."""
         self._log_chat("user", text)
+        loader = getattr(self.org, "module_loader", None)
+        doom_svc = loader.registry.get("doom") if loader is not None else None
+        doom_running = False
+        if doom_svc is not None:
+            try:
+                doom_running = bool(doom_svc.running())
+            except Exception:  # noqa: BLE001
+                doom_running = False
+        if doom_running:
+            # Human chat during a game counts as direction; cancel auto-play
+            # so the entity responds to the user rather than stacking turns.
+            self._doom_cancel_auto()
+            command = _doom_player_command(text)
+            if command is not None:
+                self._doom_command([command])
+                return
         if self._mud_game is not None:
             command = mud.parse_player_command(text)
             if command is not None:
@@ -2656,14 +2906,14 @@ class OrganismApp(App):
             self._render_event(event)
         self._maybe_respond(text)
 
-    def _maybe_respond(self, text):
+    def _maybe_respond(self, text, *, quick=False, temperature=None):
         if not self._responding:
             self._responding = True
             self.refresh_status()
-            self._respond(text)
+            self._respond(text, quick=quick, temperature=temperature)
 
     @work(thread=True)
-    def _respond(self, text):
+    def _respond(self, text, *, quick=False, temperature=None):
         org = self.org  # capture: a swap mid-debate drops the delivery
         reply = None
         self.call_from_thread(self.set_activity, "org is thinking")
@@ -2673,6 +2923,8 @@ class OrganismApp(App):
                 org,
                 text,
                 on_token=lambda tok: self.call_from_thread(self._pending_token, tok),
+                quick=quick,
+                temperature=temperature,
             )
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
@@ -2680,7 +2932,71 @@ class OrganismApp(App):
             self.call_from_thread(self.clear_activity)
             self._responding = False
         if reply is not None and org is self.org:
+            # If the entity is in the middle of a doom game, show its thinking
+            # in the chat log, execute any doom.command line, and refresh the
+            # DOOM pane so the user sees the result.
+            doom_cmd = _extract_doom_command(reply)
+            if doom_cmd is not None:
+                # Render the command itself in chat as a system line so the
+                # user can analyze the entity's decision.
+                self.call_from_thread(
+                    self._append_log,
+                    f'doom.command("{doom_cmd}")',
+                    STYLE_SELF,
+                    stamp=True,
+                )
+                self.call_from_thread(self._doom_command, [doom_cmd])
+                with contextlib.suppress(Exception):
+                    self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
+            # Mirror the entity's prose reasoning into the DOOM pane when a game is running.
+            loader = getattr(self.org, "module_loader", None)
+            doom_svc = loader.registry.get("doom") if loader is not None else None
+            try:
+                if doom_svc is not None and doom_svc.running():
+                    self.call_from_thread(self._set_doom_thought, reply)
+            except Exception:
+                logger.warning("doom thought mirror failed", exc_info=True)
             self.call_from_thread(self._set_reply, reply)
+            # If a doom game is still running after the entity's move, queue
+            # another turn so it keeps playing autonomously. The human can
+            # interrupt by chatting or taking manual control.
+            self.call_from_thread(self._schedule_doom_turn)
+
+    def _set_doom_thought(self, text):
+        """Append entity reasoning to the DOOM pane's thought stream."""
+        thoughts = self._safe_query("#doom-thoughts", Static)
+        if thoughts is None:
+            return
+        current = str(getattr(thoughts, "_Static__content", "") or "")
+        lines = [current, text] if current else [text]
+        # Keep the last ~20 lines so the pane stays readable.
+        trimmed = "\n".join(lines[-20:])
+        thoughts.update(trimmed)
+
+    def _schedule_doom_turn(self):
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        if svc is None or not svc.running():
+            return
+        if self._responding or self._self_talking:
+            return
+        # small delay so the UI is readable and human input can interleave
+        self.set_timer(2.0, self._doom_take_turn)
+
+    def _doom_take_turn(self):
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        if svc is None or not svc.running():
+            return
+        if self._responding:
+            # another response is already in flight; reschedule
+            self._schedule_doom_turn()
+            return
+        self._maybe_respond(
+            "you are playing nano-doom. the game just updated. look at the current frame and choose your next move. start with exactly one doom.command(...) line.",
+            quick=True,
+            temperature=0.2,
+        )
 
     # -- group chat -------------------------------------------------------
     GROUP_STYLES: ClassVar[list[str]] = [

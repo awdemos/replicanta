@@ -486,6 +486,8 @@ class Glasshouse:
                 messages.append(self._look_command())
             elif name == "/mud":
                 messages.append(self._mud_command(args))
+            elif name == "/doom":
+                messages.append(self._doom_command(args))
             elif name == "/hand":
                 arm = getattr(self.org, "module_loader", None)
                 if arm is None:
@@ -615,6 +617,22 @@ class Glasshouse:
             self.org.git_disable()
             return "git sensing off"
         return "/git [on|off|status]"
+
+    def _doom_command(self, args):
+        """Dispatch /doom subcommands for the web UI."""
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            raise WebError("module loader unavailable")
+        svc = loader.registry.get("doom")
+        if svc is None:
+            raise WebError("nano-doom module not loaded (enable it via /modules)")
+        commands = loader.registry.get("commands")
+        if commands is None:
+            raise WebError("command service unavailable")
+        result = commands.dispatch("/doom", args if args else [])
+        if result:
+            return str(result)
+        return ""
 
     def _export_chat(self, path=None):
         """Write the full chat log to a markdown file. Returns the path.
