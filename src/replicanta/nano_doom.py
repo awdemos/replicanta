@@ -50,7 +50,7 @@ class _Player:
     x: float = 3.5
     y: float = 3.5
     angle: float = 0.0
-    hp: int = 10
+    hp: int = 15
     ammo: int = 20
 
 
@@ -58,7 +58,7 @@ class _Player:
 class _Enemy:
     x: float = 10.5
     y: float = 5.5
-    hp: int = 3
+    hp: int = 6
 
 
 @dataclass
@@ -191,7 +191,7 @@ class _DoomGame:
                 continue
             distance = math.hypot(enemy.x - self.player.x, enemy.y - self.player.y)
             if distance <= 1.2:
-                self.player.hp -= 2
+                self.player.hp -= 1
                 self.log.append("bitten")
                 continue
             dx = 0.0
@@ -257,7 +257,7 @@ class DoomService:
 
     def status(self):
         if self._game is None:
-            return "no game running — /doom start"
+            return "no game running — press F10 in the DOOM pane"
         return self._game.render()
 
     @staticmethod
@@ -278,9 +278,39 @@ class DoomService:
     def command(self, cmd):
         if cmd == "__maps":
             return ", ".join(sorted(MAPS))
+        if cmd == "__tactical":
+            return self.tactical()
+        if cmd == "__can_shoot":
+            return "yes" if self.can_shoot() else "no"
         if self._game is None:
             raise RuntimeError("no game running")
         return self._game.tick(cmd)
+
+    def tactical(self):
+        """Plain-english target hints for the entity's prompt."""
+        if self._game is None:
+            return "no game running"
+        alive = [e for e in self._game.enemies if e.hp > 0]
+        if not alive:
+            return "no targets."
+        lines = []
+        for enemy in alive:
+            dx = enemy.x - self._game.player.x
+            dy = enemy.y - self._game.player.y
+            distance = math.hypot(dx, dy)
+            angle = _normalize_angle(math.atan2(dy, dx) - self._game.player.angle)
+            direction = "ahead" if abs(angle) < 0.3 else "left" if angle < 0 else "right"
+            behind = abs(angle) > math.pi / 2
+            lines.append(
+                f"target at distance {distance:.1f}, {direction}{' (behind you)' if behind else ''}, hp={enemy.hp}"
+            )
+        return "\n".join(lines)
+
+    def can_shoot(self):
+        if self._game is None:
+            return False
+        best = self._game._find_hit()
+        return best is not None and best.hp > 0
 
 
 def _is_wall(world_map: list[str], x: float, y: float) -> bool:

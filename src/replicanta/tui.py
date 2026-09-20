@@ -655,7 +655,7 @@ class OrganismApp(App):
         Binding("f8", "show_tab('cells-pane')", "cells"),
         Binding("shift+f8", "show_tab('visual-pane')", "visual"),
         Binding("f9", "modules", "modules"),
-        Binding("f10", "show_tab('doom-pane')", "doom"),
+        Binding("f10", "doom_toggle", "doom"),
         Binding("up", "doom_up", "doom forward", show=False),
         Binding("down", "doom_down", "doom back", show=False),
         Binding("left", "doom_left", "doom turn left", show=False),
@@ -931,6 +931,22 @@ class OrganismApp(App):
         if self.chat_input is not None:
             self.chat_input.focus()
 
+    def action_doom_toggle(self):
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        if svc is None:
+            return
+        active = self.query_one(TabbedContent).active
+        if active != "doom-pane":
+            self.action_show_tab("doom-pane")
+            # If no game is running, start one immediately when opening the pane.
+            if not svc.running():
+                self._doom_command(["start"])
+            return
+        # Already on the DOOM pane: pressing F10 again stops the game and leaves the pane.
+        if svc.running():
+            self._doom_command(["stop"])
+
     def action_doom_up(self):
         self._doom_key_command("w")
 
@@ -952,16 +968,24 @@ class OrganismApp(App):
     def _doom_key_command(self, cmd):
         loader = getattr(self.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
+        if svc is None:
             return
         # When on the DOOM pane, arrow/space keys drive the game; otherwise ignore.
         active = self.query_one(TabbedContent).active
         if active != "doom-pane":
             return
+        # If no game is running, start one automatically on the first keypress.
+        if not svc.running():
+            if cmd == "stop":
+                return
+            self._doom_command(["start"])
+        if not svc.running():
+            return
         # Human took manual control: cancel any queued auto-turn and run the
         # command immediately so the player feels in charge.
         self._doom_cancel_auto()
-        self._doom_command([cmd])
+        if cmd != "start":
+            self._doom_command([cmd])
         # After the human moves, let the entity respond and take its turn.
         if svc.running():
             self._maybe_respond(

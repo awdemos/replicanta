@@ -141,6 +141,8 @@ def state_snapshot(org):
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
+    snapshot["doom_tactical"] = ""
+    snapshot["doom_can_shoot"] = "no"
     if doom is not None:
         try:
             snapshot["doom"] = bool(doom.running())
@@ -151,6 +153,14 @@ def state_snapshot(org):
                 snapshot["doom_status"] = str(doom.status() or "")
             except Exception:  # noqa: BLE001
                 snapshot["doom_status"] = ""
+            try:
+                snapshot["doom_tactical"] = str(doom.tactical() or "")
+            except Exception:  # noqa: BLE001
+                snapshot["doom_tactical"] = ""
+            try:
+                snapshot["doom_can_shoot"] = str(doom.command("__can_shoot") or "no")
+            except Exception:  # noqa: BLE001
+                snapshot["doom_can_shoot"] = "no"
     state_snapshot._cache = (cache_key, snapshot)
     return snapshot
 
@@ -704,38 +714,48 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         if not snapshot.get("doom"):
             return []
         status = snapshot.get("doom_status", "")
-        return (
-            [
-                "",
-                "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
-                "",
-                "You are playing a live first-person ASCII shooter. Your job right now is to",
-                "play the game: move, look around, and shoot the target. Do not talk about",
-                "playing it — actually play it. On every reply, start with exactly one",
-                "doom.command(...) line, then a single short sentence describing the move.",
-                "",
-                "Current frame:",
-            ]
-            + [f"  {line}" for line in status.splitlines() if line.strip()]
-            + [
-                "",
-                "Valid moves (one per reply, on its own first line):",
-                '  doom.command("w")                  -- move forward',
-                '  doom.command("a")                  -- strafe left',
-                '  doom.command("s")                  -- move back',
-                '  doom.command("d")                  -- strafe right',
-                '  doom.command("q")                  -- turn left',
-                '  doom.command("e")                  -- turn right',
-                '  doom.command("shoot")              -- fire in the facing direction',
-                "",
-                "Rules: one doom command per reply, on its own line, before any prose.",
-                "Do not output hand.move or brain commands while the game is running.",
-                "",
-                "Examples:",
-                '  doom.command("w")\\nI step forward, scanning the corridor.',
-                '  doom.command("shoot")\\nI fire at the shape in front of me.',
-            ]
-        )
+        tactical = snapshot.get("doom_tactical", "")
+        can_shoot = snapshot.get("doom_can_shoot", "no")
+        lines = [
+            "",
+            "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
+            "",
+            "You are playing a live first-person ASCII shooter. Your job right now is to",
+            "play the game: move, look around, and shoot the target. Do not talk about",
+            "playing it — actually play it. On every reply, start with exactly one",
+            "doom.command(...) line, then a single short sentence describing the move.",
+            "",
+            "Tactical summary (use this instead of reading ASCII art):",
+        ]
+        if tactical:
+            lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
+        else:
+            lines.append("  (no target data)")
+        lines.append(f"  shoot would hit right now: {can_shoot}")
+        lines += [
+            "",
+            "Current frame:",
+        ]
+        lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
+        lines += [
+            "",
+            "Valid moves (one per reply, on its own first line):",
+            '  doom.command("w")                  -- move forward',
+            '  doom.command("a")                  -- strafe left',
+            '  doom.command("s")                  -- move back',
+            '  doom.command("d")                  -- strafe right',
+            '  doom.command("q")                  -- turn left',
+            '  doom.command("e")                  -- turn right',
+            '  doom.command("shoot")              -- fire in the facing direction',
+            "",
+            "Rules: one doom command per reply, on its own line, before any prose.",
+            "Do not output hand.move or brain commands while the game is running.",
+            "",
+            "Examples:",
+            '  doom.command("w")\nI step forward, scanning the corridor.',
+            '  doom.command("shoot")\nI fire at the shape in front of me.',
+        ]
+        return lines
 
     lines = list(intro)
 
@@ -769,8 +789,15 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
                 "playing it — actually play it. On every reply, start with exactly one",
                 "doom.command(...) line, then a single short sentence describing the move.",
                 "",
-                "Current frame:",
+                "Tactical summary (use this instead of reading ASCII art):",
             ]
+            tactical = snapshot.get("doom_tactical", "")
+            if tactical:
+                lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
+            else:
+                lines.append("  (no target data)")
+            lines.append(f"  shoot would hit right now: {snapshot.get('doom_can_shoot', 'no')}")
+            lines += ["", "Current frame:"]
             status = snapshot.get("doom_status", "")
             lines.extend(f"  {line}" for line in status.splitlines() if line.strip())
             lines += [

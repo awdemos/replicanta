@@ -68,13 +68,14 @@ def test_turn(service):
 def test_enemy_hits_player(service):
     service.start("box")
     # On the small box map, strafe/move toward the enemy until adjacent;
-    # the enemy turn should then bite the player.
-    for _ in range(6):
+    # the enemy turn should then bite the player. Weaker bite (1 hp) makes the
+    # loop longer, so just assert hp dropped below the starting 15.
+    for _ in range(12):
         service.command("d")
-        if service._game.player.hp < 10:
+        if service._game.player.hp < 15:
             break
     hp = service._game.player.hp
-    assert hp < 10
+    assert hp < 15
 
 
 def test_module_loads_and_registers_doom(tmp_path):
