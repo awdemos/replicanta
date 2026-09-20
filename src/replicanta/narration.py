@@ -602,9 +602,9 @@ def _doom_move_lines():
         "",
         "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
         "",
-        "This overrides everything else. Start your reply with exactly one",
-        "doom.command(...) line on its own first line. Then one short sentence.",
-        "No other commands. No questions. No emojis.",
+        "This overrides everything else. Output exactly one doom.command(...) line and nothing else.",
+        "Do not list moves. Do not explain. Do not ask questions. No emojis.",
+        "Valid commands: w, s, a, d, q, e, shoot, use.",
     ]
 
 
@@ -732,10 +732,10 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "",
             "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
             "",
-            "You are playing a live first-person ASCII shooter. Your job right now is to",
-            "play the game: move, look around, and shoot the target. Do not talk about",
-            "playing it — actually play it. On every reply, start with exactly one",
-            "doom.command(...) line, then a single short sentence describing the move.",
+            "You are playing a live first-person ASCII shooter. Output exactly one",
+            "doom.command(...) line and nothing else. Do not list moves. Do not explain.",
+            "Valid commands: w (forward), s (back), a (turn left), d (turn right),",
+            "q (strafe left), e (strafe right), shoot, use.",
             "",
             "Tactical summary (use this instead of reading ASCII art):",
         ]
@@ -782,10 +782,10 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
                 "",
                 "### NANO DOOM — A TINY ASCII SHOOTER YOU ARE CURRENTLY PLAYING",
                 "",
-                "You are playing a live first-person ASCII shooter. Your job right now is to",
-                "play the game: move, look around, and shoot enemies. Do not talk about",
-                "playing it — actually play it. On every reply, start with exactly one",
-                "doom.command(...) line, then a single short sentence describing the move.",
+                "You are playing a live first-person ASCII shooter. Output exactly one",
+                "doom.command(...) line and nothing else. Do not list moves. Do not explain.",
+                "Valid commands: w (forward), s (back), a (turn left), d (turn right),",
+                "q (strafe left), e (strafe right), shoot, use.",
                 "",
                 "Tactical summary (use this instead of reading ASCII art):",
             ]

@@ -46,6 +46,17 @@ function init(ctx)
 
   local api = {}
 
+  function api.tactical()
+    local ok, txt = pcall(function() return game:tactical() end)
+    return ok and txt or ""
+  end
+
+  function api.can_shoot()
+    local ok, result = pcall(function() return game:command("__can_shoot") end)
+    if not ok then return false end
+    return result == "yes"
+  end
+
   function api.status()
     local ok, txt = pcall(function() return game:status() end)
     return ok and txt or ("nano-doom error: " .. tostring(txt))
