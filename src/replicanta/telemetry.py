@@ -17,10 +17,8 @@ import atexit
 import functools
 import logging
 import os
-from typing import Any
 
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -49,33 +47,19 @@ _provider: TracerProvider | None = None
 _enabled = False
 
 
-def _parse_headers(raw: str) -> dict[str, str]:
-    headers = {}
+def _parse_kv_csv(raw: str, *, warn_label: str) -> dict[str, str]:
+    """Parse a ``key=value,key2=value2`` CSV string into a dict."""
+    pairs: dict[str, str] = {}
     for part in raw.split(","):
         part = part.strip()
         if not part:
             continue
         if "=" not in part:
-            logger.warning("ignoring malformed OTLP header %r", part)
+            logger.warning("ignoring malformed %s %r", warn_label, part)
             continue
         key, value = part.split("=", 1)
-        headers[key.strip()] = value.strip()
-    return headers
-
-
-def _resource_attributes() -> dict[str, Any]:
-    attrs: dict[str, Any] = {}
-    raw = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "=" not in part:
-            logger.warning("ignoring malformed resource attribute %r", part)
-            continue
-        key, value = part.split("=", 1)
-        attrs[key.strip()] = value.strip()
-    return attrs
+        pairs[key.strip()] = value.strip()
+    return pairs
 
 
 def init_telemetry(service_name: str = "replicanta") -> bool:
@@ -96,15 +80,20 @@ def init_telemetry(service_name: str = "replicanta") -> bool:
         _enabled = False
         return _enabled
 
-    resource_attrs = _resource_attributes()
+    resource_attrs = _parse_kv_csv(os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""), warn_label="resource attribute")
     resource_attrs[SERVICE_NAME] = os.environ.get("OTEL_SERVICE_NAME", service_name)
     resource_attrs[SERVICE_VERSION] = __version__
 
     _provider = TracerProvider(resource=Resource.create(resource_attrs))
 
     if exporter_name == "otlp":
+        # Deferred so the default (exporter=none) path skips the ~100ms
+        # grpcio/protobuf import; a broken grpc install must not break the
+        # CLI when OTLP export is not in use.
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
         endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        headers = _parse_headers(os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", ""))
+        headers = _parse_kv_csv(os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", ""), warn_label="OTLP header")
         exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
     elif exporter_name == "console":
         exporter = ConsoleSpanExporter()
@@ -137,15 +126,17 @@ def span(name: str | None = None, **attrs):
 
     The span name defaults to ``module.qualname``. Static keyword arguments are
     set as span attributes. Exceptions are recorded and the span status is set
-    to ERROR before being re-raised.
+    to ERROR before being re-raised. The tracer is resolved on first call, not
+    at decoration time, so importing a decorated module never initialises the
+    global provider behind the composition root's back.
     """
 
     def decorator(func):
         span_name = name or f"{func.__module__}.{func.__qualname__}"
-        tracer = get_tracer(func.__module__)
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            tracer = get_tracer(func.__module__)
             with tracer.start_as_current_span(span_name) as current_span:
                 for key, value in attrs.items():
                     current_span.set_attribute(key, value)
