@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import escape
+from rich.table import Table
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult, ScreenStackError
@@ -25,6 +26,7 @@ from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
+    Checkbox,
     Input,
     Label,
     ListItem,
@@ -84,7 +86,12 @@ class SlashCommands(Provider):
         self.app.chat_input.value = usage
         self.app.chat_input.focus()
         if " " not in usage:
-            self.app.chat_input.action_submit()
+            # Input.action_submit() is async in Textual 8 — a bare call
+            # discards the coroutine and nothing ever submits. Posting
+            # Submitted is what action_submit does, and it drives the
+            # app's real on_input_submitted path.
+            chat = self.app.chat_input
+            chat.post_message(Input.Submitted(chat, chat.value))
 
     def _hit(self, name, usage, description, score=1.0, display=None):
         return Hit(
@@ -150,8 +157,14 @@ class TabBar(Horizontal):
             yield Button(label, id=f"tab-{pane}")
 
     def set_active(self, pane):
+        """Highlight the matching tab button and remove focus so keyboard
+        input returns to the chat line after a tab switch."""
         for button in self.query(Button):
             button.variant = "primary" if button.id == f"tab-{pane}" else "default"
+        app = self.app
+        chat_input = getattr(app, "chat_input", None)
+        if chat_input is not None:
+            app.set_focus(chat_input)
 
 
 class ActivityLabel(Static):
@@ -432,9 +445,37 @@ class CellDetailScreen(ModalScreen):
         self.dismiss()
 
 
+class _ModuleList(VerticalScroll):
+    """Container for module checkboxes that uses arrow keys to move focus."""
+
+    def on_key(self, event):
+        if event.key not in ("up", "down"):
+            return
+        event.stop()
+        event.prevent_default()
+        checkboxes = list(self.query(Checkbox))
+        if not checkboxes:
+            return
+        focused = self.app.focused
+        try:
+            idx = checkboxes.index(focused)
+        except ValueError:
+            idx = -1 if event.key == "down" else 0
+        if event.key == "up":
+            idx = max(0, idx - 1)
+        else:
+            idx = min(len(checkboxes) - 1, idx + 1)
+        cb = checkboxes[idx]
+        cb.focus()
+        screen = self.screen
+        if isinstance(screen, ModulesScreen):
+            screen._show_detail(cb.id.split("-", 1)[1])
+
+
 class ModulesScreen(ModalScreen):
     """Enable or disable discovered Lua modules and reload the organism's
-    module set. Space/enter toggles, s saves & reloads, esc closes."""
+    module set. Space/enter toggles the focused checkbox; s saves & reloads;
+    esc closes."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "dismiss", "close"),
@@ -454,96 +495,109 @@ class ModulesScreen(ModalScreen):
             self._enabled = set(loader.modules)
 
     def compose(self) -> ComposeResult:
-        """Build the title, module list, and detail label."""
+        """Build the title, checkbox list, and detail label."""
         with Vertical(id="modules-box"):
             yield Label(
                 "Modules — space/enter toggles · s saves & reloads · esc closes",
                 id="modules-title",
             )
-            yield ListView(id="module-list")
+            with _ModuleList(id="module-list"):
+                pass
             yield Label("", id="module-detail")
 
     def on_mount(self):
-        """Populate the list once the DOM is ready and focus it."""
+        """Populate the checkbox list once the DOM is ready and focus it."""
         self._refresh_list()
         self.set_timer(0.05, self._ensure_focus)
 
+    def action_focus_prev(self):
+        """Move focus to the previous module checkbox."""
+        container = self.query_one("#module-list", _ModuleList)
+        checkboxes = list(container.query(Checkbox))
+        if not checkboxes:
+            return
+        focused = self.app.focused
+        try:
+            idx = checkboxes.index(focused)
+        except ValueError:
+            idx = 0
+        idx = max(0, idx - 1)
+        checkboxes[idx].focus()
+        self._show_detail(checkboxes[idx].id.split("-", 1)[1])
+
+    def action_focus_next(self):
+        """Move focus to the next module checkbox."""
+        container = self.query_one("#module-list", _ModuleList)
+        checkboxes = list(container.query(Checkbox))
+        if not checkboxes:
+            return
+        focused = self.app.focused
+        try:
+            idx = checkboxes.index(focused)
+        except ValueError:
+            idx = -1
+        idx = min(len(checkboxes) - 1, idx + 1)
+        checkboxes[idx].focus()
+        self._show_detail(checkboxes[idx].id.split("-", 1)[1])
+
     def _ensure_focus(self):
-        list_view = self.query_one("#module-list", ListView)
-        if list_view.children:
-            list_view.focus()
-            if list_view.index is None:
-                list_view.index = 0
-            self._show_detail_from_index()
-
-    def _show_detail_from_index(self):
-        list_view = self.query_one("#module-list", ListView)
-        idx = list_view.index
-        if idx is not None and 0 <= idx < len(list_view.children):
-            item = list_view.children[idx]
-            if item.id:
-                self._show_detail(item.id.split("-", 1)[1])
-
-    def on_key(self, event):
-        """Make the list respond to up/down before other handlers."""
-        list_view = self.query_one("#module-list", ListView)
-        if event.key in ("up", "down"):
-            list_view.focus()
-            return
-        if event.key in ("enter", "space"):
-            event.stop()
-            event.prevent_default()
-            idx = list_view.index
-            if idx is not None and 0 <= idx < len(list_view.children):
-                self.on_list_view_selected(type("E", (), {"item": list_view.children[idx]})())
-            return
-        if event.key == "s":
-            event.stop()
-            self.action_save()
-            return
-        if event.key == "escape":
-            event.stop()
-            self.action_dismiss()
+        container = self.query_one("#module-list", _ModuleList)
+        checkboxes = list(container.query(Checkbox))
+        if checkboxes:
+            checkboxes[0].focus()
+            self._show_detail(checkboxes[0].id.split("-", 1)[1])
 
     def _discovered(self):
         """Return discovered manifests sorted by name."""
         return sorted(self._loader._discover(), key=lambda m: m.get("name", ""))
 
     def _refresh_list(self):
-        list_view = self.query_one("#module-list", ListView)
-        list_view.clear()
+        """Rebuild the checkbox list with current state."""
+        container = self.query_one("#module-list", _ModuleList)
+        container.remove_children()
         for manifest in self._discovered():
             name = manifest.get("name", "")
-            marker = "[x]" if name in self._enabled else "[ ]"
             desc = manifest.get("description", "")
-            text = f"{marker} {name}" + (f" — {desc}" if desc else "")
-            list_view.append(ListItem(Label(text), id=f"mod-{name}"))
-        if list_view.children:
-            list_view.focus()
+            label = f"{name}" + (f" — {desc}" if desc else "")
+            cb = Checkbox(label, value=name in self._enabled, id=f"mod-{name}")
+            container.mount(cb)
+        checkboxes = list(container.query(Checkbox))
+        if checkboxes:
+            checkboxes[0].focus()
 
-    def on_list_view_selected(self, event):
-        """Toggle the selected module and refresh its detail label."""
-        item = event.item
-        if item.id is None:
+    def on_checkbox_changed(self, event):
+        """A module checkbox was toggled: update the enabled set."""
+        checkbox = event.checkbox
+        if checkbox.id is None:
             return
-        name = item.id.split("-", 1)[1]
-        if name in self._enabled:
-            self._enabled.discard(name)
-        else:
+        name = checkbox.id.split("-", 1)[1]
+        if event.value:
             self._enabled.add(name)
-        label = item.query_one(Label)
-        manifest = next((m for m in self._discovered() if m.get("name") == name), {})
-        marker = "[x]" if name in self._enabled else "[ ]"
-        desc = manifest.get("description", "")
-        text = f"{marker} {name}" + (f" — {desc}" if desc else "")
-        label.update(text)
+            state = "enabled"
+        else:
+            self._enabled.discard(name)
+            state = "disabled"
         self._show_detail(name)
+        self.notify(f"{name} {state}")
 
-    def on_list_view_highlighted(self, event):
-        """Show detail for the highlighted item as the cursor moves."""
-        item = event.item
-        if item.id:
-            self._show_detail(item.id.split("-", 1)[1])
+    def _on_checkbox_change(self, name, value):
+        """Update enabled set and detail when a module checkbox changes."""
+        if value:
+            self._enabled.add(name)
+            state = "enabled"
+        else:
+            self._enabled.discard(name)
+            state = "disabled"
+        self._show_detail(name)
+        self.notify(f"{name} {state}")
+
+    def _make_toggle_handler(self, name):
+        """Return a value-changed callback that updates _enabled and detail."""
+
+        def _on_change(value):
+            self._on_checkbox_change(name, value)
+
+        return _on_change
 
     def _show_detail(self, name):
         manifest = next((m for m in self._discovered() if m.get("name") == name), {})
@@ -567,6 +621,8 @@ class ModulesScreen(ModalScreen):
         cfg.setdefault("modules", {}).update(self._loader.modules_config)
         cfg["modules"]["enabled"] = sorted(self._enabled)
         project_config.save_config(self._loader.root, cfg)
+        # Make sure the loader uses the same enabled set before reloading.
+        self._loader.modules_config = cfg["modules"]
         host = getattr(self._loader, "_host", None)
         if host is not None:
             # Hosted: reload on a FRESH bus — loader.load_all() alone would
@@ -578,7 +634,11 @@ class ModulesScreen(ModalScreen):
             )
         else:
             self._loader.load_all()
+        self.notify(f"modules saved: {', '.join(sorted(self._enabled))}")
         self.dismiss(True)
+
+    def action_dismiss(self, result=None):
+        self.dismiss(result if result is not None else False)
 
 
 # role -> log style (Rich markup); engine events get their own styles
@@ -655,7 +715,6 @@ class OrganismApp(App):
         Binding("f8", "show_tab('cells-pane')", "cells"),
         Binding("shift+f8", "show_tab('visual-pane')", "visual"),
         Binding("f9", "modules", "modules"),
-        Binding("f10", "doom_toggle", "doom"),
         Binding("up", "doom_up", "doom forward", show=False),
         Binding("down", "doom_down", "doom back", show=False),
         Binding("left", "doom_left", "doom turn left", show=False),
@@ -663,7 +722,7 @@ class OrganismApp(App):
         Binding("space", "doom_shoot", "doom shoot", show=False),
         Binding("escape", "doom_stop", "doom stop", show=False),
         Binding("ctrl+q", "quit", "quit"),
-        Binding("f10", "quit", "quit (ctrl+q can be eaten by terminal flow control)"),
+        Binding("f10", "confirm_quit", "quit"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
         Binding("ctrl+shift+c", "copy_chat", "copy chat log"),
         Binding("ctrl+m", "toggle_mouse", "toggle mouse capture"),
@@ -771,6 +830,7 @@ class OrganismApp(App):
         self.chat_input = None
         self._narrating = False
         self._responding = False
+        self._completion_matches = None
         self._completion_index = 0
         self._chat_history = []
         self._history_index = -1
@@ -794,6 +854,7 @@ class OrganismApp(App):
         self._mud_paused = True  # start paused; the human plays the MUD
         self._mud_thinking = False  # a move-choice worker is in flight
         self._mud_turn_gen = 0  # bumped by user moves/hints: stales in-flight
+        self._brain_running = False  # cached fly-brain state for activity label
         self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
@@ -869,6 +930,15 @@ class OrganismApp(App):
 
     def on_mount(self):
         """Render the initial organism state and start background timers."""
+        # Start with terminal mouse reporting off so native text selection/copy
+        # works by default. Press ctrl+m to enable in-app mouse clicks.
+        self._mouse_enabled = False
+        driver = getattr(self, "_driver", None)
+        if driver is not None:
+            try:
+                driver._disable_mouse_support()
+            except Exception:
+                pass
         self._show_org()
         tab_bar = self._safe_query("#tab-bar", TabBar)
         if tab_bar is not None:
@@ -889,12 +959,13 @@ class OrganismApp(App):
         if not self.org.store.chat_log and self.org.store.cycle == 0:
             self._append_log("a tiny replicanta wakes up inside your machine.", STYLE_DIM)
             self._append_log(
-                "talk to it — it learns from you. /help (or F1) for commands.",
+                "talk to it — it learns from you. /help (or F1) for commands. "
+                "ctrl+m toggles mouse capture; turn it off to select/copy text.",
                 STYLE_DIM,
             )
         for role, line in self.org.store.chat_log[-100:]:
             self._log_chat(role, line, stamp=False)
-        self.org.hooks.emit = lambda msg: self._append_log(f"lua · {msg}", STYLE_DIM, stamp=True)
+        self.org.hooks.set_emit(lambda msg: self._append_log(f"lua · {msg}", STYLE_DIM, stamp=True))
         self.refresh_top_bar()
         self._refresh_sidebar()
         self.refresh_status()
@@ -906,6 +977,18 @@ class OrganismApp(App):
         against it and their deliveries are dropped by the org-identity
         checks, so swapping is always safe. flush=False is for callers
         that already persisted the organism (e.g. just renamed it)."""
+        if self._group is not None:
+            # the group keeps the old (closed) organism object and would
+            # keep broadcasting against unpersisted state — end the
+            # session instead of re-seating it on the new organism
+            names = ", ".join(self._group.names())
+            for member in self._group.members.values():
+                if member is not self.org:
+                    member.flush(force=True)
+            self._group = None
+            group_ended = names
+        else:
+            group_ended = None
         if flush:
             self.org.flush(force=True)
         old_org = self.org
@@ -921,11 +1004,16 @@ class OrganismApp(App):
         self.query_one("#dreams", RichLog).clear()
         self._pending_hide()
         self._show_org()
+        if group_ended is not None:
+            self._append_log(f"— group chat ended ({group_ended}) —", STYLE_DIM, stamp=True)
         self._append_log(f"— now living with {name} —", STYLE_DIM, stamp=True)
 
     # -- actions ---------------------------------------------------------
     def action_show_tab(self, pane):
-        self.query_one(TabbedContent).active = pane
+        """Switch to a tab pane by ID, creating/refreshing the tab bar selection
+        so the displayed pane and the highlighted tab stay in sync."""
+        tabbed = self.query_one(TabbedContent)
+        tabbed.active = pane
         tab_bar = self._safe_query("#tab-bar", TabBar)
         if tab_bar is not None:
             tab_bar.set_active(pane)
@@ -948,7 +1036,7 @@ class OrganismApp(App):
             if svc.running():
                 self.set_timer(0.3, self._doom_take_turn)
             return
-        # Already on the DOOM pane: pressing F10 again stops the game and leaves the pane.
+        # Already on the DOOM pane: toggling again stops the game and leaves the pane.
         if svc.running():
             self._doom_command(["stop"])
 
@@ -1008,7 +1096,7 @@ class OrganismApp(App):
             self.action_show_tab(button_id[4:])
             return
         if button_id == "mutation-approve":
-            entry = extensions.approve(self.org.extension_path)
+            entry = extensions.approve(self.org.dir_path / "artifacts" / "extensions.json")
             if entry:
                 self.org.store.remember("skill", f"patch applied ({entry['kind']})")
                 self._append_log(
@@ -1019,7 +1107,7 @@ class OrganismApp(App):
             self._update_mutation_banner()
             return
         if button_id == "mutation-reject":
-            entry = extensions.reject(self.org.extension_path)
+            entry = extensions.reject(self.org.dir_path / "artifacts" / "extensions.json")
             if entry:
                 self.org.store.remember("skill", f"patch rejected ({entry['kind']})")
                 self._append_log(f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True)
@@ -1078,6 +1166,39 @@ class OrganismApp(App):
         self._arm_hard_exit()
         self.exit()
 
+    def action_confirm_quit(self):
+        """F10 asks before quitting, unlike ctrl+q which is the fast path."""
+        def check(answer):
+            if answer:
+                self.action_quit()
+
+        class QuitDialog(ModalScreen[bool]):
+            BINDINGS = [Binding("escape", "dismiss", "close")]
+            CSS = """
+            QuitDialog { align: center middle; }
+            #quit-box { width: 50; height: auto; border: round $primary; padding: 1 2; background: $surface; }
+            """
+
+            def compose(self) -> ComposeResult:
+                with Vertical(id="quit-box"):
+                    yield Static("Quit Replicanta?", classes="title")
+                    yield Static("The organism state will be saved.")
+                    yield Horizontal(
+                        Button("Yes", id="quit-yes", variant="primary"),
+                        Button("No", id="quit-no"),
+                    )
+
+            def on_button_pressed(self, event):
+                self.dismiss(event.button.id == "quit-yes")
+
+            def on_key(self, event):
+                if event.key == "y":
+                    self.dismiss(True)
+                elif event.key == "n":
+                    self.dismiss(False)
+
+        self.push_screen(QuitDialog(), callback=check)
+
     def action_copy_chat(self):
         """Copy the visible chat log to the system clipboard. Falls back to
         writing plain text to a temp file if no clipboard backend is available."""
@@ -1132,12 +1253,23 @@ class OrganismApp(App):
         return dest
 
     def action_toggle_mouse(self):
-        """Toggle Textual's mouse capture. When captured, clicks work inside
-        the app but the terminal cannot select text. When released, native
-        terminal mouse selection (and copying) works."""
-        enabled = not self.mouse_captured
-        self.capture_mouse(enabled)
-        status = "enabled" if enabled else "disabled"
+        """Toggle Textual's terminal mouse reporting. When enabled, mouse clicks
+        work inside the app; when disabled, the terminal regains native text
+        selection. We track the desired state in an instance flag because
+        Textual's capture_mouse API is for widget-level capture, not for
+        turning the terminal's mouse protocol on/off."""
+        self._mouse_enabled = getattr(self, "_mouse_enabled", True)
+        self._mouse_enabled = not self._mouse_enabled
+        driver = getattr(self, "_driver", None)
+        if driver is not None:
+            try:
+                if self._mouse_enabled:
+                    driver._enable_mouse_support()
+                else:
+                    driver._disable_mouse_support()
+            except Exception:
+                pass
+        status = "enabled" if self._mouse_enabled else "disabled"
         self._append_log(f"— mouse capture {status} (ctrl+m to toggle) —", STYLE_DIM, stamp=True)
 
     def _arm_hard_exit(self, delay=0.75):
@@ -1163,20 +1295,53 @@ class OrganismApp(App):
         self.notify("press ctrl+c again to quit", timeout=1.0)
 
     def refresh_top_bar(self):
-        """Render the custom top bar: app wordmark, organism identity,
-        mood/mental state, and voice/mic/clock indicators."""
+        """Render the custom top bar: wordmark and organism identity on the
+        left, mood and mental state in the center, voice/mic/clock indicators
+        on the right — one terminal line, aiperf-style."""
         lc = self.org.lifecycle
-        icon = {"wake": "🧠", "sleep": "💤", "dead": "🪦"}.get(lc.state, "🧠")
         word = {"wake": "awake", "sleep": "asleep", "dead": "faded"}.get(lc.state, lc.state)
+        state_style = {"wake": "green", "sleep": "cyan", "dead": "red"}.get(lc.state, "")
         mood = self.org.store.belief_value("self", "mood", "calm")
         s = self.org.store
-        mental = f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f}"
-        mic = " 🎙" if self.listener.recording else ""
-        spoken = " 🔊" if speech.enabled else ""
         voice = llmclient.voice_status()
+        voice_style = {"online": "green", "offline": "red"}.get(voice, "dim")
+        recording = self.listener.recording
+        spoken = speech.enabled
         clock = self.org.probe.clock_utc()
+        left = Text.assemble(
+            ("◆ REPLICANTA", "bold cyan"),
+            ("  │  ", "dim"),
+            (self._org_name(), "bold"),
+            ("  ·  ", "dim"),
+            (word, state_style),
+            ("  ·  ", "dim"),
+            (mood, "dim"),
+        )
+        center = Text.assemble(
+            ("a/r/i ", "dim"),
+            (f"{s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f}", "bold"),
+        )
+        right = Text.assemble(
+            ("voice ", "dim"),
+            (voice, voice_style),
+        )
+        if recording:
+            right.append("   ")
+            right.append("mic", style="reverse green")
+        if spoken:
+            right.append("   ")
+            right.append("spk", style="reverse green")
+        right.append("   ")
+        right.append(clock, style="bold")
+        bar = Table.grid(expand=True)
+        bar.add_column(justify="left")
+        bar.add_column(justify="center")
+        bar.add_column(justify="right")
+        bar.add_row(left, center, right)
         text = (
-            f"Replicanta  │  {icon} {self._org_name()} · {word} · {mood} · {mental}  │  {voice}{mic}{spoken}  {clock}"
+            f"◆ REPLICANTA │ {self._org_name()} · {word} · {mood} · "
+            f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f} · "
+            f"voice {voice}{' mic' if recording else ''}{' spk' if spoken else ''} · {clock}"
         )
         self._topbar_text = text
         if text == self._rendered_topbar_text:
@@ -1184,7 +1349,7 @@ class OrganismApp(App):
         self._rendered_topbar_text = text
         topbar = self._safe_query("#topbar", Static)
         if topbar is not None:
-            topbar.update(text)
+            topbar.update(bar)
 
     def _refresh_sidebar(self):
         """Rebuild the nursery sidebar, highlighting the current organism."""
@@ -1230,7 +1395,10 @@ class OrganismApp(App):
         """(item, in_sidebar) for a screen position: the sidebar ListItem
         under it (None over chrome/empty space); in_sidebar is False when
         the position is outside the sidebar entirely."""
-        widget, _region = self.screen.get_widget_at(screen_x, screen_y)
+        try:
+            widget, _region = self.screen.get_widget_at(screen_x, screen_y)
+        except Exception:  # noqa: BLE001 — NoWidget when clicking in a screen gap
+            return None, False
         node = widget
         while node is not None:
             if isinstance(node, ListItem) and node.name:
@@ -1865,15 +2033,32 @@ class OrganismApp(App):
                 self.chat_input.focus()
             else:
                 value = self.chat_input.value
-                new_value, self._completion_index = tui_commands.complete_command(value, self._completion_index)
-                if new_value != value:
-                    self._set_chat_value(new_value)
+                if self._completion_matches is None:
+                    # capture the candidates once per typed token, then
+                    # cycle that same list across consecutive Tabs —
+                    # recomputing from the just-completed word would
+                    # collapse the match set to one
+                    self._completion_matches = tui_commands.completion_matches(value)
+                    self._completion_index = 0
+                if self._completion_matches:
+                    new_value, self._completion_index = tui_commands.complete_command(
+                        value,
+                        self._completion_matches,
+                        self._completion_index,
+                    )
+                    if new_value != value:
+                        self._set_chat_value(new_value)
             # without prevent_default, App._on_key still runs focus_next
             # (MRO dispatch ignores event.stop) and steals focus from the input
             event.prevent_default()
             event.stop()
         elif event.key in ("up", "down"):
             if self.chat_input is None or not self.chat_input.has_focus:
+                return
+            if self.query_one(TabbedContent).active == "doom-pane":
+                # on the DOOM pane the arrows drive the player (doom_up/
+                # doom_down bindings); prevent_default here would swallow
+                # them, so leave the key to binding dispatch
                 return
             delta = -1 if event.key == "up" else 1
             value = self._browse_history(delta)
@@ -1900,7 +2085,13 @@ class OrganismApp(App):
         return value
 
     def on_input_changed(self, event):
+        if event.input.id != "chat":
+            # rename/name prompts and the palette input also bubble
+            # Changed up to the app; only the chat line drives hints
+            # and typing state
+            return
         if not self._suppress_changed:
+            self._completion_matches = None
             self._completion_index = 0
             self._history_index = -1
         hints = self._safe_query("#command-hints", CommandHints)
@@ -2005,8 +2196,24 @@ class OrganismApp(App):
             self._render_event(event)
         if self._busy():
             self._busy_frame = (self._busy_frame + 1) % 3
+        self._update_brain_activity()
         self._refresh_views()
         self.refresh_status()
+
+    def _update_brain_activity(self):
+        """Show/hide the transient fly-brain activity indicator. Use U+1FAB0 🪰
+        when the brain is processing so the activation state is visually
+        distinct from the static ready indicator in the status bar."""
+        loader = getattr(self.org, "module_loader", None)
+        svc = loader.registry.get("brain") if loader is not None else None
+        running = svc is not None and svc.running()
+        if running == self._brain_running:
+            return
+        self._brain_running = running
+        if running:
+            self.set_activity("\U0001FAB0 fly brain processing data…")
+        else:
+            self.clear_activity()
 
     def _busy(self):
         return self._narrating or self._responding or self._self_talking or self._group_responding
@@ -2116,8 +2323,8 @@ class OrganismApp(App):
             self._reflect()
 
     def refresh_status(self):
-        """Render the custom bottom bar: activity on the left, compact
-        counters and keyboard shortcuts on the right."""
+        """Render the custom bottom bar: activity counters on the left,
+        keyboard shortcuts as styled key caps on the right."""
         m = self.org.metrics()
         if self._mud_game is not None:
             playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
@@ -2129,18 +2336,34 @@ class OrganismApp(App):
         doom_svc = loader.registry.get("doom") if loader is not None else None
         if doom_svc is not None and doom_svc.running():
             playing += " · 💀 doom"
-        text = (
-            f"{m.belief_count} beliefs · {m.rule_count} rules · "
-            f"inner voice {llmclient.voice_status()}{playing}  │  "
-            "ctrl+p palette · F1 help · F2-F8 tabs · shift+F8 visual · ctrl+q quit "
-            "(or F10, ctrl+c×2, /quit)"
+        brain_svc = loader.registry.get("brain") if loader is not None else None
+        brain_loaded = brain_svc is not None
+        if brain_loaded:
+            if brain_svc.running():
+                playing += " · \U0001FAB0 fly brain running"
+            else:
+                playing += " · \U0001FAB0 fly brain ready"
+        counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {llmclient.voice_status()}{playing}"
+        keys = Text.assemble(
+            ("ctrl+p", "reverse"),
+            (" palette ", ""),
+            ("·", "dim"),
+            ("  F1", "reverse"),
+            (" help ", ""),
+            ("·", "dim"),
+            ("  F2-F8", "reverse"),
+            (" tabs ", ""),
+            ("·", "dim"),
+            ("  ctrl+q", "reverse"),
+            (" quit", ""),
         )
+        text = f"{counters}   {keys.plain}"
         self._bottombar_text = text
         if text != self._rendered_bottombar_text:
             self._rendered_bottombar_text = text
             bottombar = self._safe_query("#bottombar-text", Static)
             if bottombar is not None:
-                bottombar.update(text)
+                bottombar.update(Text(f"{counters}   ") + keys)
         self._update_quick_actions()
 
     def _update_quick_actions(self):
@@ -2464,6 +2687,10 @@ class OrganismApp(App):
 
     # -- chat line -------------------------------------------------------
     def on_input_submitted(self, event):
+        if event.input.id != "chat":
+            # modal rename/name prompts and the palette input bubble
+            # Submitted up to the app too; only the chat line is chat
+            return
         text = event.value.strip()
         self.query_one("#chat", Input).value = ""
         tui_commands.history_push(self._chat_history, text)
@@ -2743,16 +2970,49 @@ class OrganismApp(App):
             self._append_log("fly-brain module not loaded (enable it via /modules)", STYLE_WARN)
             return
         commands = loader.registry.get("commands")
-        if commands is None:
-            self._append_log("command service unavailable", STYLE_WARN)
-            return
-        try:
-            result = commands.dispatch("/brain", args if args else [])
-        except Exception as exc:  # noqa: BLE001
-            self._append_log(f"brain command failed: {exc}", STYLE_WARN)
-            return
+        result = None
+        if commands is not None:
+            try:
+                result = commands.dispatch("/brain", args if args else [])
+            except Exception as exc:  # noqa: BLE001
+                self._append_log(f"brain command dispatch failed: {exc}", STYLE_WARN)
+        # Fallback: call the brain service directly if dispatch failed or returned nothing.
+        if not result:
+            try:
+                verb = (args[0] if args else "status").lower()
+                if verb in ("status", ""):
+                    result = svc.status()
+                elif verb == "bank":
+                    result = svc.bank()
+                elif verb in ("run", "optimize"):
+                    task = args[1] if len(args) > 1 else "digits"
+                    try:
+                        if svc.optimize(task):
+                            result = f"fly brain: optimizing {task} harness (async)"
+                        else:
+                            result = "fly brain: optimize not started"
+                    except Exception:
+                        # Fall back to the simpler run-only CLI if optimize is unavailable.
+                        if svc.run_task(task):
+                            result = f"fly brain: running {task} harness (async)"
+                        else:
+                            result = "fly brain: run not started"
+                elif verb == "adapt":
+                    if svc.adapt():
+                        result = "fly brain: drift rehearsal started (async)"
+                    else:
+                        result = "fly brain: run not started"
+                else:
+                    result = "usage: /brain [status|bank|run <task>|optimize <task>|adapt]"
+            except Exception as exc:  # noqa: BLE001
+                self._append_log(f"brain command failed: {exc}", STYLE_WARN)
+                return
         for line in str(result or "").splitlines():
             self._append_log(line, STYLE_DIM)
+        # If the command started an async run, refresh status so the indicator appears.
+        if args and args[0].lower() in ("run", "optimize", "adapt"):
+            self.refresh_status()
+            self.set_activity("🪰 fly brain is running…")
 
     def _doom_command(self, args):
         """Dispatch /doom subcommands: bare = status, start/stop, or direct

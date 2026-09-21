@@ -64,6 +64,50 @@ def _loaded_rule_ok(text):
     return isinstance(text, str) and "\n" not in text and "\r" not in text
 
 
+def _loaded_pair_ok(pair):
+    """Re-validate a two-item collection entry (attention pair, chat line)
+    from state.json: an iterable of exactly two strings."""
+    return isinstance(pair, (list, tuple)) and len(pair) == 2 and all(isinstance(s, str) for s in pair)
+
+
+def _loaded_memory_ok(m):
+    """A memory episode must survive narration (which indexes m['cycle']
+    and m['text']) and ranking: a dict with a non-empty text and an int
+    cycle stamp."""
+    return (
+        isinstance(m, dict)
+        and isinstance(m.get("text"), str)
+        and bool(m["text"].strip())
+        and isinstance(m.get("cycle"), int)
+        and not isinstance(m["cycle"], bool)
+    )
+
+
+def _loaded_goal_ok(g):
+    """A goal must survive active_goal()/_goals_tick/mind_view, which index
+    text, done_cycle, created_cycle and marker: a dict with a non-empty
+    text, int cycle stamps (done_cycle may be None) and a numeric marker.
+    Entries missing any of these are dropped like other filtered state."""
+    if not isinstance(g, dict):
+        return False
+    if not isinstance(g.get("text"), str) or not g["text"].strip():
+        return False
+    for key in ("created_cycle", "marker"):
+        value = g.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+    if "done_cycle" not in g:
+        return False
+    done = g["done_cycle"]
+    return done is None or (isinstance(done, (int, float)) and not isinstance(done, bool))
+
+
+def _as_list(value):
+    """Coerce a loaded JSON field to a list; anything else reads as empty;
+    a corrupt-but-parseable state.json must not crash boot."""
+    return value if isinstance(value, list) else []
+
+
 class BeliefStore:
     """In-memory belief dict + archived beliefs + chaos + cycle, persisted to
     state.json. `organism.scl` is rendered from this on every save."""
@@ -78,7 +122,7 @@ class BeliefStore:
         self._derived_cache: dict[str, Any] | None = None
         self.chaos = 0.5
         self.stress = 0.05
-        self.arousal = 0.3  # activation/energy (see MentalState)
+        self.arousal = 0.15  # activation/energy; low at birth
         self.rationality = 0.5  # grounded coherence (see MentalState)
         self.irrationality = 0.2  # chaos/stress-driven incoherence
         self.insane = False  # extreme stress + incoherence
@@ -96,6 +140,7 @@ class BeliefStore:
         self.last_diary_cycle = 0
         self.last_reflect_cycle = 0
         self.activity = {}  # neurosymbolic activity counters (activity.py)
+        self.fatigue = 0.0  # sleep debt; rises while wake, resets on sleep
         self.surprise_this_tick = False
         self.on_adverse = None  # callback(amount) fired on contradiction
         self.on_utterance = None  # callback(role, text) fired on chat lines
@@ -174,7 +219,10 @@ class BeliefStore:
         self._derived_cache = {
             "needs_user": needs_user,
             "contradictions": contradictions,
-            "stress_mood": mood in {"tired", "scared", "angry"},
+            # only moods _compute_mood can actually write to (self, mood, X);
+            # "tired"/"scared"/"angry" are user-feeling vocabulary and never
+            # occur here. narration reads this into its snapshot.
+            "stress_mood": mood in {"insane", "hurt", "anxious"},
         }
         return self._derived_cache
 
@@ -241,23 +289,29 @@ class BeliefStore:
     def observe(self, belief, conf):
         """Replace the current reading for (obj, attr): a fresh perception
         supersedes the old one without triggering the contradiction/archive
-        path (which is reserved for conflicting internal derivations)."""
+        path (which is reserved for conflicting internal derivations). Any
+        coexisting value for the same (obj, attr) is dropped, including
+        sub-threshold leftovers that add()'s contradiction gate lets sit
+        alongside the held value."""
         obj, attr, val = belief
         if not VALID_VALUE_RE.match(obj) or not VALID_VALUE_RE.match(attr) or not VALID_VALUE_RE.match(val):
             raise ValueError(f"invalid belief value in {belief}")
         conf = float(conf)
         key = (obj, attr, val)
+        changed = False
         for o, a, v in list(self.beliefs_map):
             if (o, a) == (obj, attr):
                 if v == val and self.beliefs_map[(o, a, v)] == conf:
-                    return  # unchanged reading: nothing to persist
+                    continue  # unchanged reading: keep the existing entry
                 del self.beliefs_map[(o, a, v)]
                 self._unindex_belief((o, a, v))
-        self.beliefs_map[key] = conf
-        self._index_belief(key, conf)
-        self.dirty = True
-        self.genome_dirty = True
-        self._invalidate_derived()
+                changed = True
+        if changed or key not in self.beliefs_map:
+            self.beliefs_map[key] = conf
+            self._index_belief(key, conf)
+            self.dirty = True
+            self.genome_dirty = True
+            self._invalidate_derived()
 
     def beliefs(self):
         """Return a shallow copy of the live belief map."""
@@ -302,7 +356,13 @@ class BeliefStore:
     def add_goal(self, text, marker=0, strategy=None):
         """Form a new intention: one active goal at a time, cycle-stamped.
         `marker` records the progress baseline (e.g. user-fact count at
-        formation) so the engine can tell when the goal is achieved."""
+        formation) so the engine can tell when the goal is achieved.
+
+        Refuses (returns None) while another goal is still active, so the
+        queue never holds two unfinished fronts; completed-goal history is
+        left intact."""
+        if self.active_goal() is not None:
+            return None
         self.goals.append(
             {
                 "text": text,
@@ -313,6 +373,7 @@ class BeliefStore:
             }
         )
         self.dirty = True
+        return self.goals[-1]
 
     def active_goal(self):
         """Return the first unfinished goal, or None."""
@@ -430,6 +491,7 @@ class BeliefStore:
             "last_diary_cycle": self.last_diary_cycle,
             "last_reflect_cycle": self.last_reflect_cycle,
             "activity": self.activity,
+            "fatigue": self.fatigue,
             "auto_apply_patches": self.auto_apply_patches,
         }
         atomic_write_text(self.state_path, json.dumps(state, indent=2))
@@ -442,13 +504,16 @@ class BeliefStore:
             state = json.loads(self.state_path.read_text())
         except (OSError, ValueError):
             return  # a corrupt state.json must not crash startup
+        if not isinstance(state, dict):
+            return  # valid JSON, wrong shape: keep fresh defaults
         self.chaos = state.get("chaos", 0.5)
         self.stress = state.get("stress", 0.05)
-        self.arousal = state.get("arousal", 0.3)
+        self.arousal = state.get("arousal", 0.15)
         self.rationality = state.get("rationality", 0.5)
         self.irrationality = state.get("irrationality", 0.2)
         self.insane = state.get("insane", False)
         self.fade_streak = state.get("fade_streak", 0)
+        self.fatigue = state.get("fatigue", 0.0)
         self.cycle = state.get("cycle", 0)
         self.rule_counter = state.get("rule_counter", 0)
         # state.json is app-owned (0600) but load() must re-validate anyway:
@@ -456,32 +521,43 @@ class BeliefStore:
         # tampered state file would otherwise inject Scallop relations.
         self.rules = [
             (r[0], int(r[1]))
-            for r in state.get("rules", [])
+            for r in _as_list(state.get("rules"))
             if isinstance(r, (list, tuple))
             and len(r) == 2
             and _loaded_rule_ok(r[0])
             and isinstance(r[1], (int, float))
             and not isinstance(r[1], bool)
         ]
-        self.beliefs_map = {(b[0], b[1], b[2]): float(b[3]) for b in state.get("beliefs", []) if _loaded_belief_ok(b)}
-        self.archived_map = {(b[0], b[1], b[2]): float(b[3]) for b in state.get("archived", []) if _loaded_belief_ok(b)}
-        self.attention = {tuple(p) for p in state.get("attention", [])}
-        self.chat_log = [list(c) for c in state.get("chat", [])]
+        self.beliefs_map = {
+            (b[0], b[1], b[2]): float(b[3]) for b in _as_list(state.get("beliefs")) if _loaded_belief_ok(b)
+        }
+        self.archived_map = {
+            (b[0], b[1], b[2]): float(b[3]) for b in _as_list(state.get("archived")) if _loaded_belief_ok(b)
+        }
+        self.attention = {tuple(p) for p in _as_list(state.get("attention")) if _loaded_pair_ok(p)}
+        self.chat_log = [list(c) for c in _as_list(state.get("chat")) if _loaded_pair_ok(c)]
         self.memory = [
-            memory_module.attach_importance(dict(m), current_cycle=self.cycle) for m in state.get("memory", [])
+            memory_module.attach_importance(dict(m), current_cycle=self.cycle)
+            for m in _as_list(state.get("memory"))
+            if _loaded_memory_ok(m)
         ]
-        self.thread_results = deque(state.get("thread_results", []), maxlen=20)
-        self.goals = [dict(g) for g in state.get("goals", [])]
+        self.thread_results = deque(_as_list(state.get("thread_results")), maxlen=20)
+        self.goals = [dict(g) for g in _as_list(state.get("goals")) if _loaded_goal_ok(g)]
         self.last_goal_cycle = state.get("last_goal_cycle", 0)
         self.last_diary_cycle = state.get("last_diary_cycle", 0)
         self.last_reflect_cycle = state.get("last_reflect_cycle", 0)
         self.auto_apply_patches = state.get("auto_apply_patches", False)
         self.activity = {}
-        for k, v in state.get("activity", {}).items():
-            if isinstance(v, (list, dict)):
-                self.activity[k] = v
-            else:
-                self.activity[k] = int(v)
+        activity = state.get("activity", {})
+        if isinstance(activity, dict):
+            for k, v in activity.items():
+                if isinstance(v, (list, dict)):
+                    self.activity[k] = v
+                else:
+                    try:
+                        self.activity[k] = int(v)
+                    except (TypeError, ValueError):
+                        continue  # an uncountable value drops with the counter
 
 
 # Scallop contexts are thread-affine: they must be created and dropped on the
@@ -724,6 +800,8 @@ class MentalState:
     RECOVERY_STRESS = 0.6  # hysteresis: recover when stress drops below this
     RECOVERY_IRRATIONALITY = 0.45  # hysteresis: recover when incoherence drops below this
     SMOOTHING = 0.25  # EMA share per tick-second
+    WAKE_FATIGUE_RATE = 0.02  # fatigue per second while awake
+    SLEEP_RECOVERY_RATE = 0.08  # fatigue recovered per second while asleep
 
     def __init__(self, store):
         """MentalState smooths arousal/rationality/irrationality and decides the
@@ -754,7 +832,20 @@ class MentalState:
         when the insane flag flipped."""
         stress = self.store.stress
         share = self._grounded_share()
-        arousal_t = 0.15 if sleeping else self._clamp(0.25 + 0.45 * chaos + 0.3 * stress)
+        # Fatigue tracks sleep debt: builds while awake, recovers while asleep.
+        if sleeping:
+            self.store.fatigue = self._clamp(self.store.fatigue - self.SLEEP_RECOVERY_RATE * dt)
+        else:
+            self.store.fatigue = self._clamp(self.store.fatigue + self.WAKE_FATIGUE_RATE * dt)
+        # Arousal is energy: low when asleep, low when fatigued, moderate when fresh.
+        fatigue = self.store.fatigue
+        if sleeping:
+            arousal_t = 0.1
+        else:
+            base = 0.25
+            rested_bonus = 0.35 * (1.0 - fatigue)
+            tired_penalty = -0.35 * fatigue
+            arousal_t = self._clamp(base + rested_bonus + tired_penalty + 0.2 * chaos + 0.15 * stress)
         irrationality_t = self._clamp(0.55 * chaos + 0.55 * stress)
         rationality_t = self._clamp(0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
         rate = min(1.0, self.SMOOTHING * dt)
@@ -1006,9 +1097,15 @@ class Lifecycle:
         self.transition("wake")
 
     def transition(self, new_state):
-        """Record a state change and reset the elapsed timer."""
+        """Record a state change, reset the elapsed timer, and reset fatigue on wake."""
         self.state = new_state
         self.state_started = time.time()
+        if new_state == "wake":
+            # Waking up restores some fatigue but not instantly to fully rested.
+            self.store.fatigue = max(0.0, self.store.fatigue * 0.5)
+        elif new_state == "sleep":
+            # Falling asleep begins recovery; final recovery happens during sleep ticks.
+            self.store.fatigue = max(0.0, self.store.fatigue - 0.3)
 
     def due(self):
         """True when the current state's duration has elapsed."""
@@ -1042,7 +1139,14 @@ class Metrics:
     @property
     def abstraction_count(self):
         heads = {r[0].split("(")[0].split()[-1] for r in self.store.rules}
-        refs = sum(1 for (_t, _d) in self.store.rules for h in heads if h in _t and h != _t.split("(")[0].split()[-1])
+        refs = 0
+        for text, _depth in self.store.rules:
+            own = text.split("(")[0].split()[-1]
+            body = text.split("=", 1)[-1]
+            for h in heads:
+                # word-boundary match: head q1 must not count inside q10
+                if h != own and re.search(rf"\b{re.escape(h)}\b", body):
+                    refs += 1
         return refs
 
     def score(self):
@@ -1095,9 +1199,8 @@ class Organism:
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
         self.thread_pool = ThreadPool(max_workers=4)
         # Hooks engine is created here so code can attach to it before load();
-        # the module-driven hooks service is wired in load().
+        # the Lua host and the persistent store sink are wired in load().
         self.hooks = HookEngine(scripts_dir_for(dir_path), hooks_service=None)
-        self._default_hook_emit = self.hooks.emit
         self.store.on_utterance = lambda role, text: self.hooks.fire("utterance", self, text=text)
         self.store.chaos = chaos
         self.store.on_adverse = self.meter.bump
@@ -1145,11 +1248,11 @@ class Organism:
         self.module_loader = self.lua_host.loader
         self.persona_service = self.lua_host.registry.get("persona")
         # Wire the engine created in __init__ in place so anything attached
-        # to it before load() survives.
-        self.hooks._host = self.lua_host
-        self.hooks.hooks_service = self.lua_host.hooks
-        if self.hooks.emit is self._default_hook_emit:
-            self.hooks.emit = lambda msg: self.store.record_chat("system", msg)
+        # to it before load() survives: dispatch mirrors the Lua host, and
+        # every hook log line fans into the store's chat log plus the live
+        # sink (when a UI installs one via set_emit).
+        self.hooks.attach_host(self.lua_host)
+        self.hooks.set_store_sink(self._emit_log)
         if fresh:
             self.store.remember("born", "woke into existence")
             self.hooks.fire("birth", self)
@@ -1367,28 +1470,34 @@ class Organism:
     def add_goal(self, text):
         """Give the organism an intention (formed by its voice, or a
         fallback). Records the user-fact count as the progress marker for
-        learn-goals and remembers the moment as an episode."""
+        learn-goals and remembers the moment as an episode. One active goal
+        at a time: while a goal is still active the new one is refused and
+        None is returned (nothing is remembered for a refused goal)."""
         marker = self.store.count_beliefs("user")
-        self.store.add_goal(text, marker=marker, strategy=goals.formulate_subgoals(text))
-        self.store.remember("goal", f"new goal: {text}")
+        goal = self.store.add_goal(text, marker=marker, strategy=goals.formulate_subgoals(text))
+        if goal is not None:
+            self.store.remember("goal", f"new goal: {text}")
+        return goal
 
     def _goals_tick(self):
         """Goal lifecycle per wake tick: complete the active goal when its
         heuristic is met; otherwise ask the voice for a new one when the
-        cooldown has passed. Emits {"kind": "goal"|"want_goal"} events."""
+        cooldown has passed. Emits {"kind": "goal"|"want_goal"} events.
+
+        Progress is tracked on one metric for every goal kind — the
+        user-fact count — so update_progress/is_stalled and
+        goals.goal_progress compare the same series."""
         events = []
         goal = self.store.active_goal()
         if goal is not None:
             done = False
             text = goal["text"].lower()
+            progress = self.store.count_beliefs("user")
             if any(w in text for w in ("learn", "user", "know")):
-                facts = self.store.count_beliefs("user")
-                done = facts >= goal["marker"] + self.GOAL_LEARN_GROWTH
-                goals.update_progress(goal, self.store.cycle, facts)
+                done = progress >= goal["marker"] + self.GOAL_LEARN_GROWTH
             else:
-                progress = self.store.cycle - goal["created_cycle"]
-                done = progress >= self.GOAL_PURSUIT_CYCLES
-                goals.update_progress(goal, self.store.cycle, progress)
+                done = self.store.cycle - goal["created_cycle"] >= self.GOAL_PURSUIT_CYCLES
+            goals.update_progress(goal, self.store.cycle, progress)
             if done:
                 finished = self.store.complete_active_goal()
                 self.store.remember("goal", f"completed: {finished['text']}")
@@ -1396,7 +1505,7 @@ class Organism:
                 # completing a goal is exactly the experience worth
                 # distilling a technique from
                 events.append({"kind": "want_reflect"})
-            elif goals.is_stalled(goal, self.store.cycle, goal.get("last_progress_current", 0)):
+            elif goals.is_stalled(goal, self.store.cycle, progress):
                 events.append({"kind": "goal_stalled", "text": goal["text"]})
         elif self.store.cycle > 0 and self.store.cycle - self.store.last_goal_cycle >= self.GOAL_COOLDOWN:
             self.store.last_goal_cycle = self.store.cycle  # stamp: fire once
@@ -1456,10 +1565,17 @@ class Organism:
             replace = item["replace"]
             confidence = item["confidence"]
             if confidence >= learning.LEARN_CONF:
-                if replace:
-                    self.store.observe(belief, confidence)
-                else:
-                    self.store.add(belief, confidence)
+                try:
+                    if replace:
+                        self.store.observe(belief, confidence)
+                    else:
+                        self.store.add(belief, confidence)
+                except ValueError as exc:
+                    # a fact outside the belief vocabulary must never kill
+                    # the chat handler; learning._extract_facts guards the
+                    # common paths, this is the last line of defense
+                    logger.warning("dropping unlearnable fact %s: %s", belief, exc)
+                    continue
                 self.store.note_activity("facts_learned")
                 self.store.remember("learned", learning.describe(belief))
                 events.append({"kind": "learned", "belief": belief, "text": learning.describe(belief)})
@@ -1579,6 +1695,8 @@ class Organism:
         self.lifecycle.revive()
         self._sentiment = None
         self._mood = None
+        self.store.fatigue = 0.0
+        self.store.arousal = 0.15
         self.store.remember("revived", "stirred back into existence")
         self.flush(force=True)
         return True
@@ -1663,7 +1781,8 @@ class Organism:
                         self.store.add(belief, max(before, tag))
                 # chaos-weighted generalization: commit the rule itself
                 if self.store.chaos > 0.0 and rng.random() < self.store.chaos * 0.25:
-                    depth = self.questioner._rule_depth(rule.split('"')[1], rule.split('"')[3])
+                    # split('"') tokens: [pre, attr_a, mid, val_a, mid, attr_b, ...]
+                    depth = self.questioner._rule_depth(rule.split('"')[1], rule.split('"')[5])
                     self.store.commit_rule(rule, depth)
                     self.store.remember("rule", f"committed a rule: {rule[:80]}")
             except Exception as exc:  # noqa: BLE001 — thread errors are logged, not fatal

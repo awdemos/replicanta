@@ -40,32 +40,26 @@ import threading
 from pathlib import Path
 
 from replicanta import lua_sandbox, telemetry
-
-EVENTS = (
-    "birth",
-    "cycle",
-    "learned",
-    "utterance",
-    "fade",
-    "mud_turn",
-    "mud_win",
-    "mud_end",
-)
+from replicanta.modules import HookService
 
 
 class HookEngine:
-    """Discovers and fires Lua hooks. Pure apart from the `emit` callback
-    (which the TUI points at the chat log); headless organisms work too."""
+    """Discovers and fires Lua hooks. Pure apart from the emit sinks (the
+    TUI points the live one at the chat log); headless organisms work too."""
 
     def __init__(self, scripts_dir, emit=None, hooks_service=None, host=None):
         self.scripts_dir = Path(scripts_dir)
-        self.emit = emit if emit is not None else (lambda _msg: None)
+        self._live_sink = emit if emit is not None else (lambda _msg: None)
+        self._store_sink = None  # installed by the organism: persisted copy of every line
         self.hooks_service = hooks_service
-        self._host = host
+        self._host = None
         self._lock = threading.Lock()
         self._lua = None
         self._available = None  # None = untested, False = lupa missing
-        self.reload()
+        if host is not None:
+            self.attach_host(host)
+        else:
+            self.reload()
 
     def reload(self):
         """Re-read the scripts directory (drop + rebuild the runtime)."""
@@ -76,43 +70,50 @@ class HookEngine:
         self.scripts = sorted(self.scripts_dir.glob("*.lua")) if self.scripts_dir.is_dir() else []
         self._lua = None
 
+    # -- emit routing --------------------------------------------------------
+    @property
+    def emit(self):
+        """The live sink: where hook log lines land for the current consumer
+        (the TUI points this at the chat log). Assigning to ``emit`` routes
+        through set_emit, so ``engine.emit = fn`` keeps working."""
+        return self._live_sink
+
+    @emit.setter
+    def emit(self, sink):
+        self.set_emit(sink)
+
+    def set_emit(self, sink):
+        """Point the live sink at ``sink`` (None restores the no-op default).
+        The store sink installed via set_store_sink keeps receiving a copy
+        of every line, so re-routing the UI never drops persisted history."""
+        self._live_sink = sink if sink is not None else (lambda _msg: None)
+
+    def set_store_sink(self, sink):
+        """Install (or clear, with None) the persistent recorder that every
+        hook log line is fanned out to — the organism points this at the
+        belief store's chat log."""
+        self._store_sink = sink
+
+    def _route(self, msg):
+        """Single owner for a hook log line: fan out to the store + live sink."""
+        if self._store_sink is not None:
+            self._store_sink(msg)
+        self._live_sink(msg)
+
+    def attach_host(self, host):
+        """Delegate fire/run/reload to a LuaHost (created later, in
+        organism.load()): script discovery and dispatch mirror the host,
+        the engine follows the host's event bus, and the host's log lines
+        route through this engine's fan — so re-pointing the live sink
+        keeps controlling where every script line lands."""
+        self._host = host
+        self.hooks_service = host.hooks
+        host.set_emit(self._route)
+        self.reload()
+
     # -- runtime -----------------------------------------------------------
     def _runtime(self):
         return lua_sandbox.build_runtime()
-
-    def _ctx(self, org, event, text):
-        m = org.metrics()
-        mood = org.store.belief_value("self", "mood", "calm")
-        return self._lua.table(
-            event=event,
-            text=text,
-            state=org.lifecycle.state,
-            cycle=org.store.cycle,
-            mood=mood,
-            belief_count=m.belief_count,
-            rule_count=m.rule_count,
-            score=m.score(),
-            chaos=org.store.chaos,
-            stress=org.store.stress,
-            arousal=org.store.arousal,
-            rationality=org.store.rationality,
-            irrationality=org.store.irrationality,
-            insane=org.store.insane,
-            organism=org.dir_path.name,
-            activity=self._lua.table_from(dict(org.store.activity)),
-            log=lambda msg: self.emit(str(msg)),
-            set_chaos=lambda x: self._set_chaos(org, x),
-            focus=lambda attr: self._focus(org, attr),
-        )
-
-    @staticmethod
-    def _set_chaos(org, x):
-        org.store.chaos = max(0.0, min(1.0, float(x)))
-
-    @staticmethod
-    def _focus(org, attr):
-        org.window.focus(attr if attr else None)
-        org.store.attention = org.window.pairs
 
     # -- firing --------------------------------------------------------------
     def _ensure_runtime(self):
@@ -133,14 +134,13 @@ class HookEngine:
     def fire(self, event, org, text=None):
         """Call on_<event>(ctx) in every script. Never raises."""
         if self._host is not None:
-            # Follow the engine's emit so reassigning org.hooks.emit keeps
-            # controlling where script log lines land.
-            self._host.emit = self.emit
+            # The host was wired to this engine's _route in attach_host, so
+            # its log lines already follow the live sink + store fan.
             self._host.fire(event, org=org, text=text)
             return
         if self.hooks_service is not None:
             self.hooks_service.emit(event, text)
-        if not self.scripts or event not in EVENTS:
+        if not self.scripts or event not in HookService.EVENTS:
             return
         with telemetry.get_tracer(__name__).start_as_current_span("hooks.fire") as span:
             span.set_attribute("hook.event", event)
@@ -150,37 +150,28 @@ class HookEngine:
                 disabled = self._ensure_runtime()
                 if disabled is not None:
                     if not was_latched:
-                        self.emit(disabled)
+                        self._route(disabled)
                     return
                 try:
-                    ctx = self._ctx(org, event, text) if org is not None else self._lua.table(event=event, text=text)
+                    ctx = (
+                        lua_sandbox.build_hook_ctx(self._lua, org, event, text, self._route)
+                        if org is not None
+                        else self._lua.table(event=event, text=text)
+                    )
                 except Exception as exc:  # noqa: BLE001 — 'Never raises' covers ctx building too
-                    self.emit(f"ctx: {exc}")
+                    self._route(f"ctx: {exc}")
                     return
-                handlers = []
-                prev_hook = self._lua.globals()[f"on_{event}"]
-                same_hook = self._lua.eval("function(a, b) return a == b end")
-                for script in self.scripts:
-                    try:
-                        lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=script.name)
-                        hook = self._lua.globals()[f"on_{event}"]
-                        if hook is not None and not same_hook(hook, prev_hook):
-                            handlers.append((script.name, hook))
-                            prev_hook = hook
-                    except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
-                        self.emit(f"{script.name}: {exc}")
-                for name, hook in handlers:
+                for name, hook in lua_sandbox.collect_script_handlers(self._lua, self.scripts, event, self._route):
                     try:
                         hook(ctx)
                     except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
-                        self.emit(f"{name}: {exc}")
+                        self._route(f"{name}: {exc}")
 
     def run(self, name, org):
         """Run one named script on demand (the /lua command): execute it in
         the shared sandbox, then call its main(ctx) when defined. Returns
         a status line for the chat log; never raises."""
         if self._host is not None:
-            self._host.emit = self.emit
             return self._host.run(name, org)
         if Path(name).name != name or not name.endswith(".lua"):
             return f"/lua: bad script name {name!r} (want a plain *.lua file)"
@@ -192,13 +183,17 @@ class HookEngine:
             if disabled is not None:
                 return disabled
             try:
+                globals_ = self._lua.globals()
+                globals_["main"] = None  # a previous /lua run's main must not leak into this script
                 lua_sandbox.sandboxed_execute(self._lua, script.read_text(), name=name)
-                main = self._lua.globals()["main"]
+                main = globals_["main"]
                 if main is not None:
-                    main(self._ctx(org, "lua", name))
+                    main(lua_sandbox.build_hook_ctx(self._lua, org, "lua", name, self._route))
                 return f"lua: ran {name}"
             except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
                 return f"{name}: {exc}"
+            finally:
+                self._lua.globals()["main"] = None  # and this run's main must not leak into the next
 
 
 def scripts_dir_for(dir_path):

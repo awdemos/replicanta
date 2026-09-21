@@ -46,9 +46,8 @@ class LuaHost:
     """
 
     def __init__(self, scripts_dir=None, modules_dir=None, organism=None, emit=None, root=None):
-        # Once a HookEngine attaches, its fire/run mirror the engine's emit
-        # onto this attribute — direct assignment here is stomped on the next
-        # delegated call.
+        # A HookEngine re-points this via set_emit when it attaches; until
+        # then, standalone hosts log through the constructor's emit.
         self.emit = emit if emit is not None else (lambda _msg: None)
         self.lock = threading.RLock()  # reentrant: module handlers may emit events
         self.lua = lua_sandbox.build_runtime()
@@ -61,6 +60,12 @@ class LuaHost:
         self.modules_dir = Path(modules_dir) if modules_dir else None
         self.scripts = []
         self.loader = None
+
+    def set_emit(self, sink):
+        """Re-point where host-originated log lines land (a HookEngine
+        installs its route fan here when it attaches). None restores the
+        no-op default."""
+        self.emit = sink if sink is not None else (lambda _msg: None)
 
     # -- loading -------------------------------------------------------------
     def reload_scripts(self):
@@ -120,23 +125,12 @@ class LuaHost:
             span.set_attribute("hook.script_count", len(self.scripts))
             with self.lock:
                 self.hooks.emit(event, text)
-                handlers = []
-                prev = self.lua.globals()[f"on_{event}"]
-                same = self.lua.eval("function(a, b) return a == b end")
-                for script in self.scripts:
-                    try:
-                        lua_sandbox.sandboxed_execute(self.lua, script.read_text(), name=script.name)
-                        hook = self.lua.globals()[f"on_{event}"]
-                        if hook is not None and not same(hook, prev):
-                            handlers.append((script.name, hook))
-                            prev = hook
-                    except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
-                        self.emit(f"{script.name}: {exc}")
+                handlers = lua_sandbox.collect_script_handlers(self.lua, self.scripts, event, self.emit)
                 if org is None:
                     ctx = self.lua.table(event=event, text=text, log=lambda msg: self.emit(str(msg)))
                 else:
                     try:
-                        ctx = self._ctx(org, event, text)
+                        ctx = lua_sandbox.build_hook_ctx(self.lua, org, event, text, self.emit)
                     except Exception as exc:  # noqa: BLE001
                         self.emit(f"ctx: {exc}")
                         return
@@ -145,40 +139,6 @@ class LuaHost:
                         hook(ctx)
                     except Exception as exc:  # noqa: BLE001
                         self.emit(f"{name}: {exc}")
-
-    def _ctx(self, org, event, text):
-        m = org.metrics()
-        mood = org.store.belief_value("self", "mood", "calm")
-        return self.lua.table(
-            event=event,
-            text=text,
-            state=org.lifecycle.state,
-            cycle=org.store.cycle,
-            mood=mood,
-            belief_count=m.belief_count,
-            rule_count=m.rule_count,
-            score=m.score(),
-            chaos=org.store.chaos,
-            stress=org.store.stress,
-            arousal=org.store.arousal,
-            rationality=org.store.rationality,
-            irrationality=org.store.irrationality,
-            insane=org.store.insane,
-            organism=org.dir_path.name,
-            activity=self.lua.table_from(dict(org.store.activity)),
-            log=lambda msg: self.emit(str(msg)),
-            set_chaos=lambda x: self._set_chaos(org, x),
-            focus=lambda attr: self._focus(org, attr),
-        )
-
-    @staticmethod
-    def _set_chaos(org, x):
-        org.store.chaos = max(0.0, min(1.0, float(x)))
-
-    @staticmethod
-    def _focus(org, attr):
-        org.window.focus(attr if attr else None)
-        org.store.attention = org.window.pairs
 
     def run(self, name, org):
         """Run one script's main(ctx) on demand (the /lua command)."""
@@ -191,14 +151,18 @@ class LuaHost:
             return f"/lua: no {name} in {self.scripts_dir}"
         with self.lock:
             try:
+                globals_ = self.lua.globals()
+                globals_["main"] = None  # a previous /lua run's main must not leak into this script
                 lua_sandbox.sandboxed_execute(self.lua, script.read_text(), name=name)
-                main = self.lua.globals()["main"]
+                main = globals_["main"]
                 if main is not None:
                     main(
-                        self._ctx(org, "lua", name)
+                        lua_sandbox.build_hook_ctx(self.lua, org, "lua", name, self.emit)
                         if org is not None
                         else self.lua.table(event="lua", text=name, log=lambda msg: self.emit(str(msg)))
                     )
                 return f"lua: ran {name}"
             except Exception as exc:  # noqa: BLE001
                 return f"{name}: {exc}"
+            finally:
+                self.lua.globals()["main"] = None  # and this run's main must not leak into the next

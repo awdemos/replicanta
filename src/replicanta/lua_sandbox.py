@@ -1,4 +1,5 @@
-"""Shared Lua runtime hardening for Replicanta hooks and modules."""
+"""Shared Lua runtime hardening plus the script ctx contract and dispatch
+helpers for Replicanta hooks and modules."""
 
 import logging
 
@@ -115,6 +116,76 @@ def sandboxed_execute(lua, code, name="script"):
     ``name`` is ignored; it is accepted for caller convenience.
     """
     lua.execute(code)
+
+
+def set_chaos(org, x):
+    """ctx.set_chaos actuator: retune randomness (clamped to 0..1)."""
+    org.store.chaos = max(0.0, min(1.0, float(x)))
+
+
+def focus(org, attr):
+    """ctx.focus actuator: steer attention (nil/empty clears)."""
+    org.window.focus(attr if attr else None)
+    org.store.attention = org.window.pairs
+
+
+def build_hook_ctx(lua, org, event, text, emit):
+    """Build the ctx table every on_<event>/main(ctx) handler receives.
+
+    One copy of the documented ctx contract for both Lua engines
+    (HookEngine and lua_host.LuaHost): the event summary plus live
+    organism state and neurosymbolic activity counters, and the safe
+    actuators ctx.log / ctx.set_chaos / ctx.focus. ``emit`` receives
+    ctx.log lines.
+    """
+    m = org.metrics()
+    mood = org.store.belief_value("self", "mood", "calm")
+    return lua.table(
+        event=event,
+        text=text,
+        state=org.lifecycle.state,
+        cycle=org.store.cycle,
+        mood=mood,
+        belief_count=m.belief_count,
+        rule_count=m.rule_count,
+        score=m.score(),
+        chaos=org.store.chaos,
+        stress=org.store.stress,
+        arousal=org.store.arousal,
+        rationality=org.store.rationality,
+        irrationality=org.store.irrationality,
+        insane=org.store.insane,
+        organism=org.dir_path.name,
+        activity=lua.table_from(dict(org.store.activity)),
+        log=lambda msg: emit(str(msg)),
+        set_chaos=lambda x: set_chaos(org, x),
+        focus=lambda attr: focus(org, attr),
+    )
+
+
+def collect_script_handlers(lua, scripts, event, emit):
+    """Collect on_<event> handlers from every script, in script order.
+
+    Classic scripts share one global table, so a script only counts when
+    executing it CHANGES the current on_<event> global: the first
+    definition wins and later redefinitions are skipped (identity check),
+    while a script that defines no handler leaves the global untouched.
+    A script that fails to execute reports one error line through
+    ``emit`` and is skipped. Never raises.
+    """
+    handlers = []
+    prev = lua.globals()[f"on_{event}"]
+    same = lua.eval("function(a, b) return a == b end")
+    for script in scripts:
+        try:
+            sandboxed_execute(lua, script.read_text(), name=script.name)
+            hook = lua.globals()[f"on_{event}"]
+            if hook is not None and not same(hook, prev):
+                handlers.append((script.name, hook))
+                prev = hook
+        except Exception as exc:  # noqa: BLE001 — user scripts must never kill the organism
+            emit(f"{script.name}: {exc}")
+    return handlers
 
 
 class DictProxy:
