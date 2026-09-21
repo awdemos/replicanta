@@ -3,7 +3,7 @@ vocabulary sanitization, hear() assimilation into the belief store,
 and narration exposure of user facts."""
 
 from replicanta import learning
-from replicanta.learning import analyze, describe, extract
+from replicanta.learning import analyze, describe
 from replicanta.narration import build_prompt, state_snapshot
 from replicanta.organism import Organism
 from replicanta.probe import SystemProbe
@@ -19,50 +19,56 @@ def _beliefs_only(facts):
     return [b for b, _replace in facts]
 
 
+def _extract(text):
+    """analyze() plus the high-confidence regex filter the old learning.extract() shim applied."""
+    result = analyze(text)
+    return [(item["belief"], item["replace"]) for item in result["facts"] if item["confidence"] >= learning.LEARN_CONF]
+
+
 # -- extraction ---------------------------------------------------------------
 
 
 def test_extract_name():
-    assert _beliefs_only(extract("my name is Sam")) == [("user", "name", "sam")]
+    assert _beliefs_only(_extract("my name is Sam")) == [("user", "name", "sam")]
 
 
 def test_extract_like_multiword():
-    assert _beliefs_only(extract("i really like ice cream")) == [("user", "like_ice_cream", "true")]
+    assert _beliefs_only(_extract("i really like ice cream")) == [("user", "like_ice_cream", "true")]
 
 
 def test_extract_dislike():
-    assert _beliefs_only(extract("i hate loud noises")) == [("user", "dislike_loud_noises", "true")]
+    assert _beliefs_only(_extract("i hate loud noises")) == [("user", "dislike_loud_noises", "true")]
 
 
 def test_extract_feeling():
-    assert _beliefs_only(extract("i am happy")) == [("user", "feeling", "happy")]
-    assert _beliefs_only(extract("i feel sad.")) == [("user", "feeling", "sad")]
+    assert _beliefs_only(_extract("i am happy")) == [("user", "feeling", "happy")]
+    assert _beliefs_only(_extract("i feel sad.")) == [("user", "feeling", "sad")]
 
 
 def test_extract_you_are():
-    assert _beliefs_only(extract("you are beautiful")) == [("self", "described_as", "beautiful")]
+    assert _beliefs_only(_extract("you are beautiful")) == [("self", "described_as", "beautiful")]
 
 
 def test_extract_your_trait():
-    assert _beliefs_only(extract("your color is blue")) == [("self", "color", "blue")]
+    assert _beliefs_only(_extract("your color is blue")) == [("self", "color", "blue")]
 
 
 def test_extract_strips_filler():
-    assert _beliefs_only(extract("i like rain a lot")) == [("user", "like_rain", "true")]
+    assert _beliefs_only(_extract("i like rain a lot")) == [("user", "like_rain", "true")]
 
 
 def test_questions_teach_nothing():
-    assert extract("do you like rain?") == []
-    assert extract("what is my name?") == []
+    assert _extract("do you like rain?") == []
+    assert _extract("what is my name?") == []
 
 
 def test_unlearnable_text_yields_nothing():
-    assert extract("asdf 1234 !!!") == []
-    assert extract("hello there little one") == []
+    assert _extract("asdf 1234 !!!") == []
+    assert _extract("hello there little one") == []
 
 
 def test_extract_caps_per_message():
-    facts = extract("my name is Sam and i like rain and you are brave")
+    facts = _extract("my name is Sam and i like rain and you are brave")
     assert len(facts) <= learning.MAX_PER_MESSAGE
 
 
@@ -175,26 +181,26 @@ def test_analyze_extracts_commands():
 
 
 def test_extract_generic_my_trait():
-    assert _beliefs_only(extract("my job is engineer")) == [("user", "job", "engineer")]
+    assert _beliefs_only(_extract("my job is engineer")) == [("user", "job", "engineer")]
 
 
 def test_extract_definitional_fact():
-    assert _beliefs_only(extract("scallop means logic")) == [("self", "knows", "scallop_is_logic")]
+    assert _beliefs_only(_extract("scallop means logic")) == [("self", "knows", "scallop_is_logic")]
 
 
 def test_extract_negation():
-    assert _beliefs_only(extract("i don't like rain")) == [("user", "dislike_rain", "true")]
-    assert _beliefs_only(extract("you are not nice")) == [("self", "described_as", "not_nice")]
+    assert _beliefs_only(_extract("i don't like rain")) == [("user", "dislike_rain", "true")]
+    assert _beliefs_only(_extract("you are not nice")) == [("self", "described_as", "not_nice")]
 
 
 def test_extract_feeling_synonyms():
-    assert _beliefs_only(extract("i am glad")) == [("user", "feeling", "happy")]
-    assert _beliefs_only(extract("i feel blue")) == [("user", "feeling", "sad")]
+    assert _beliefs_only(_extract("i am glad")) == [("user", "feeling", "happy")]
+    assert _beliefs_only(_extract("i feel blue")) == [("user", "feeling", "sad")]
 
 
 def test_extract_preserves_literal_colors():
     # "blue" must not be rewritten to "sad" outside of feeling context.
-    assert _beliefs_only(extract("your color is blue")) == [("self", "color", "blue")]
+    assert _beliefs_only(_extract("your color is blue")) == [("self", "color", "blue")]
 
 
 def test_llm_fallback_extracts_facts(monkeypatch):

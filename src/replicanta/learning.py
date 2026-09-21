@@ -249,8 +249,6 @@ def _extract_facts(text, speech_act):
         val = _sanitize(val, attr)
         if val is None:
             continue
-        if attr is None:
-            continue
         fact = ((obj, attr, val), replace)
         if fact not in facts:
             facts.append(fact)
@@ -399,18 +397,6 @@ def analyze(text, context=None, use_llm=None):
             result["facts"].append({"belief": belief, "replace": True, "confidence": LLM_CONF})
 
     return result
-
-
-def extract(text):
-    """Pull learnable facts from a user message. Returns a list of
-    ((obj, attr, val), replace) — kept for backward compatibility with callers
-    that only need high-confidence regex facts.
-
-    Questions teach nothing, but intent/command utterances are ignored here;
-    use `analyze()` to capture those.
-    """
-    result = analyze(text)
-    return [(item["belief"], item["replace"]) for item in result["facts"] if item["confidence"] >= LEARN_CONF]
 
 
 def describe(belief):

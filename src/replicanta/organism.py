@@ -581,8 +581,6 @@ def _release_context(ref, owner_thread):
     thread the context drops before this returns; from any other thread it is
     parked until the owner drains it (see ``Mind.close``).
     """
-    import threading
-
     if threading.current_thread() is owner_thread:
         ref.clear()
     else:
@@ -608,8 +606,6 @@ class Mind:
 
     def __init__(self, scl_path):
         """Build a Mind for the .scl genome at ``scl_path``."""
-        import threading
-
         self.scl_path = scl_path
         self.ctx = None
         self._owner_thread = threading.current_thread()
@@ -624,8 +620,6 @@ class Mind:
         organism), so the per-call import cost off-thread is a safety
         fallback, not a hot path.
         """
-        import threading
-
         me = threading.current_thread()
         if me is self._owner_thread:
             if self.ctx is None:
@@ -645,8 +639,6 @@ class Mind:
         thread-affine). A previous context owned by another thread is handed
         back to that thread for release rather than dropped here.
         """
-        import threading
-
         me = threading.current_thread()
         ref, self.ctx = [self.ctx], None
         _release_context(ref, self._owner_thread)
@@ -667,10 +659,7 @@ class Mind:
     def query_rule(self, rule, head_relation):
         """Run a candidate rule against a fork of the current program without
         committing. Returns list of (tag, tuple)."""
-        ctx = scallopy.ScallopContext(provenance=PROVENANCE, fork_from=self._thread_context())
-        ctx.add_rule(rule)
-        ctx.run()
-        return [(float(tag), tuple(tup)) for (tag, tup) in ctx.relation(head_relation)]
+        return self.derive(head_relation, rule)
 
     def derive(self, head_relation, rule):
         """Run a transient derived rule against a fresh fork and return the
@@ -688,8 +677,6 @@ class Mind:
         contexts parked for this thread; from any other thread the context is
         parked until the owner releases it.
         """
-        import threading
-
         me = threading.current_thread()
         if me is self._owner_thread:
             self.ctx = None

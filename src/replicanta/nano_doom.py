@@ -12,9 +12,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from replicanta import lua_sandbox
-
-
 # Block type nibbles (matching the original doom-nano legend)
 E_FLOOR = 0x0
 E_PLAYER = 0x1
@@ -785,14 +782,3 @@ class DoomService:
         self.stop()
         return False
 
-
-def build_lua_service(organism=None, lua_lock=None):
-    """Factory used by the module loader."""
-    return DoomService(organism=organism, lua_lock=lua_lock)
-
-
-def _build_proxy(obj):
-    """Wrap non-string results so Lua can read dict keys."""
-    if isinstance(obj, dict):
-        return lua_sandbox.DictProxy(obj)
-    return obj

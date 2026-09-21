@@ -175,7 +175,11 @@ def test_revert_removes_last_applied(tmp_path):
 def test_learning_extract_uses_registry_pattern(tmp_path):
     extensions.load_global(_path(tmp_path))
     extensions.propose(_path(tmp_path), _good_pattern(), auto_apply=True)
-    facts = learning.extract("i adore hiking")
+    facts = [
+        (item["belief"], item["replace"])
+        for item in learning.analyze("i adore hiking")["facts"]
+        if item["confidence"] >= learning.LEARN_CONF
+    ]
     assert (("user", "like_hiking", "true"), False) in facts
 
 

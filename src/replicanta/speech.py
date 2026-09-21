@@ -44,7 +44,6 @@ def _find_voices_dir():
     return candidates[0]
 
 
-VOICES_DIR = None
 _VOICES_DIR_CACHE = None
 
 
@@ -303,12 +302,10 @@ def _drain():
 def _speak_with_timeout(text, timeout=30):
     """Run _speak in a daemon thread and abandon it if playback/synthesis hangs.
     This keeps a single hung utterance from silencing every subsequent one."""
-    done = []
 
     def target():
         with contextlib.suppress(Exception):  # nosec — speech must never kill anything
             _speak(text)
-        done.append(True)
 
     t = threading.Thread(target=target, daemon=True, name="speech-utterance")
     t.start()
