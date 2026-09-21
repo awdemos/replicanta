@@ -180,8 +180,12 @@ def _load_fly_brain(tmp_path, logs):
     src = REPO_MODULES
     if src.is_dir():
         shutil.copytree(src, tmp_path / "modules", dirs_exist_ok=True)
-    config = {"modules": {"enabled": ["base", "fly-brain"]}, "persona": {}}
-    loader = ModuleLoader(tmp_path / "modules", organism=None, config=config, emit=logs.append)
+    loader = ModuleLoader(
+        tmp_path / "modules",
+        organism=None,
+        modules_config={"enabled": ["base", "fly-brain"]},
+        emit=logs.append,
+    )
     loader.load_all()
     return loader
 

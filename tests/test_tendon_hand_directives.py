@@ -292,7 +292,7 @@ def test_real_module_learned_hook_delivers_emotion(tmp_path):
     loader = ModuleLoader(
         tmp_path / "modules",
         organism=None,
-        config={"modules": {"enabled": ["base", "tendon-hand"]}},
+        modules_config={"enabled": ["base", "tendon-hand"]},
     )
     loader.load_all()
     assert "tendon-hand" in loader.modules

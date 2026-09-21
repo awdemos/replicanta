@@ -118,11 +118,7 @@ class CommandService:
         item = self._commands.get(name)
         if item is None:
             return None
-        if isinstance(item, tuple):
-            handler, runtime = item
-        else:
-            # Legacy callers stored raw handlers directly.
-            handler, runtime = item, None
+        handler, runtime = item
         if lua_type(handler) == "function":
             return handler(self._table_from(runtime, args))
         return handler(args)
@@ -138,26 +134,13 @@ class ModuleLoader:
         modules_config=None,
         emit=None,
         root=None,
-        config=None,
         persona_config=None,
         host=None,
     ):
         self.modules_dir = Path(modules_dir)
         self.organism = organism
-        if modules_config is not None:
-            self.modules_config = modules_config
-        elif config is not None:
-            self.modules_config = config.get("modules", {})
-        else:
-            self.modules_config = {}
-        # Backward-compatible alias for callers that read loader.config.
-        self.config = self.modules_config
-        if persona_config is not None:
-            self.persona_config = persona_config
-        elif config is not None:
-            self.persona_config = config.get("persona", {})
-        else:
-            self.persona_config = {}
+        self.modules_config = modules_config if modules_config is not None else {}
+        self.persona_config = persona_config if persona_config is not None else {}
         self.emit = emit if emit is not None else (lambda _msg: None)
         self.root = root
         self.registry = ServiceRegistry()
@@ -407,14 +390,9 @@ class VisualService:
 class PersonaService:
     """Registry and activation for persona modules."""
 
-    def __init__(self, store, persona_config=None, root=None, config=None):
+    def __init__(self, store, persona_config=None, root=None):
         self.store = store
-        if persona_config is not None:
-            self.persona_config = persona_config
-        elif config is not None:
-            self.persona_config = config.setdefault("persona", {})
-        else:
-            self.persona_config = {}
+        self.persona_config = persona_config if persona_config is not None else {}
         self.root = root
         self._personas = {}
 

@@ -17,11 +17,12 @@ def _load_nano_doom(tmp_path, logs):
 
     src = Path(__file__).parent.parent / "modules"
     shutil.copytree(src, tmp_path / "modules", dirs_exist_ok=True)
-    config = {
-        "modules": {"enabled": ["base", "nano-doom"]},
-        "persona": {},
-    }
-    loader = ModuleLoader(tmp_path / "modules", organism=None, config=config, emit=logs.append)
+    loader = ModuleLoader(
+        tmp_path / "modules",
+        organism=None,
+        modules_config={"enabled": ["base", "nano-doom"]},
+        emit=logs.append,
+    )
     loader.load_all()
     return loader
 

@@ -19,8 +19,8 @@ def test_persona_service_register_and_list():
 
 def test_persona_service_activate(tmp_path):
     store = BeliefStore(tmp_path)
-    config = {}
-    svc = PersonaService(store, config=config)
+    persona_config = {}
+    svc = PersonaService(store, persona_config=persona_config)
     svc.register(
         {
             "name": "se",
@@ -30,7 +30,7 @@ def test_persona_service_activate(tmp_path):
         }
     )
     svc.activate("se")
-    assert config.get("persona", {}).get("active") == "se"
+    assert persona_config.get("active") == "se"
     assert ("self", "style", "terse") in store.beliefs()
     assert any("se" in m.get("text", "") for m in store.memory)
 

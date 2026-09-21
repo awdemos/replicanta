@@ -58,7 +58,7 @@ def test_dispatch_converts_args_to_table_for_lua_handler(tmp_path):
         "  end)\n"
         "end\n"
     )
-    loader = ModuleLoader(tmp_path, organism=None, config={"modules": {"enabled": ["luacmd"]}})
+    loader = ModuleLoader(tmp_path, organism=None, modules_config={"enabled": ["luacmd"]})
     loader.load_all()
     result = loader.registry.get("commands").dispatch("/echo", ["a", "b"])
     assert result == "a,b,2"
