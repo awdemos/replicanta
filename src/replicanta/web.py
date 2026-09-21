@@ -51,11 +51,13 @@ class Glasshouse:
     # NOT here: it carries chat history, memories, and camera frames.
     PUBLIC_API_GETS = ("/api/commands",)
 
-    def __init__(self, root, organism, spawn=None, respond=voice.respond, token=None):
+    def __init__(self, root, organism, spawn=None, respond=None, token=None):
         self.root = Path(root)
         self.org = organism
         self.spawn = dict(spawn or {})
-        self.respond = respond
+        # Resolve at construction, not at class definition, so a rebind of
+        # voice.respond before the adapter is built is honored.
+        self.respond = respond if respond is not None else voice.respond
         self.token = token or secrets.token_urlsafe(24)
         self.lock = threading.RLock()
         self._self_talk = False
@@ -571,11 +573,7 @@ class Glasshouse:
                 else:
                     messages.append("no applied patches yet")
             elif name == "/auto-apply":
-                if args and args[0] in ("on", "off"):
-                    self.org.store.auto_apply_patches = args[0] == "on"
-                    self.org.store.dirty = True
-                state = "on" if self.org.store.auto_apply_patches else "off"
-                messages.append(f"auto-apply patches: {state}")
+                messages.append(tui_commands.auto_apply_command(self.org.store, args))
             elif name == "/new":
                 new_name = args[0] if args else nursery.next_name(self.root)
                 self.create_organism(new_name)
@@ -619,33 +617,13 @@ class Glasshouse:
             return {"messages": messages, "state": self.snapshot()}
 
     def _voice_command(self, args):
-        if not args or args[0] in ("on", "off"):
-            if args:
-                speech.set_enabled(args[0] == "on")
-            else:
-                speech.set_enabled(not speech.enabled)
-            state = "on" if speech.enabled else "off"
-            if speech.enabled:
-                if speech.available():
-                    speech.say("I can speak now.")
-                    return f"spoken voice {state}"
-                return f"spoken voice {state}, but no piper model available"
-            return f"spoken voice {state}"
-        if args[0] == "list":
-            voices = speech.list_voices()
-            active = speech.voice_name()
-            listing = ", ".join(f"*{v}" if v == active else v for v in voices) or "(none)"
-            return f"voices: {listing}  (* = active)"
-        if args[0] == "use" and len(args) == 2:
-            if speech.set_voice(args[1]):
-                speech.say("This is my new voice.")
-                return f"voice: {speech.voice_name()}"
-            return f"no voice named {args[1]!r}"
-        if args[0] == "get" and len(args) == 2 and not speech.download_voice(args[1]):
+        result = tui_commands.voice_command(args)
+        if result is None:
+            if speech.download_voice(args[1]):
+                return f"downloaded voice {args[1]}"
             return f"could not download voice {args[1]!r}"
-        if args[0] == "get" and len(args) == 2:
-            return f"downloaded voice {args[1]}"
-        return "/voice [on|off|list|use name|get name]"
+        text, _warn = result
+        return text
 
     def _git_command(self, args):
         if not args or args[0] == "status":
@@ -692,23 +670,7 @@ class Glasshouse:
             name = f"replicanta-chat-{org_name}-{timestamp}.md"
         dest = fileutil.safe_path(export_dir, name)
         dest.parent.mkdir(parents=True, exist_ok=True)
-
-        lines = [
-            f"# Chat with {org_name}",
-            "",
-            f"Exported: {datetime.now(UTC).isoformat()}",
-            f"Organism: {org_name}",
-            f"Cycles: {self.org.store.cycle}",
-            "",
-        ]
-        for role, text in self.org.store.chat_log:
-            who = "You" if role == "user" else org_name
-            lines.append(f"## {who}")
-            lines.append("")
-            lines.append(text)
-            lines.append("")
-
-        fileutil.atomic_write_text(dest, "\n".join(lines), root=export_dir)
+        fileutil.atomic_write_text(dest, fileutil.render_chat_export(org_name, self.org.store), root=export_dir)
         return dest
 
     def _persona_command(self, args):
@@ -724,7 +686,12 @@ class Glasshouse:
             svc.deactivate()
             return "persona cleared"
         svc.activate(args[0])
-        return f"persona: {args[0]}"
+        # activate() returns None on both paths, so verify through
+        # active() before announcing success.
+        active = svc.active()
+        if active is not None and active["name"] == args[0]:
+            return f"persona: {args[0]}"
+        return f"unknown persona {args[0]!r} (try /persona list)"
 
     def _listen_command(self):
         try:

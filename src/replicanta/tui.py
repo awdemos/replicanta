@@ -1222,33 +1222,26 @@ class OrganismApp(App):
         self._append_log(f"— chat log saved to {path} —", STYLE_DIM, stamp=True)
 
     def _export_chat(self, path=None):
-        """Write the full chat log to a markdown file. Returns the path."""
+        """Write the full chat log to a markdown file. Returns the path.
+
+        Exports are confined to ``~/.replicanta/exports/`` and the optional
+        argument is a bare filename (``safe_name``), never a path — /export
+        must not become an arbitrary file write.
+        """
         from datetime import datetime
 
         org_name = self._org_name()
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        export_dir = Path.home() / ".replicanta" / "exports"
         if path:
-            dest = Path(path).expanduser()
+            name = fileutil.safe_name(path)
+            if not name.endswith(".md"):
+                name += ".md"
         else:
-            dest = Path.home() / f"replicanta-chat-{org_name}-{timestamp}.md"
+            name = f"replicanta-chat-{org_name}-{timestamp}.md"
+        dest = fileutil.safe_path(export_dir, name)
         dest.parent.mkdir(parents=True, exist_ok=True)
-
-        lines = [
-            f"# Chat with {org_name}",
-            "",
-            f"Exported: {datetime.now(UTC).isoformat()}",
-            f"Organism: {org_name}",
-            f"Cycles: {self.org.store.cycle}",
-            "",
-        ]
-        for role, text in self.org.store.chat_log:
-            who = "You" if role == "user" else org_name
-            lines.append(f"## {who}")
-            lines.append("")
-            lines.append(text)
-            lines.append("")
-
-        fileutil.atomic_write_text(dest, "\n".join(lines))
+        fileutil.atomic_write_text(dest, fileutil.render_chat_export(org_name, self.org.store), root=export_dir)
         return dest
 
     def action_toggle_mouse(self):
@@ -2933,7 +2926,13 @@ class OrganismApp(App):
             self._append_log("persona cleared", STYLE_DIM)
         else:
             svc.activate(args[0])
-            self._append_log(f"persona: {args[0]}", STYLE_DIM)
+            # activate() returns None on both paths, so verify through
+            # active() before announcing success.
+            active = svc.active()
+            if active is not None and active["name"] == args[0]:
+                self._append_log(f"persona: {args[0]}", STYLE_DIM)
+            else:
+                self._append_log(f"unknown persona {args[0]!r} (try /persona list)", STYLE_WARN)
 
     def _modules_command(self, args):
         if args and args[0] != "manage":

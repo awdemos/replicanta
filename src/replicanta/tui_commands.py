@@ -1,11 +1,12 @@
-"""Pure UI helpers for the organism TUI: slash-command metadata, the
-dispatch registry, tab completion, activity sparkline, help text. No
-textual imports — unit testable without a terminal. Sentiment scorers
-live in sentiment.py."""
+"""Pure UI helpers for the organism TUI and web front-ends: slash-command
+metadata, the dispatch registry, tab completion, activity sparkline, help
+text, and the shared /voice and /auto-apply command behaviors each frontend
+renders for itself. No textual imports — unit testable without a terminal.
+Sentiment scorers live in sentiment.py."""
 
 from pathlib import Path
 
-from replicanta import activity, extensions, nursery, speech
+from replicanta import activity, extensions, fileutil, nursery, speech
 from replicanta.tui_views import STYLE_DIM, STYLE_LEARNED, STYLE_WARN
 
 COMMANDS = [
@@ -102,7 +103,7 @@ COMMANDS = [
     (
         "/export",
         "/export [name]",
-        "save chat log to ~/.replicanta/exports/ (web) or a path (TUI)",
+        "save chat log to ~/.replicanta/exports/",
         "System",
     ),
     ("/save", "/save", "persist state + genome", "System"),
@@ -220,6 +221,12 @@ def _cmd_export(app, parts):
     try:
         dest = app._export_chat(parts[1] if len(parts) > 1 else None)
         app._append_log(f"— chat exported to {dest} —", STYLE_DIM, stamp=True)
+    except fileutil.UnsafePathError:
+        app._append_log(
+            "— export failed: give a plain filename (exports land in ~/.replicanta/exports/) —",
+            STYLE_WARN,
+            stamp=True,
+        )
     except OSError as exc:
         app._append_log(f"— export failed: {exc} —", STYLE_WARN, stamp=True)
 
@@ -284,8 +291,12 @@ def _cmd_swap(app, parts):
         return
     app._swap_to(parts[1])
 
-def _cmd_voice(app, parts):
-    args = parts[1:]
+def voice_command(args):
+    """Shared /voice behavior for the TUI and web frontends: performs the
+    speech-state transition and returns (message, warn) for the frontend to
+    render. Returns None for ``get`` — each frontend runs the download in
+    its own transport (the TUI in a background worker with progress, the
+    web UI inline in the request)."""
     if not args or args[0] in ("on", "off"):
         if args:
             speech.set_enabled(args[0] == "on")
@@ -293,46 +304,55 @@ def _cmd_voice(app, parts):
             speech.set_enabled(not speech.enabled)
         state = "on" if speech.enabled else "off"
         if speech.enabled and not speech.available():
-            app._append_log(
+            message = (
                 f"spoken voice {state}, but no piper model at "
                 f"{speech.model_path()} — staying mute "
-                f"(/voice get en_US-lessac-medium)",
-                STYLE_WARN,
+                f"(/voice get en_US-lessac-medium)"
             )
-        elif speech.enabled:
-            app._append_log(
-                "spoken voice on — the organism speaks aloud (piper tts)",
-                STYLE_DIM,
-            )
+            return (message, True)
+        if speech.enabled:
             speech.say("I can speak now.")
-        else:
-            app._append_log("spoken voice off", STYLE_DIM)
-        app.refresh_status()
-    elif args[0] == "list":
+            return ("spoken voice on — the organism speaks aloud (piper tts)", False)
+        return ("spoken voice off", False)
+    if args[0] == "list":
         voices = speech.list_voices()
         active = speech.voice_name()
-        listing = (
-            ", ".join(f"*{v}" if v == active else v for v in voices)
-            or "(none — /voice get en_US-lessac-medium)"
-        )
-        app._append_log(f"voices: {listing}  (* = active)", STYLE_DIM)
-    elif args[0] == "use" and len(args) == 2:
+        listing = ", ".join(f"*{v}" if v == active else v for v in voices) or "(none — /voice get en_US-lessac-medium)"
+        return (f"voices: {listing}  (* = active)", False)
+    if args[0] == "use" and len(args) == 2:
         if speech.set_voice(args[1]):
-            app._append_log(f"voice: {speech.voice_name()}", STYLE_DIM)
             speech.say("This is my new voice.")
-        else:
-            have = ", ".join(speech.list_voices()) or "(none)"
-            app._append_log(
-                f"/voice use: no voice {args[1]!r} — have: {have}. /voice get {args[1]} downloads it",
-                STYLE_WARN,
-            )
-    elif args[0] == "get" and len(args) == 2:
+            return (f"voice: {speech.voice_name()}", False)
+        have = ", ".join(speech.list_voices()) or "(none)"
+        message = f"/voice use: no voice {args[1]!r} — have: {have}. /voice get {args[1]} downloads it"
+        return (message, True)
+    if args[0] == "get" and len(args) == 2:
+        return None
+    return ("/voice [on|off] · /voice list · /voice use name · /voice get name", False)
+
+
+def auto_apply_command(store, args):
+    """Shared /auto-apply behavior for the TUI and web frontends: apply the
+    on/off transition to the store and return the status line."""
+    if args and args[0] in ("on", "off"):
+        store.auto_apply_patches = args[0] == "on"
+        store.dirty = True
+        state = "on" if store.auto_apply_patches else "off"
+        return f"auto-apply patches: {state}"
+    state = "on" if store.auto_apply_patches else "off"
+    return f"auto-apply patches is {state} — use /auto-apply on|off"
+
+
+def _cmd_voice(app, parts):
+    args = parts[1:]
+    result = voice_command(args)
+    if result is None:
         app._voice_download(args[1])
-    else:
-        app._append_log(
-            "/voice [on|off] · /voice list · /voice use name · /voice get name",
-            STYLE_DIM,
-        )
+        return
+    text, warn = result
+    app._append_log(text, STYLE_WARN if warn else STYLE_DIM)
+    if not args or args[0] in ("on", "off"):
+        app.refresh_status()
 
 def _cmd_self_talk(app, parts):
     app._self_talk_on = not app._self_talk_on
@@ -364,15 +384,7 @@ def _cmd_reject(app, parts):
         app._append_log("/reject: no pending patch.", STYLE_DIM)
 
 def _cmd_auto_apply(app, parts):
-    args = parts[1:]
-    if args and args[0] in ("on", "off"):
-        app.org.store.auto_apply_patches = args[0] == "on"
-        app.org.store.dirty = True
-        state = "on" if app.org.store.auto_apply_patches else "off"
-        app._append_log(f"auto-apply patches: {state}", STYLE_DIM)
-    else:
-        state = "on" if app.org.store.auto_apply_patches else "off"
-        app._append_log(f"auto-apply patches is {state} — use /auto-apply on|off", STYLE_DIM)
+    app._append_log(auto_apply_command(app.org.store, parts[1:]), STYLE_DIM)
 
 def _cmd_revert(app, parts):
     entry = extensions.revert_last(app.org.dir_path / "artifacts" / "extensions.json")

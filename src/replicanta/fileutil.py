@@ -3,6 +3,7 @@
 import os
 import re
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 
@@ -38,6 +39,26 @@ def safe_name(name):
     if name.startswith("..") or "/../" in name or name.endswith("/.."):
         raise UnsafePathError(f"name contains parent traversal: {name!r}")
     return name
+
+
+def render_chat_export(org_name, store):
+    """Assemble the chat log as a markdown document, for /export. Shared by
+    the TUI and web frontends; each keeps its own destination policy."""
+    lines = [
+        f"# Chat with {org_name}",
+        "",
+        f"Exported: {datetime.now(UTC).isoformat()}",
+        f"Organism: {org_name}",
+        f"Cycles: {store.cycle}",
+        "",
+    ]
+    for role, text in store.chat_log:
+        who = "You" if role == "user" else org_name
+        lines.append(f"## {who}")
+        lines.append("")
+        lines.append(text)
+        lines.append("")
+    return "\n".join(lines)
 
 
 def atomic_write_text(path, text, root=None):
