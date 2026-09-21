@@ -890,14 +890,15 @@ class OrganismApp(App):
 
     def on_mount(self):
         """Render the initial organism state and start background timers."""
-        # Start with terminal mouse reporting off so native text selection/copy
-        # works by default. Press ctrl+m to enable in-app mouse clicks.
-        self._mouse_enabled = False
+        # Mouse reporting starts ON: menus, buttons, and drag-and-drop are
+        # click-driven. Press ctrl+m to turn it off when native terminal
+        # text selection/copy is needed.
+        self._mouse_enabled = True
         driver = getattr(self, "_driver", None)
         if driver is not None:
             # a headless driver may not implement mouse protocols at all
             with contextlib.suppress(Exception):
-                driver._disable_mouse_support()
+                driver._enable_mouse_support()
         self._show_org()
         tab_bar = self._safe_query("#tab-bar", TabBar)
         if tab_bar is not None:
@@ -919,7 +920,7 @@ class OrganismApp(App):
             self._append_log("a tiny replicanta wakes up inside your machine.", STYLE_DIM)
             self._append_log(
                 "talk to it — it learns from you. /help (or F1) for commands. "
-                "ctrl+m toggles mouse capture; turn it off to select/copy text.",
+                "mouse capture is on; ctrl+m toggles it off to select/copy text.",
                 STYLE_DIM,
             )
         for role, line in self.org.store.chat_log[-100:]:
@@ -1934,6 +1935,9 @@ class OrganismApp(App):
             ("·", "dim"),
             ("  F2-F8", "reverse"),
             (" tabs ", ""),
+            ("·", "dim"),
+            ("  ctrl+m", "reverse"),
+            (" mouse ", ""),
             ("·", "dim"),
             ("  ctrl+q", "reverse"),
             (" quit", ""),

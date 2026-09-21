@@ -158,8 +158,21 @@ def test_bottom_bar_shows_counts_and_keys(nursery_app):
             assert "rules" in text
             assert "ctrl+p" in text
             assert "F1" in text
+            assert "ctrl+m" in text
             assert "ctrl+q quit" in text
             assert text.strip() == app._bottombar_text
+
+    asyncio.run(check())
+
+
+def test_mouse_capture_enabled_by_default(nursery_app):
+    """Menus, buttons, and drag-and-drop are click-driven, so mouse
+    reporting must start on (ctrl+m toggles it off for native selection)."""
+    app = nursery_app
+
+    async def check():
+        async with app.run_test():
+            assert app._mouse_enabled is True
 
     asyncio.run(check())
 
