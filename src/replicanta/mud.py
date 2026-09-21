@@ -882,8 +882,8 @@ def _choose_from_raw(generate, game, hint=None, rng=None, org=None, actor_name=N
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
         command, reason = parse_action_with_reason(voice.clean_candidate(raw or ""))
-    except Exception:  # noqa: BLE001, S110 # nosec — a silent voice means wandering
-        pass
+    except Exception as exc:  # noqa: BLE001 — a silent voice means wandering
+        logger.warning("MUD action generation failed: %s; wandering", exc)
     if command is None:
         command = fallback_action(game, rng, actor_name=actor_name)
         reason = "the inner voice was silent — wandering on instinct"

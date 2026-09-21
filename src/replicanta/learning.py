@@ -27,14 +27,29 @@ Command shapes:
 """
 
 import json
+import logging
 import os
 import re
 
 from replicanta import extensions
 
+logger = logging.getLogger(__name__)
+
 LEARN_CONF = 0.8
 LLM_CONF = 0.5
 MAX_PER_MESSAGE = 2
+
+# Belief vocabulary rule, mirrored from BeliefStore.add: obj/attr/val must
+# match [a-z_]+. An approved extension template that violates it (e.g.
+# "user:zone:9{x}") would raise ValueError at the firing site and kill the
+# chat handler, so the substitution result is re-checked here.
+_BELIEF_PART_RE = re.compile(r"^[a-z_]+$")
+
+
+def valid_belief_parts(obj, attr, val):
+    """True when (obj, attr, val) survives BeliefStore.add validation."""
+    return all(isinstance(p, str) and _BELIEF_PART_RE.match(p) for p in (obj, attr, val))
+
 
 _VALUE = r"([a-zA-Z][a-zA-Z ]{0,58}?)"
 _WORD = r"([a-zA-Z][a-zA-Z ]{0,38}?)"
@@ -256,14 +271,24 @@ def _extract_facts(text, speech_act):
             break
     # tier B executable skills: registry patterns approved by the user
     for entry in extensions.active_entries("pattern"):
-        match = re.search(entry["regex"], text, re.IGNORECASE)
+        pattern = entry.get("regex")
+        template = entry.get("template")
+        if not isinstance(pattern, str) or not isinstance(template, str):
+            continue
+        match = re.search(pattern, text, re.IGNORECASE)
         if match is None:
             continue
         raw = match.group(1) if match.groups() else match.group(0)
         value = _sanitize(raw)
         if value is None:
             continue
-        obj, attr, val = (part.replace("{x}", value) for part in entry["template"].split(":"))
+        obj, attr, val = (part.replace("{x}", value) for part in template.split(":"))
+        if not valid_belief_parts(obj, attr, val):
+            # templates are supposed to be vocabulary-checked at approve
+            # time; skip (never raise) when a bad one slipped into the
+            # registry, so a firing pattern can never break hear()
+            logger.warning("skipping extension pattern with invalid template %r", template)
+            continue
         fact = ((obj, attr, val), obj == "self")
         if fact not in facts:
             facts.append(fact)
@@ -336,7 +361,8 @@ def _llm_extract(text):
                 continue
             facts.append({"subject": sub, "relation": rel, "object": obj})
         return facts
-    except Exception:  # noqa: BLE001 — LLM fallback must never break learning
+    except Exception as exc:  # noqa: BLE001 — LLM fallback must never break learning
+        logger.warning("fact extraction failed: %s", exc)
         return []
 
 

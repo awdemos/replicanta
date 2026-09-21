@@ -27,7 +27,18 @@ from replicanta import extensions, telemetry
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "ternary-bonsai-1.7b:latest"
-MAX_TOKENS = 180
+# Thinking models can spend ~150 tokens reasoning before answering; 180
+# clipped the reply itself to empty. 320 leaves headroom for the answer.
+MAX_TOKENS = 320
+
+
+class LLMError(RuntimeError):
+    """A backend-reported failure from the local LLM (ollama or llama.cpp).
+
+    Raised at the transport boundary so callers can catch LLM failures
+    precisely; subclassing RuntimeError keeps every existing
+    ``except RuntimeError`` / ``pytest.raises(RuntimeError)`` compatible.
+    """
 
 
 def vision_model():
@@ -244,7 +255,13 @@ def _strip_special(text):
 
 
 def generate_stream(prompt, model, timeout=None, temperature=0.95, on_token=None, max_tokens=None):
-    """Streaming generation; returns final cleaned text after calling on_token."""
+    """Streaming generation; returns final cleaned text after calling on_token.
+
+    Two fallback paths to know about: on_token=None delegates to the
+    non-streaming generate(); and the llama_cpp backend has no streaming,
+    so it generates the full reply first and then replays it through
+    on_token in word chunks (max_tokens is ignored on that path).
+    """
     if timeout is None:
         timeout = default_timeout()
     if on_token is None:
@@ -287,9 +304,10 @@ def _generate_ollama_stream(prompt, model, timeout, temperature, on_token, max_t
             try:
                 data = json.loads(raw.decode())
             except json.JSONDecodeError:
+                logger.warning("skipping malformed stream chunk: %r", raw[:200])
                 continue
             if data.get("error"):
-                raise RuntimeError(data["error"])
+                raise LLMError(data["error"])
             token = data.get("response", "")
             if token:
                 pieces.append(token)
@@ -318,7 +336,7 @@ def _generate_ollama(prompt, model, timeout, temperature):
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
-        raise RuntimeError(data["error"])
+        raise LLMError(data["error"])
     stats = {
         "prompt_tokens": int(data.get("prompt_eval_count") or 0),
         "gen_tokens": int(data.get("eval_count") or 0),
@@ -326,36 +344,50 @@ def _generate_ollama(prompt, model, timeout, temperature):
     return _strip_special(_strip_think(data.get("response", ""))), stats
 
 
-def _generate_llama_cpp(prompt, model, timeout, temperature):
-    """POST to llama-server /completion, non-streaming.
-
-    The loaded model is determined by the server, so the ``model`` argument
-    is accepted for API compatibility but not sent in the payload.
-    """
-    payload = json.dumps(
-        {
-            "prompt": prompt,
-            "n_predict": MAX_TOKENS,
-            "temperature": temperature,
-            "repeat_penalty": 1.1,
-            "stop": _STOP_TOKENS,
-            "stream": False,
-        }
-    ).encode()
+def _post_llama_cpp_chat(payload, timeout):
     req = urllib.request.Request(
-        f"{llama_cpp_url().rstrip('/')}/completion",
-        data=payload,
+        f"{llama_cpp_url().rstrip('/')}/v1/chat/completions",
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local llama-server endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
-        raise RuntimeError(data["error"])
-    stats = {
-        "prompt_tokens": int(data.get("tokens_evaluated") or 0),
-        "gen_tokens": int(data.get("tokens_predicted") or 0),
+        raise LLMError(data["error"])
+    return data
+
+
+def _generate_llama_cpp(prompt, model, timeout, temperature):
+    """POST to llama-server /v1/chat/completions, non-streaming.
+
+    The loaded model is determined by the server, so the ``model`` argument
+    is accepted for API compatibility but not sent in the payload. The
+    server-side chat template wraps the prompt as a user turn, and thinking
+    is disabled: thinking models otherwise burn the whole token budget (or
+    a full minute) reasoning before answering. A capped-out empty reply is
+    retried once as insurance.
+    """
+    payload = {
+        "messages": [{"role": "user", "content": prompt}],
+        "n_predict": MAX_TOKENS,
+        "temperature": temperature,
+        "repeat_penalty": 1.1,
+        "stop": _STOP_TOKENS,
+        "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
     }
-    return _strip_special(_strip_think(data.get("content", ""))), stats
+    for attempt in range(2):
+        data = _post_llama_cpp_chat(payload, timeout)
+        usage = data.get("usage") or {}
+        stats = {
+            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+            "gen_tokens": int(usage.get("completion_tokens") or 0),
+        }
+        message = (data.get("choices") or [{}])[0].get("message") or {}
+        text = _strip_special(_strip_think(message.get("content") or ""))
+        if text or stats["gen_tokens"] < MAX_TOKENS - 1 or attempt == 1:
+            return text, stats
+        logger.debug("llama_cpp reply empty at token cap; retrying once")
 
 
 @telemetry.span("llm.generate")
@@ -394,7 +426,7 @@ def describe_image(image_bytes, model=None, timeout=None):
     vision support is out of scope for this iteration.
     """
     if llm_backend() == "llama_cpp":
-        raise RuntimeError("vision is not supported on the llama.cpp backend")
+        raise LLMError("vision is not supported on the llama.cpp backend")
     if model is None:
         model = vision_model()
     if timeout is None:
@@ -416,7 +448,7 @@ def describe_image(image_bytes, model=None, timeout=None):
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - local ollama endpoint
         data = json.loads(resp.read().decode())
     if data.get("error"):
-        raise RuntimeError(data["error"])
+        raise LLMError(data["error"])
     return _strip_think(data.get("response", ""))
 
 

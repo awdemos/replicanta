@@ -14,8 +14,11 @@ the narrator's LLM), REPLICANTA_STT_COMPUTE (default 'int8'). The model
 downloads from HuggingFace on first use (~150 MB for base).
 """
 
+import logging
 import os
 import threading
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
 
@@ -108,6 +111,7 @@ class Listener:
         self._mic_factory = mic_factory
         self.mic_spec = None  # chosen input device (id or name substring)
         self._thread = None
+        self._last_capture = None  # most recent capture thread, live or zombie
         self._chunks = []
         self._stop = threading.Event()
         self._model = None
@@ -122,6 +126,14 @@ class Listener:
         no-op when no microphone can be opened (recording stays False)."""
         if self.recording:
             return
+        # stop() joins with a timeout; a capture stuck in record() can
+        # outlive it and still hold the mic. Never open a second capture
+        # while that zombie lives.
+        prev = self._last_capture
+        if prev is not None and prev.is_alive():
+            prev.join(timeout=5)
+            if prev.is_alive():
+                return
         try:
             mic = self._open_mic()
         except Exception:  # noqa: BLE001 — no mic / busy device
@@ -129,6 +141,7 @@ class Listener:
         self._chunks = []
         self._stop.clear()
         self._thread = threading.Thread(target=self._capture, args=(mic,), daemon=True, name="listen")
+        self._last_capture = self._thread
         self._thread.start()
 
     def _open_mic(self):
@@ -194,7 +207,8 @@ class Listener:
                 return self._transcriber(audio).strip()
             segments, _info = self._load_model().transcribe(audio, beam_size=5, vad_filter=True)
             return " ".join(s.text.strip() for s in segments).strip()
-        except Exception:  # noqa: BLE001 — hearing must never kill anything
+        except Exception as exc:  # noqa: BLE001 — hearing must never kill anything
+            logger.warning("transcription failed: %s", exc)
             return ""
 
     def _capture(self, mic):
@@ -202,7 +216,8 @@ class Listener:
             with mic.recorder(samplerate=SAMPLE_RATE) as rec:
                 while not self._stop.is_set():
                     self._chunks.append(_mono(rec.record(numframes=SAMPLE_RATE // 10)))
-        except Exception:  # noqa: BLE001 — device died mid-capture: "nothing heard"
+        except Exception as exc:  # noqa: BLE001 — device died mid-capture: "nothing heard"
+            logger.warning("mic capture died: %s", exc)
             self._chunks = []
 
     def _load_model(self):
