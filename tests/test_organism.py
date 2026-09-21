@@ -673,7 +673,7 @@ def test_tui_command_chaos(tmp_path):
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
-    app.handle_command("/chaos 0.8")
+    app.dispatch_command("/chaos 0.8")
     assert org.store.chaos == 0.8
 
 
@@ -681,7 +681,7 @@ def test_tui_command_focus(tmp_path):
     org = Organism(tmp_path)
     org.load()
     app = OrganismApp(org)
-    app.handle_command("/focus color")
+    app.dispatch_command("/focus color")
     assert org.window.focus_attr == "color"
 
 
@@ -705,7 +705,7 @@ def test_tui_command_revive_brings_back_dead(monkeypatch, tmp_path):
 
     monkeypatch.setattr(app, "query_one", lambda *a, **k: FakeStatic())
     monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    app.handle_command("/revive")
+    app.dispatch_command("/revive")
     assert org.lifecycle.state == "wake"
     assert org.store.fade_streak == 0
     assert org.store.stress == 0.05
@@ -727,9 +727,9 @@ def test_tui_command_self_talk_toggles(monkeypatch, tmp_path):
             pass
 
     monkeypatch.setattr(app, "query_one", lambda *a, **k: FakeStatic())
-    app.handle_command("/self-talk")
+    app.dispatch_command("/self-talk")
     assert app._self_talk_on is True
-    app.handle_command("/self-talk")
+    app.dispatch_command("/self-talk")
     assert app._self_talk_on is False
 
 
@@ -1167,7 +1167,7 @@ def test_tui_approve_applies_pending(monkeypatch, tmp_path):
         _proposal_entry(),
         auto_apply=False,
     )
-    app.handle_command("/approve")
+    app.dispatch_command("/approve")
     assert ext_mod.active_entries("pattern")[0]["regex"] == "i adore ([a-z '-]+)"
     assert any("applied" in line for line in logged)
 
@@ -1177,7 +1177,7 @@ def test_tui_approve_without_pending(monkeypatch, tmp_path):
     app.org.store.auto_apply_patches = False
     logged = []
     _patch_app(monkeypatch, app, logged)
-    app.handle_command("/approve")
+    app.dispatch_command("/approve")
     assert any("no pending" in line for line in logged)
 
 
@@ -1191,7 +1191,7 @@ def test_tui_reject_discards_pending(monkeypatch, tmp_path):
         _proposal_entry(),
         auto_apply=False,
     )
-    app.handle_command("/reject")
+    app.dispatch_command("/reject")
     assert ext_mod.pending() is None
     assert ext_mod.active_entries("pattern") == []
     assert any("rejected" in line for line in logged)
@@ -1207,7 +1207,7 @@ def test_tui_revert_removes_last_patch(monkeypatch, tmp_path):
         auto_apply=False,
     )
     ext_mod.approve(app.org.dir_path / "artifacts" / "extensions.json")
-    app.handle_command("/revert")
+    app.dispatch_command("/revert")
     assert ext_mod.active_entries("pattern") == []
     assert any("reverted" in line for line in logged)
 
@@ -1221,10 +1221,10 @@ def test_tui_auto_apply_toggle(monkeypatch, tmp_path):
     app = _headless_app(monkeypatch, tmp_path)
     logged = []
     _patch_app(monkeypatch, app, logged)
-    app.handle_command("/auto-apply off")
+    app.dispatch_command("/auto-apply off")
     assert not app.org.store.auto_apply_patches
     assert any("auto-apply patches: off" in line for line in logged)
-    app.handle_command("/auto-apply on")
+    app.dispatch_command("/auto-apply on")
     assert app.org.store.auto_apply_patches
     assert any("auto-apply patches: on" in line for line in logged)
 
@@ -1278,7 +1278,7 @@ def test_tui_new_births_and_swaps(monkeypatch, tmp_path):
     from replicanta import nursery
 
     app, root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/new fern")
+    app.dispatch_command("/new fern")
     assert app.org.dir_path == nursery.organism_dir(root, "fern")
     assert (root / "organisms" / "fern" / "organism.scl").exists()
     assert nursery.current(root) == "fern"
@@ -1287,32 +1287,32 @@ def test_tui_new_births_and_swaps(monkeypatch, tmp_path):
 
 def test_tui_new_bare_autonames(monkeypatch, tmp_path):
     app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/new")
+    app.dispatch_command("/new")
     assert app.org.dir_path.name == "replicanta-2"
 
 
 def test_tui_new_rejects_duplicate(monkeypatch, tmp_path):
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/new default")
+    app.dispatch_command("/new default")
     assert app.org.dir_path.name == "default"  # stayed put
     assert any("already exists" in line for line in logged)
 
 
 def test_tui_organisms_lists_with_current_marked(monkeypatch, tmp_path):
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/new fern")
+    app.dispatch_command("/new fern")
     logged.clear()
-    app.handle_command("/organisms")
+    app.dispatch_command("/organisms")
     assert any("*fern" in line and "default" in line for line in logged)
 
 
 def test_tui_swap_roundtrip_and_unknown(monkeypatch, tmp_path):
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/new fern")
-    app.handle_command("/swap default")
+    app.dispatch_command("/new fern")
+    app.dispatch_command("/swap default")
     assert app.org.dir_path.name == "default"
     logged.clear()
-    app.handle_command("/swap nope")
+    app.dispatch_command("/swap nope")
     assert app.org.dir_path.name == "default"
     assert any("no organism 'nope'" in line for line in logged)
 
@@ -1323,7 +1323,7 @@ def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
     busy flags reset so the new organism can speak immediately."""
     app, root, _logged = _nursery_app(monkeypatch, tmp_path)
     app._responding = True
-    app.handle_command("/new fern")
+    app.dispatch_command("/new fern")
     assert app.org.dir_path.name == "fern"  # swapped anyway
     assert (root / "organisms" / "fern").exists()
     assert app._responding is False  # flags reset for the new org
@@ -1336,11 +1336,11 @@ def test_tui_voice_toggles_speech(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "available", lambda: True)
     monkeypatch.setattr(speech, "say", lambda text: said.append(text))
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice on")
+    app.dispatch_command("/voice on")
     assert speech.enabled is True
     assert said == ["I can speak now."]
     assert any("spoken voice on" in line for line in logged)
-    app.handle_command("/voice off")
+    app.dispatch_command("/voice off")
     assert speech.enabled is False
     assert any("spoken voice off" in line for line in logged)
 
@@ -1349,9 +1349,9 @@ def test_tui_voice_bare_toggles(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "available", lambda: True)
     monkeypatch.setattr(speech, "say", lambda text: None)
     app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice")
+    app.dispatch_command("/voice")
     assert speech.enabled is True
-    app.handle_command("/voice")
+    app.dispatch_command("/voice")
     assert speech.enabled is False
 
 
@@ -1359,14 +1359,14 @@ def test_tui_voice_warns_without_model(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "available", lambda: False)
     monkeypatch.setattr(speech, "say", lambda text: None)
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice on")
+    app.dispatch_command("/voice on")
     assert speech.enabled is True  # flag set, but honest about it
     assert any("staying mute" in line for line in logged)
 
 
 def test_tui_voice_rejects_bad_arg(monkeypatch, tmp_path):
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice loudly")
+    app.dispatch_command("/voice loudly")
     assert speech.enabled is False
     assert any("/voice list" in line for line in logged)
 
@@ -1375,7 +1375,7 @@ def test_tui_voice_list_marks_active(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "list_voices", lambda: ["en_GB-alan-low", "en_US-lessac-medium"])
     monkeypatch.setattr(speech, "voice_name", lambda: "en_US-lessac-medium")
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice list")
+    app.dispatch_command("/voice list")
     assert any("*en_US-lessac-medium" in line and "en_GB-alan-low" in line for line in logged)
 
 
@@ -1385,7 +1385,7 @@ def test_tui_voice_use_switches_and_speaks(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "set_voice", lambda spec: Path(f"voices/{spec}.onnx"))
     monkeypatch.setattr(speech, "voice_name", lambda: "en_GB-alan-low")
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice use en_GB-alan-low")
+    app.dispatch_command("/voice use en_GB-alan-low")
     assert any("voice: en_GB-alan-low" in line for line in logged)
     assert said == ["This is my new voice."]
 
@@ -1394,7 +1394,7 @@ def test_tui_voice_use_unknown_suggests_get(monkeypatch, tmp_path):
     monkeypatch.setattr(speech, "set_voice", lambda spec: None)
     monkeypatch.setattr(speech, "list_voices", lambda: ["en_US-lessac-medium"])
     app, _root, logged = _nursery_app(monkeypatch, tmp_path)
-    app.handle_command("/voice use en_GB-alan-low")
+    app.dispatch_command("/voice use en_GB-alan-low")
     assert any("no voice 'en_GB-alan-low'" in line and "/voice get en_GB-alan-low" in line for line in logged)
 
 
@@ -1402,7 +1402,7 @@ def test_tui_voice_get_runs_download_worker(monkeypatch, tmp_path):
     got = []
     app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
     app._voice_download = lambda name: got.append(name)
-    app.handle_command("/voice get en_GB-alan-low")
+    app.dispatch_command("/voice get en_GB-alan-low")
     assert got == ["en_GB-alan-low"]
 
 

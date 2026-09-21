@@ -1599,13 +1599,13 @@ class OrganismApp(App):
     def action_sleep_wake(self):
         """Toggle between wake and sleep states."""
         if self.org.lifecycle.state == "wake":
-            self.handle_command("/sleep")
+            self.dispatch_command("/sleep")
         else:
-            self.handle_command("/wake")
+            self.dispatch_command("/wake")
 
     def action_voice(self):
         """Toggle spoken voice output."""
-        self.handle_command("/voice")
+        self.dispatch_command("/voice")
 
     def action_mud(self):
         """Toggle the MUD mini-game."""
@@ -1966,7 +1966,7 @@ class OrganismApp(App):
     def _transcribe_then_say(self, audio):
         text = self.listener.transcribe(audio)
         if text:
-            self.call_from_thread(self.handle_chat, text)
+            self.call_from_thread(self.route_chat_message, text)
         else:
             self.call_from_thread(self._append_log, "(heard nothing)", STYLE_DIM)
         self.call_from_thread(self.refresh_status)
@@ -2676,11 +2676,11 @@ class OrganismApp(App):
         self.query_one("#chat", Input).value = ""
         tui_commands.history_push(self._chat_history, text)
         if text.startswith("/"):
-            self.handle_command(text)
+            self.dispatch_command(text)
         elif text:
-            self.handle_chat(text)
+            self.route_chat_message(text)
 
-    def handle_command(self, cmd):
+    def dispatch_command(self, cmd):
         """Parse and dispatch a slash-command line from the chat input."""
         parts = cmd.split()
         name = parts[0]
@@ -2929,7 +2929,7 @@ class OrganismApp(App):
             return
         self.action_modules()
 
-    def handle_chat(self, text):
+    def route_chat_message(self, text):
         """Route ordinary user chat to DOOM, MUD, group chat, or the organism."""
         self._log_chat("user", text)
         loader = getattr(self.org, "module_loader", None)

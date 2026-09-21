@@ -254,12 +254,12 @@ def test_group_command_start_status_and_stop(nursery_app):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start fern")
+            app.dispatch_command("/group start fern")
             assert app._group is not None
             assert app._group.names() == ["default", "fern"]
             # the current organism participates as itself
             assert app._group.members["default"] is app.org
-            app.handle_command("/group stop")
+            app.dispatch_command("/group stop")
             assert app._group is None
 
     asyncio.run(check())
@@ -270,15 +270,15 @@ def test_group_command_rejects_unknown_and_solo(nursery_app):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start ghost")
+            app.dispatch_command("/group start ghost")
             assert app._group is None
-            app.handle_command("/group start default")
+            app.dispatch_command("/group start default")
             assert app._group is None  # a group needs two members
 
     asyncio.run(check())
 
 
-def test_handle_chat_in_group_mode_broadcasts(nursery_app, monkeypatch):
+def test_route_chat_message_in_group_mode_broadcasts(nursery_app, monkeypatch):
     """In group mode a chat line goes to the group broadcast worker, not
     the solo reply path, and it does not pollute individual chat logs."""
     from conftest import patch_generate
@@ -291,7 +291,7 @@ def test_handle_chat_in_group_mode_broadcasts(nursery_app, monkeypatch):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start fern")
+            app.dispatch_command("/group start fern")
             assert isinstance(app._group, groupchat.GroupChat)
             solo_calls = []
             monkeypatch.setattr(
@@ -299,7 +299,7 @@ def test_handle_chat_in_group_mode_broadcasts(nursery_app, monkeypatch):
                 "_maybe_respond",
                 lambda text: solo_calls.append(text),
             )
-            app.handle_chat("hello everyone")
+            app.route_chat_message("hello everyone")
             # wait for the background group respond worker (genuine
             # off-loop worker, so poll bounded rather than fixed-sleep)
             await wait_until(lambda: not app._group_responding, timeout=2.0, message="group respond worker to finish")
@@ -320,7 +320,7 @@ def test_group_deliver_renders_member_cards(nursery_app):
 
     async def check():
         async with app.run_test() as pilot:
-            app.handle_command("/group start fern")
+            app.dispatch_command("/group start fern")
             app._deliver_group([("fern", "hi from fern"), ("default", "hi from default")])
             await pilot.pause()
             # group replies are rendered as member cards, but they must not
@@ -616,7 +616,7 @@ def test_group_command_start_expands_nursery_groups(nursery_app):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start thinkers")
+            app.dispatch_command("/group start thinkers")
             assert set(app._group.names()) == {"default", "fern"}
             assert app._group.members["default"] is app.org
 
@@ -634,7 +634,7 @@ def test_group_command_start_organism_beats_same_named_group(nursery_app):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start fern")
+            app.dispatch_command("/group start fern")
             assert set(app._group.names()) == {"default", "fern"}
             # fern itself was seated, not expanded from the group
             assert "fern" in app._group.members
@@ -647,7 +647,7 @@ def test_group_command_unknown_group_reports(nursery_app):
 
     async def check():
         async with app.run_test():
-            app.handle_command("/group start nowhere")
+            app.dispatch_command("/group start nowhere")
             assert app._group is None
 
     asyncio.run(check())
@@ -669,7 +669,7 @@ def test_mud_stale_organism_move_dropped_after_user_move(nursery_app):
             game = mud_mod.MudGame()
             app._mud_game = game
             stale_gen = app._mud_turn_gen  # in-flight move started here
-            app.handle_chat("go north")
+            app.route_chat_message("go north")
             assert game.turns == 1  # user move applied instantly
             assert app._mud_turn_gen == stale_gen + 1
             # the late organism move arrives — the world has moved on
@@ -692,7 +692,7 @@ def test_mud_stale_organism_move_dropped_after_hint(nursery_app, monkeypatch):
             game = mud_mod.MudGame()
             app._mud_game = game
             stale_gen = app._mud_turn_gen
-            app.handle_chat("maybe try the door")
+            app.route_chat_message("maybe try the door")
             assert app._mud_turn_gen == stale_gen + 1
             assert app._mud_hint == "maybe try the door"
             app._mud_apply(game, "go south", gen=stale_gen)

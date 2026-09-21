@@ -1461,7 +1461,7 @@ class Organism:
         at a time: while a goal is still active the new one is refused and
         None is returned (nothing is remembered for a refused goal)."""
         marker = self.store.count_beliefs("user")
-        goal = self.store.add_goal(text, marker=marker, strategy=goals.formulate_subgoals(text))
+        goal = self.store.add_goal(text, marker=marker, strategy=goals.default_strategy(text))
         if goal is not None:
             self.store.remember("goal", f"new goal: {text}")
         return goal

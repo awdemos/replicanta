@@ -149,10 +149,10 @@ def test_listen_command_toggles_mic(tmp_path):
     app = OrganismApp(org)
     fake = _FakeListener()
     app.listener = fake
-    app.handle_command("/listen")
+    app.dispatch_command("/listen")
     assert fake.recording is True
     app._transcribe_then_say = lambda _audio: None  # no worker in tests
-    app.handle_command("/listen")
+    app.dispatch_command("/listen")
     assert fake.recording is False
     assert fake.stopped is True
 
@@ -223,6 +223,6 @@ def test_microphone_command_status_and_use(tmp_path):
     org.load()
     app = OrganismApp(org)
     app.listener = Listener(mic_factory=_FakeMic)
-    app.handle_command("/microphone")  # status line, no crash
-    app.handle_command("/microphone use usb-1")
+    app.dispatch_command("/microphone")  # status line, no crash
+    app.dispatch_command("/microphone use usb-1")
     assert app.listener.mic_spec == "usb-1"

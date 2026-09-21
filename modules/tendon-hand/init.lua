@@ -162,7 +162,7 @@ function init(ctx)
     -- fall back to the first token so the feedback line names what the
     -- organism tried when it invents an unknown move, e.g. "cartwheel"
     local move = resolve_move(phrase) or string.match(phrase, "^([%a_]+)")
-    local ok = pcall(function() return arm:goal(move, dur) end)
+    local ok = pcall(function() return arm:move(move, dur) end)
     if not ok then
       ok = pcall(function() return arm:posture(move, dur) end)
     end

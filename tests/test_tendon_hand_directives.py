@@ -15,7 +15,7 @@ class _Arm:
     def __init__(self):
         self.calls = []
 
-    def goal(self, kind, dur):
+    def move(self, kind, dur):
         if kind not in GOALS:
             raise ValueError(f"unknown goal {kind!r}")
         self.calls.append(("goal", kind, dur))
@@ -210,12 +210,12 @@ def test_explicit_goal_holds_off_volition():
     arm._post = lambda path, body: sent.append((path, body))
 
     assert arm._explicit_hold_until == 0.0
-    arm.goal("wave", 4.0)
+    arm.move("wave", 4.0)
     assert sent == [("/goal", {"kind": "wave", "duration_s": 4.0})]
     hold = arm._explicit_hold_until
     assert hold > time.time() + 4.0  # move duration + grace
-    # volitional goals go through but don't extend the hold
-    arm.goal("fist", 6.0, _volitional=True)
+    # volitional moves go through but don't extend the hold
+    arm.move("fist", 6.0, _volitional=True)
     assert arm._explicit_hold_until == hold
 
 
@@ -254,7 +254,7 @@ def test_module_uses_service_provided_moves():
         def moves(self):
             return "flutter, wave"  # service-side vocabulary
 
-        def goal(self, kind, dur):
+        def move(self, kind, dur):
             if kind not in ("flutter", "wave"):
                 raise ValueError(f"unknown goal {kind!r}")
             self.calls.append(("goal", kind, dur))

@@ -164,12 +164,12 @@ def test_camera_command_status_and_use(tmp_path):
     org.load()
     app = OrganismApp(org)
     app.camera = Camera(grabber=lambda: b"\xff\xd8jpeg")
-    app.handle_command("/camera")  # status line, no crash
+    app.dispatch_command("/camera")  # status line, no crash
     monkey_cams = [(1, "HD Webcam")]
     orig = camera.list_cameras
     camera.list_cameras = lambda: monkey_cams
     try:
-        app.handle_command("/camera use webcam")
+        app.dispatch_command("/camera use webcam")
         assert app.camera.device == 1
     finally:
         camera.list_cameras = orig

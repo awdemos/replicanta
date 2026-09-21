@@ -10,8 +10,8 @@ LEARN_GOAL_PREFIXES = ("learn", "know", "understand")
 STALLED_CYCLES = 10
 
 
-def formulate_subgoals(goal_text):
-    """Return a short strategy string for a goal."""
+def default_strategy(goal_text):
+    """Return the canned fallback strategy string for a goal."""
     return f"strategy: break '{goal_text}' into small questions and ask one at a time."
 
 

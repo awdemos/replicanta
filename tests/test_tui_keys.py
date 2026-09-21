@@ -325,13 +325,13 @@ def test_doom_pane_arrows_drive_doom_not_history(headless_app, monkeypatch):
 
 def test_modal_input_submitted_does_not_run_chat(headless_app, monkeypatch):
     """Enter in the rename prompt dismisses the prompt — it must not
-    also clear the chat line, push history, and run handle_chat with
+    also clear the chat line, push history, and run route_chat_message with
     the modal text (Submitted bubbles up to the app)."""
 
     app = headless_app
     chats, commands = [], []
-    monkeypatch.setattr(app, "handle_chat", chats.append)
-    monkeypatch.setattr(app, "handle_command", commands.append)
+    monkeypatch.setattr(app, "route_chat_message", chats.append)
+    monkeypatch.setattr(app, "dispatch_command", commands.append)
 
     async def check():
         async with app.run_test() as pilot:

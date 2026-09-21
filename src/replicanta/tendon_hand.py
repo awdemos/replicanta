@@ -84,19 +84,19 @@ class ArmService:
     """Client for the tendon-hand bridge with optional volitional control.
 
     Exposed to Lua as ``services.get('arm')`` with methods:
-      get_state(), state(), health(), telemetry(), goal(kind, duration),
+      get_state(), state(), health(), telemetry(), move(kind, duration),
       posture(name, duration), actuator(finger, joint, side, activation),
       pose(spec), emotion(spec), summary(), moves(), postures(),
       volition(enabled), set_decide(fn), dispatch(args).
 
-    Error contract per method: goal/posture/actuator/pose/emotion validate
+    Error contract per method: move/posture/actuator/pose/emotion validate
     their arguments and raise (Lua sees the error via pcall); get_state,
     state, and health never raise on bridge failures — they return a
     DictProxy carrying ``connected=false`` and an ``error`` field instead.
 
     The SSE listener and volition threads start lazily on first use.
     When volition is enabled (default), a background thread reads the
-    organism's mood/stress/arousal every few seconds and sends goals to the
+    organism's mood/stress/arousal every few seconds and sends moves to the
     hand without human input.
     """
 
@@ -111,7 +111,7 @@ class ArmService:
         self._state = None
         self._volition = True
         self._last_volition = 0.0
-        self._last_goal = None
+        self._last_move = None
         # explicit moves (chat requests, slash commands) hold off volitional
         # ones until the move has played out, so autonomy can't stomp them
         self._explicit_hold_until = 0.0
@@ -166,10 +166,10 @@ class ArmService:
         with self._lock:
             return list(self._telemetry_log)
 
-    def goal(self, kind, duration_s=4.0, _volitional=False):
+    def move(self, kind, duration_s=4.0, _volitional=False):
         kind = str(kind).lower()
         if kind not in GOALS:
-            raise ValueError(f"unknown goal {kind!r}; try {GOALS}")
+            raise ValueError(f"unknown move {kind!r}; try {GOALS}")
         duration_s = max(0.3, min(15.0, float(duration_s)))
         self._post("/goal", {"kind": kind, "duration_s": duration_s})
         if not _volitional:
@@ -293,7 +293,7 @@ class ArmService:
             self.actuator(args[1], args[2], args[3], float(args[4]), float(args[5]) if len(args) > 5 else 4.0)
             return f"hand: {args[1]}/{args[2]} {args[3]} = {args[4]}"
         if verb == "goal":
-            return f"hand: goal '{self.goal(args[1] if len(args) > 1 else 'reach', float(args[2]) if len(args) > 2 else 4.0)['goal']}' set"
+            return f"hand: goal '{self.move(args[1] if len(args) > 1 else 'reach', float(args[2]) if len(args) > 2 else 4.0)['goal']}' set"
         if verb == "volition":
             if len(args) > 1:
                 on = args[1] in ("on", "true", "1")
@@ -418,13 +418,13 @@ class ArmService:
             if now < self._explicit_hold_until:
                 continue
             kind = self._volition_tick(mood, stress, arousal, chaos, insane, now)
-            if kind and kind != self._last_goal:
+            if kind and kind != self._last_move:
                 try:
-                    self.goal(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
-                    self._last_goal = kind
-                    log.debug("volition chose goal %s (mood=%s stress=%.2f)", kind, mood, stress)
+                    self.move(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
+                    self._last_move = kind
+                    log.debug("volition chose move %s (mood=%s stress=%.2f)", kind, mood, stress)
                 except Exception as exc:  # noqa: BLE001
-                    log.debug("volition goal error: %s", exc)
+                    log.debug("volition move error: %s", exc)
 
     def _volition_tick(self, mood, stress, arousal, chaos, insane, now):
         """Run one volition decision; never raises.

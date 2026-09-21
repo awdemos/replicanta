@@ -142,7 +142,7 @@ def test_volition_tick_recovers_after_raising_fn():
 def test_volition_tick_updates_cadence_when_move_repeats():
     arm = ArmService()
     arm.set_decide(lambda _inputs: "wave")
-    arm._last_goal = "wave"  # policy keeps choosing the same move
+    arm._last_move = "wave"  # policy keeps choosing the same move
     assert arm._volition_tick("calm", 0.1, 0.1, 0.1, False, 1000.0) == "wave"
     assert arm._last_volition == 1000.0
 
