@@ -728,21 +728,14 @@ class Glasshouse:
     # -- MUD controller --------------------------------------------------------
 
     def _mud_load_scenario(self, slug):
-        """Load a saved generated scenario by slug, or the built-in default."""
-        if not slug or fileutil.slug(slug) != slug:
-            return None
-        directory = self.org.dir_path / "artifacts" / "mud" / "scenarios"
-        path = directory / f"{slug}.json"
-        if path.exists():
-            try:
-                data = json.loads(path.read_text())
-                return mud.validate_scenario(data)
-            except Exception:  # noqa: BLE001
-                return None
-        default = mud.default_scenario()
-        if fileutil.slug(default.title) == slug:
-            return default
-        return None
+        """Load a saved generated scenario by slug, or the built-in default —
+        thin wrapper over ``mud.load_scenario`` that logs failures instead of
+        swallowing them."""
+        try:
+            return mud.load_scenario(slug, self.org.dir_path / "artifacts")
+        except (OSError, ValueError) as exc:
+            logger.warning("mud: couldn't load scenario %s (%s)", slug, exc)
+            return mud.default_scenario_for_slug(slug)
 
     def _mud_start(self, scenario=None, description=None):
         """Start a new MUD game hosted by the current organism."""
@@ -753,9 +746,10 @@ class Glasshouse:
             # Still seated in another host's game; auto-step would keep
             # pulling this organism back into that game's turns.
             return "mud: already in a game; /mud leave first"
+        saved = ""
         if description:
             scenario = mud.generate_scenario(description, self.org)
-            self._mud_save_scenario(scenario)
+            saved = self._mud_save_scenario(scenario)
         elif scenario is None:
             loaded = self._mud_load_scenario_from_session()
             scenario = loaded or mud.default_scenario()
@@ -767,7 +761,7 @@ class Glasshouse:
         self._mud_games[host_name] = game
         self._mud_member_of[host_name] = host_name
         self.org.store.save_mud_session(game.session)
-        return f"mud: entered {game.world.scenario.title}"
+        return f"mud: entered {game.world.scenario.title}{saved}"
 
     def _mud_load_scenario_from_session(self):
         """Resume a saved session's scenario when available."""
@@ -777,14 +771,14 @@ class Glasshouse:
         return self._mud_load_scenario(session.scenario_id)
 
     def _mud_save_scenario(self, scenario):
-        """Persist a generated scenario to artifacts/mud/scenarios/<slug>.json."""
+        """Persist a generated scenario via the domain layer; returns a
+        parenthetical result message for ``_mud_start`` — a failed save is
+        reported, never swallowed."""
         try:
-            directory = self.org.dir_path / "artifacts" / "mud" / "scenarios"
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"{fileutil.slug(scenario.title)}.json"
-            fileutil.atomic_write_text(path, json.dumps(mud.scenario_to_json(scenario), indent=1))
-        except OSError:
-            pass
+            return f" ({mud.save_scenario(scenario, self.org.dir_path / 'artifacts')})"
+        except OSError as exc:
+            logger.warning("mud: couldn't save scenario (%s)", exc)
+            return f" (couldn't save scenario: {exc})"
 
     def _mud_join(self, host_name):
         """Add the current organism to a hosted game."""

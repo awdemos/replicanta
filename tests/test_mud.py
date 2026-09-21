@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from replicanta import mud
+from replicanta import fileutil, mud
 from replicanta.mud import MudGame, Room
 
 
@@ -576,6 +576,27 @@ def test_validate_scenario_falls_back_on_bad_exits():
             "win_condition": {"item": "a"},
             "rooms": {"foyer": "not a mapping"},
         },
+        {
+            "title": "x",
+            "premise": "y",
+            "start_room": "z",
+            "win_condition": {"item": "a"},
+            "rooms": ["foyer"],
+        },
+        {
+            "title": "x",
+            "premise": "y",
+            "start_room": "z",
+            "win_condition": {"item": "a"},
+            "rooms": {"foyer": {"desc": "A foyer.", "exits": 5}},
+        },
+        {
+            "title": "x",
+            "premise": "y",
+            "start_room": "z",
+            "win_condition": {"item": "a"},
+            "rooms": {"foyer": {"desc": "A foyer.", "locked": []}},
+        },
     ],
 )
 def test_validate_scenario_raises_valueerror_on_bad_input(payload):
@@ -660,6 +681,47 @@ def test_loaded_scenario_is_playable(tmp_path):
         game.act(cmd)
     assert game.won and game.finished
     assert game.turns == 8
+
+
+# -- scenario persistence ------------------------------------------------------
+
+
+def test_save_and_load_scenario_roundtrip(tmp_path):
+    """The domain persistence layer owns the artifacts/mud/scenarios layout."""
+    scenario = mud.default_scenario()
+    message = mud.save_scenario(scenario, tmp_path)
+    slug = fileutil.slug(scenario.title)
+    assert message == f"scenario saved: artifacts/mud/scenarios/{slug}.json"
+    loaded = mud.load_scenario(slug, tmp_path)
+    assert loaded is not None
+    assert loaded.title == scenario.title
+    assert loaded.rooms["dark hall"].locked["north"] == scenario.rooms["dark hall"].locked["north"]
+
+
+def test_load_scenario_missing_file(tmp_path):
+    """Unknown slugs and never-saved files load as None."""
+    assert mud.load_scenario("no-such-scenario", tmp_path) is None
+    assert mud.load_scenario(None, tmp_path) is None
+    assert mud.load_scenario("not a slug!", tmp_path) is None
+
+
+def test_load_scenario_default_slug_falls_back(tmp_path):
+    """The default scenario's slug resolves to the default even without a file."""
+    slug = fileutil.slug(mud.default_scenario().title)
+    assert mud.load_scenario(slug, tmp_path) == mud.default_scenario()
+    assert mud.default_scenario_for_slug(slug) == mud.default_scenario()
+    assert mud.default_scenario_for_slug("other-slug") is None
+
+
+def test_load_scenario_invalid_file_raises_valueerror(tmp_path):
+    """A present but invalid file raises ValueError (never KeyError/TypeError)."""
+    import json
+
+    directory = tmp_path / "mud" / "scenarios"
+    directory.mkdir(parents=True)
+    (directory / "broken.json").write_text(json.dumps({"title": "Broken"}))
+    with pytest.raises(ValueError):
+        mud.load_scenario("broken", tmp_path)
 
 
 # -- win conditions ------------------------------------------------------------

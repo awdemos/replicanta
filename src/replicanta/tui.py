@@ -3,7 +3,6 @@ the thought arena (arena.py) and the MUD engine (mud.py) to the terminal,
 delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
 
 import contextlib
-import json
 import logging
 import os
 import random
@@ -1830,30 +1829,21 @@ class OrganismApp(App):
         return scenario, session
 
     def _mud_load_scenario(self, slug):
-        """A saved generated scenario by slug, or the built-in default.
-        The slug comes from a resumed session on disk, so re-validate it
-        the same way writes produce it before touching the filesystem."""
-        if not slug or fileutil.slug(slug) != slug:
-            return None
-        path = self._mud_artifacts_dir() / "mud" / "scenarios" / f"{slug}.json"
+        """A saved generated scenario by slug, or the built-in default —
+        thin wrapper over ``mud.load_scenario`` that only translates errors
+        into the TUI log. The slug comes from a resumed session on disk, so
+        the domain layer re-validates it before touching the filesystem."""
         try:
-            if path.exists():
-                return mud.validate_scenario(json.loads(path.read_text()))
+            return mud.load_scenario(slug, self._mud_artifacts_dir())
         except (OSError, ValueError) as exc:
             self._append_log(f"mud: couldn't load scenario {slug} ({exc})", STYLE_WARN)
-        default = mud.default_scenario()
-        if fileutil.slug(default.title) == slug:
-            return default
-        return None
+            return mud.default_scenario_for_slug(slug)
 
     def _mud_save_scenario(self, scenario):
-        """Save a generated scenario to artifacts/mud/scenarios/<slug>.json."""
+        """Save a generated scenario via the domain layer, rendering the
+        result message (or the OSError) into the TUI log."""
         try:
-            directory = self._mud_artifacts_dir() / "mud" / "scenarios"
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"{fileutil.slug(scenario.title)}.json"
-            fileutil.atomic_write_text(path, json.dumps(mud.scenario_to_json(scenario), indent=1))
-            self._append_log(f"scenario saved: artifacts/mud/scenarios/{path.name}", STYLE_DIM)
+            self._append_log(mud.save_scenario(scenario, self._mud_artifacts_dir()), STYLE_DIM)
         except OSError as exc:
             self._append_log(f"mud: couldn't save scenario ({exc})", STYLE_WARN)
 

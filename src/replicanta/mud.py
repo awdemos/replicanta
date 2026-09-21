@@ -23,6 +23,7 @@ import os
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, NamedTuple, TypedDict
 
 from replicanta import fileutil, voice
@@ -937,25 +938,32 @@ def validate_scenario(data: dict[str, Any]) -> Scenario:
         rooms_data = data["rooms"]
     except (KeyError, TypeError) as exc:
         raise ValueError(f"invalid scenario data: {exc}") from exc
+    if not isinstance(rooms_data, dict):
+        raise ValueError(f"rooms must be a mapping, got {type(rooms_data).__name__}")  # noqa: TRY004 — contract is ValueError
 
     if start_room not in rooms_data:
         raise ValueError(f"start_room {start_room!r} not in rooms")
 
     rooms = {}
     for room_id, room_data in rooms_data.items():
-        if not isinstance(room_data, dict) or not isinstance(room_data.get("desc"), str):
-            raise ValueError(f"room {room_id!r} needs a desc")  # noqa: TRY004 — contract is ValueError
-        desc = room_data["desc"]
-        exits = dict(room_data.get("exits", {}))
-        items = list(room_data.get("items", []))
-        locked_raw = room_data.get("locked", {})
-        locked = {}
-        for direction, lock_info in locked_raw.items():
-            if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
-                raise ValueError(f"invalid locked format for {direction} in {room_id}")
-            locked[direction] = (lock_info[0], lock_info[1])
-        plot_trigger = room_data.get("plot_trigger")
-        is_goal = room_data.get("is_goal", False)
+        try:
+            if not isinstance(room_data, dict) or not isinstance(room_data.get("desc"), str):
+                raise ValueError(f"room {room_id!r} needs a desc")  # noqa: TRY004 — contract is ValueError
+            desc = room_data["desc"]
+            exits = dict(room_data.get("exits", {}))
+            items = list(room_data.get("items", []))
+            locked_raw = room_data.get("locked", {})
+            if not isinstance(locked_raw, dict):
+                raise ValueError(f"locked must be a mapping in {room_id}")  # noqa: TRY004 — contract is ValueError
+            locked = {}
+            for direction, lock_info in locked_raw.items():
+                if not isinstance(lock_info, (list, tuple)) or len(lock_info) < 2:
+                    raise ValueError(f"invalid locked format for {direction} in {room_id}")
+                locked[direction] = (lock_info[0], lock_info[1])
+            plot_trigger = room_data.get("plot_trigger")
+            is_goal = room_data.get("is_goal", False)
+        except (KeyError, TypeError) as exc:
+            raise ValueError(f"invalid room {room_id}: {exc}") from exc
         rooms[room_id] = Room(
             desc=desc,
             exits=exits,
@@ -1020,6 +1028,58 @@ def scenario_to_json(scenario: Scenario) -> ScenarioDict:
             for room_id, room in scenario.rooms.items()
         },
     }
+
+
+# -- scenario persistence ------------------------------------------------------
+#
+# Generated scenarios persist under the organism's artifacts dir in
+# ``artifacts/mud/scenarios/<slug>.json``; both frontends delegate to these
+# functions so directory layout, slug validation, and the error contract
+# live in exactly one place.
+
+
+def scenario_dir(artifacts_dir) -> Path:
+    """The scenarios directory inside an organism's artifacts dir."""
+    return Path(artifacts_dir) / "mud" / "scenarios"
+
+
+def save_scenario(scenario: Scenario, artifacts_dir) -> str:
+    """Persist a generated scenario to ``mud/scenarios/<slug>.json``.
+
+    Returns the display message for the saved file. Filesystem errors
+    (OSError) propagate to the caller, which owns the output channel.
+    """
+    directory = scenario_dir(artifacts_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{fileutil.slug(scenario.title)}.json"
+    fileutil.atomic_write_text(path, json.dumps(scenario_to_json(scenario), indent=1))
+    return f"scenario saved: artifacts/mud/scenarios/{path.name}"
+
+
+def default_scenario_for_slug(slug: str) -> Scenario | None:
+    """The built-in default when ``slug`` names it, else None — the
+    historic fallback both UIs use for an unloadable scenario slug."""
+    default = default_scenario()
+    if fileutil.slug(default.title) == slug:
+        return default
+    return None
+
+
+def load_scenario(slug: str, artifacts_dir) -> Scenario | None:
+    """The saved scenario named by ``slug``, or the built-in default when
+    the slug names it.
+
+    Returns None for an invalid slug or a missing file. A present but
+    invalid file raises ValueError (per ``validate_scenario``); OSError
+    from the filesystem propagates. Callers that want the forgiving
+    log-and-fallback policy catch both and use ``default_scenario_for_slug``.
+    """
+    if not slug or fileutil.slug(slug) != slug:
+        return None
+    path = scenario_dir(artifacts_dir) / f"{slug}.json"
+    if path.exists():
+        return validate_scenario(json.loads(path.read_text()))
+    return default_scenario_for_slug(slug)
 
 
 def generate_scenario(
