@@ -2,31 +2,20 @@
 
 import asyncio
 
-from textual.widgets import ListItem
+from textual.widgets import Checkbox
 
 from replicanta.modules import ModuleLoader
-from replicanta.organism import Organism
-from replicanta.tui import ModulesScreen, OrganismApp
+from replicanta.tui import ModulesScreen
 
 
-def _headless_app(monkeypatch, tmp_path):
-    org = Organism(tmp_path)
-    org.load()
-    app = OrganismApp(org)
-    monkeypatch.setattr(app, "_probe_voice", lambda: None)
-    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    monkeypatch.setattr(app, "_on_tick", lambda: None)
-    return app
-
-
-def test_f9_binding_opens_modules_screen(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_f9_binding_opens_modules_screen(headless_app):
+    app = headless_app
     assert "f9" in app._bindings.key_to_bindings
 
     async def check():
-        async with app.run_test() as _pilot:
-            await _pilot.press("f9")
-            await asyncio.sleep(0.1)
+        async with app.run_test() as pilot:
+            await pilot.press("f9")
+            await pilot.pause()
             assert isinstance(app.screen, ModulesScreen)
 
     asyncio.run(check())
@@ -42,46 +31,41 @@ def _make_modules_dir(tmp_path):
     return modules_dir
 
 
-def test_modules_screen_toggles_enabled(monkeypatch, tmp_path):
+def test_modules_screen_toggles_enabled(headless_app, tmp_path):
     modules_dir = _make_modules_dir(tmp_path)
     loader = ModuleLoader(
         modules_dir,
         organism=None,
-        config={"modules": {"enabled": ["alpha"]}},
+        modules_config={"enabled": ["alpha"]},
         root=tmp_path,
     )
 
-    app = OrganismApp(Organism(tmp_path))
-    monkeypatch.setattr(app, "_probe_voice", lambda: None)
-    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    monkeypatch.setattr(app, "_on_tick", lambda: None)
+    app = headless_app
 
     async def check():
-        async with app.run_test() as _pilot:
+        async with app.run_test() as pilot:
             app.push_screen(ModulesScreen(loader))
-            await asyncio.sleep(0.1)
+            await pilot.pause()
             screen = app.screen
             assert "alpha" in screen._enabled
             assert "beta" not in screen._enabled
 
-            # Get the actual ListItem for beta and toggle it.
-            beta_item = screen.query_one("#mod-beta", ListItem)
-
-            class FakeEvent:
-                item = beta_item
-
-            screen.on_list_view_selected(FakeEvent())
+            # Toggle beta on by clicking its Checkbox.
+            beta_cb = screen.query_one("#mod-beta", Checkbox)
+            beta_cb.value = True
+            await pilot.pause()
             assert "beta" in screen._enabled
             assert "alpha" in screen._enabled
 
-            # Select beta again to toggle it off.
-            screen.on_list_view_selected(FakeEvent())
+            # Toggle beta off again.
+            beta_cb.value = False
+            await pilot.pause()
             assert "beta" not in screen._enabled
 
     asyncio.run(check())
 
 
-def test_modules_screen_save_persists_config(tmp_path, monkeypatch):
+def test_modules_screen_save_persists_config(headless_app, tmp_path, monkeypatch):
     modules_dir = tmp_path / "modules"
     (modules_dir / "alpha").mkdir(parents=True)
     (modules_dir / "alpha" / "manifest.toml").write_text('name = "alpha"\nversion = "1.0.0"\n')
@@ -90,14 +74,11 @@ def test_modules_screen_save_persists_config(tmp_path, monkeypatch):
     loader = ModuleLoader(
         modules_dir,
         organism=None,
-        config={"modules": {}},
+        modules_config={},
         root=tmp_path,
     )
 
-    app = OrganismApp(Organism(tmp_path))
-    monkeypatch.setattr(app, "_probe_voice", lambda: None)
-    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    monkeypatch.setattr(app, "_on_tick", lambda: None)
+    app = headless_app
 
     saved = {"called": False, "root": None, "config": None}
 
@@ -113,15 +94,52 @@ def test_modules_screen_save_persists_config(tmp_path, monkeypatch):
     monkeypatch.setattr(loader, "load_all", lambda: reloaded.update(called=True))
 
     async def check():
-        async with app.run_test() as _pilot:
+        async with app.run_test() as pilot:
             screen = ModulesScreen(loader)
             screen._enabled = {"alpha"}
             app.push_screen(screen)
-            await asyncio.sleep(0.1)
+            await pilot.pause()
             screen.action_save()
             assert saved["called"]
             assert saved["root"] == tmp_path
             assert saved["config"]["modules"]["enabled"] == ["alpha"]
             assert reloaded["called"]
+
+    asyncio.run(check())
+
+
+def test_modules_screen_keyboard_toggle_and_save_propagates(headless_app, tmp_path):
+    """End-to-end: open the screen with pilot keys, toggle beta, save, and verify
+    the loader's modules_config picks up the new enabled set."""
+    modules_dir = _make_modules_dir(tmp_path)
+    loader = ModuleLoader(
+        modules_dir,
+        organism=None,
+        modules_config={"enabled": ["alpha"]},
+        root=tmp_path,
+    )
+
+    app = headless_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            app.push_screen(ModulesScreen(loader))
+            await pilot.pause()
+            screen = app.screen
+            assert "alpha" in screen._enabled
+            assert "beta" not in screen._enabled
+
+            # Focus beta's checkbox directly and press space to toggle.
+            beta_cb = screen.query_one("#mod-beta", Checkbox)
+            beta_cb.focus()
+            await pilot.pause()
+            await pilot.press("space")
+            await pilot.pause()
+            assert "beta" in screen._enabled
+
+            # Save: this should write the config and reload modules on the loader.
+            await pilot.press("s")
+            await pilot.pause()
+            assert loader.modules_config.get("enabled") == ["alpha", "beta"]
 
     asyncio.run(check())

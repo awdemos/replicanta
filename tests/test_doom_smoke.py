@@ -7,13 +7,14 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, Static
 
+from conftest import neuter_background_loops, wait_until
 from replicanta import nursery as nursery_mod
 from replicanta.organism import Organism
 from replicanta.tui import OrganismApp
 
 
 @pytest.fixture
-def headless_app(monkeypatch, tmp_path):
+def doom_app(monkeypatch, tmp_path):
     seed = tmp_path / "organism.scl"
     seed.write_text("type bel(x: String, a: String, v: String)\n")
     nursery_mod.create(tmp_path, "doomtest", seed)
@@ -27,15 +28,13 @@ def headless_app(monkeypatch, tmp_path):
     org = Organism(org_dir)
     org.load()
     app = OrganismApp(org, root=tmp_path)
-    monkeypatch.setattr(app, "_probe_voice", lambda: None)
-    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    monkeypatch.setattr(app, "_on_tick", lambda: None)
+    neuter_background_loops(monkeypatch, app)
     monkeypatch.setattr(app, "refresh_status", lambda: None)
     return app
 
 
-def test_doom_command_renders_frame(headless_app):
-    app = headless_app
+def test_doom_command_renders_frame(doom_app):
+    app = doom_app
 
     async def check():
         async with app.run_test() as pilot:
@@ -43,18 +42,17 @@ def test_doom_command_renders_frame(headless_app):
             chat.focus()
             chat.value = "/doom start"
             await pilot.press("enter")
-            await asyncio.sleep(1.0)
-            # The frame now renders in the dedicated DOOM pane, not the chat log.
+            # The doom loop's first frame is genuinely timer-driven, so
+            # poll bounded rather than fixed-sleeping.
             doom = app.query_one("#doom", Static)
-            text = str(doom.render())
-            assert "hp=" in text
+            await wait_until(lambda: "hp=" in str(doom.render()), message="doom frame to render")
             assert app.org.store.belief_value("doom", "frame") == "running"
 
     asyncio.run(check())
 
 
-def test_doom_command_observes_frame(headless_app):
-    app = headless_app
+def test_doom_command_observes_frame(doom_app):
+    app = doom_app
 
     async def check():
         async with app.run_test() as pilot:
@@ -62,9 +60,12 @@ def test_doom_command_observes_frame(headless_app):
             chat.focus()
             chat.value = "/doom start"
             await pilot.press("enter")
-            await asyncio.sleep(0.5)
-            memories = [m["text"] for m in app.org.store.memory if m.get("kind") == "doom"]
-            assert any("hp=" in m for m in memories)
+
+            def observed():
+                memories = [m["text"] for m in app.org.store.memory if m.get("kind") == "doom"]
+                return any("hp=" in m for m in memories)
+
+            await wait_until(observed, message="doom frame observation to be remembered")
             assert app.org.store.belief_value("doom", "frame") == "running"
 
     asyncio.run(check())

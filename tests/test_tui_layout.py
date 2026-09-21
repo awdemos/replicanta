@@ -6,59 +6,37 @@ from pathlib import Path
 from textual.containers import VerticalScroll
 from textual.widgets import Button, ListView, Static
 
-from replicanta.organism import Organism
-from replicanta.tui import OrganismApp
+from conftest import renderable_text, wait_until
 
 
-def _headless_app(monkeypatch, tmp_path):
-    from replicanta import nursery as nursery_mod
 
-    seed = tmp_path / "organism.scl"
-    seed.write_text("type bel(x: String, a: String, v: String)\n")
-    nursery_mod.create(tmp_path, "default", seed)
-    org = Organism(nursery_mod.organism_dir(tmp_path, "default"))
-    org.load()
-    app = OrganismApp(org, root=tmp_path)
-    monkeypatch.setattr(app, "_probe_voice", lambda: None)
-    monkeypatch.setattr(app, "_maybe_narrate", lambda: None)
-    monkeypatch.setattr(app, "_on_tick", lambda: None)
-    return app
-
-
-def _renderable_text(widget):
-    """Read a Static widget's current content as a plain string.
-
-    Textual 8 stores Static content in the name-mangled private
-    attribute `_Static__content`.
-    """
-    return str(getattr(widget, "_Static__content", ""))
-
-
-def test_top_bar_shows_organism_name(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_top_bar_shows_organism_name(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
             app.refresh_top_bar()
-            text = _renderable_text(app.query_one("#topbar", Static))
-            assert "Replicanta" in text
+            text = renderable_text(app.query_one("#topbar", Static), width=120)
+            assert "REPLICANTA" in text  # wordmark is upper-case in the new branding
             name = Path(app.org.dir_path).name
             assert name in text
+            assert "a/r/i" in text  # mental-state readout in the center zone
+            assert "UTC" in text  # clock in the right zone
 
     asyncio.run(check())
 
 
-def test_sidebar_lists_organisms_and_highlights_current(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_sidebar_lists_organisms_and_highlights_current(nursery_app):
+    app = nursery_app
     (app.root / "organisms" / "fern").mkdir(parents=True)
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._refresh_sidebar()
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             lv = app.query_one("#sidebar-list", ListView)
             current = Path(app.org.dir_path).name
-            labels = [str(_renderable_text(item.children[0])) for item in lv.children]
+            labels = [renderable_text(item.children[0]) for item in lv.children]
             assert any(current in label for label in labels)
             assert any("fern" in label for label in labels)
 
@@ -74,73 +52,73 @@ def _make_fern(app):
         (fern_dir / "organism.scl").write_text(seed.read_text())
 
 
-def test_sidebar_selection_opens_action_menu(monkeypatch, tmp_path):
+def test_sidebar_selection_opens_action_menu(nursery_app):
     """Left-click / Enter on a sidebar organism opens its dropdown menu
     instead of swapping immediately."""
     from replicanta.tui import OrganismMenuScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._refresh_sidebar()
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             lv = app.query_one("#sidebar-list", ListView)
-            fern_item = next(item for item in lv.children if "fern" in str(_renderable_text(item.children[0])))
-            event = type("Selected", (), {"item": fern_item})()
-            app.on_list_view_selected(event)
-            await asyncio.sleep(0.05)
+            fern_item = next(item for item in lv.children if "fern" in renderable_text(item.children[0]))
+            index = list(lv.children).index(fern_item)
+            app.on_list_view_selected(ListView.Selected(lv, fern_item, index))
+            await pilot.pause()
             assert isinstance(app.screen, OrganismMenuScreen)
             assert app.org.dir_path.name == "default"  # not swapped yet
 
     asyncio.run(check())
 
 
-def test_sidebar_menu_swap_choice_swaps_organism(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_sidebar_menu_swap_choice_swaps_organism(nursery_app):
+    app = nursery_app
     _make_fern(app)
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._refresh_sidebar()
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             app._open_org_menu("fern")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             app.screen.dismiss(("swap", "fern"))
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert app.org.dir_path.name == "fern"
 
     asyncio.run(check())
 
 
-def test_rename_sleeping_organism_refreshes_sidebar(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_rename_sleeping_organism_refreshes_sidebar(nursery_app):
+    app = nursery_app
     _make_fern(app)
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._rename_org("fern", "willow")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert (app.root / "organisms" / "willow").is_dir()
             assert app.org.dir_path.name == "default"
             lv = app.query_one("#sidebar-list", ListView)
-            labels = [str(_renderable_text(item.children[0])) for item in lv.children]
+            labels = [renderable_text(item.children[0]) for item in lv.children]
             assert any("willow" in label for label in labels)
             assert not any("fern" in label for label in labels)
 
     asyncio.run(check())
 
 
-def test_rename_awake_organism_swaps_to_new_path(monkeypatch, tmp_path):
+def test_rename_awake_organism_swaps_to_new_path(nursery_app):
     """Renaming the awake organism moves its directory and keeps the app
     living with it — the old path must not be resurrected by a flush."""
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._rename_org("default", "willow")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert app.org.dir_path.name == "willow"
             assert not (app.root / "organisms" / "default").exists()
             assert (app.root / "organisms" / "willow").is_dir()
@@ -151,17 +129,17 @@ def test_rename_awake_organism_swaps_to_new_path(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_menu_for_awake_organism_has_no_swap_option(monkeypatch, tmp_path):
+def test_menu_for_awake_organism_has_no_swap_option(nursery_app):
     from textual.widgets import OptionList
 
     from replicanta.tui import OrganismMenuScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._open_org_menu("default")
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             assert isinstance(app.screen, OrganismMenuScreen)
             menu = app.screen.query_one(OptionList)
             ids = [option.id for option in menu.options]
@@ -170,22 +148,25 @@ def test_menu_for_awake_organism_has_no_swap_option(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_bottom_bar_shows_counts_and_keys(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_bottom_bar_shows_counts_and_keys(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
             app.refresh_status()
-            text = _renderable_text(app.query_one("#bottombar-text", Static))
+            text = renderable_text(app.query_one("#bottombar-text", Static), width=120)
             assert "beliefs" in text
             assert "rules" in text
+            assert "ctrl+p" in text
+            assert "F1" in text
             assert "ctrl+q quit" in text
+            assert text.strip() == app._bottombar_text
 
     asyncio.run(check())
 
 
-def test_mind_memory_inner_are_scrollable(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_mind_memory_inner_are_scrollable(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -197,8 +178,8 @@ def test_mind_memory_inner_are_scrollable(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_chat_input_stays_below_main_area(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_chat_input_stays_below_main_area(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -212,13 +193,13 @@ def test_chat_input_stays_below_main_area(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_cells_tab_click_opens_detail(monkeypatch, tmp_path):
+def test_cells_tab_click_opens_detail(nursery_app):
     """Left-clicking an occupied cell in the F8 grid opens the inspector
     with the object's kind and metadata."""
     from replicanta import tui_views
     from replicanta.tui import CellDetailScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     app.org.store.add(("cat", "has_fur", "true"), 0.9)
 
     async def check():
@@ -231,7 +212,7 @@ def test_cells_tab_click_opens_detail(monkeypatch, tmp_path):
             await pilot.click("#cells", offset=(col * 2, row + 1))
             await pilot.pause()
             assert isinstance(app.screen, CellDetailScreen)
-            detail = _renderable_text(app.screen.query_one("#cell-detail"))
+            detail = renderable_text(app.screen.query_one("#cell-detail"))
             assert "kind: belief" in detail
             assert "object:    cat" in detail
             assert "attribute: has_fur" in detail
@@ -243,11 +224,11 @@ def test_cells_tab_click_opens_detail(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_cells_tab_click_on_empty_cell_does_nothing(monkeypatch, tmp_path):
+def test_cells_tab_click_on_empty_cell_does_nothing(nursery_app):
     from replicanta import tui_views
     from replicanta.tui import CellDetailScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     app.org.store.add(("cat", "has_fur", "true"), 0.9)
 
     async def check():
@@ -267,8 +248,8 @@ def test_cells_tab_click_on_empty_cell_does_nothing(monkeypatch, tmp_path):
 # -- group chat (F-key-free wiring) ------------------------------------------
 
 
-def test_group_command_start_status_and_stop(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_group_command_start_status_and_stop(nursery_app):
+    app = nursery_app
     _make_fern(app)
 
     async def check():
@@ -284,8 +265,8 @@ def test_group_command_start_status_and_stop(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_command_rejects_unknown_and_solo(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_group_command_rejects_unknown_and_solo(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -297,16 +278,14 @@ def test_group_command_rejects_unknown_and_solo(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
+def test_handle_chat_in_group_mode_broadcasts(nursery_app, monkeypatch):
     """In group mode a chat line goes to the group broadcast worker, not
     the solo reply path, and it does not pollute individual chat logs."""
-    import time
-
     from conftest import patch_generate
 
     from replicanta import groupchat
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     patch_generate(monkeypatch, lambda *a, **k: "hi from fern")
 
@@ -321,10 +300,9 @@ def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
                 lambda text: solo_calls.append(text),
             )
             app.handle_chat("hello everyone")
-            # wait for the background group respond worker
-            deadline = time.time() + 2.0
-            while time.time() < deadline and app._group_responding:
-                await asyncio.sleep(0.05)
+            # wait for the background group respond worker (genuine
+            # off-loop worker, so poll bounded rather than fixed-sleep)
+            await wait_until(lambda: not app._group_responding, timeout=2.0, message="group respond worker to finish")
             assert solo_calls == []
             # every member remembers the line as a group episode, but it is
             # not recorded in their one-on-one chat_log.
@@ -336,15 +314,15 @@ def test_handle_chat_in_group_mode_broadcasts(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_group_deliver_renders_member_cards(nursery_app):
+    app = nursery_app
     _make_fern(app)
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app.handle_command("/group start fern")
             app._deliver_group([("fern", "hi from fern"), ("default", "hi from default")])
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             # group replies are rendered as member cards, but they must not
             # pollute each speaker's individual one-on-one chat log.
             assert not any("hi from fern" in t for _r, t in app._group.members["fern"].store.chat_log)
@@ -353,10 +331,10 @@ def test_group_deliver_renders_member_cards(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_log_narration_records_musing_in_chat_log(monkeypatch, tmp_path):
+def test_log_narration_records_musing_in_chat_log(nursery_app):
     """Idle musings enter the chat log so later prompts — and the
     cross-cycle repeat gate — know what the voice already said."""
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -369,20 +347,20 @@ def test_log_narration_records_musing_in_chat_log(monkeypatch, tmp_path):
 # -- nursery groups in the sidebar -------------------------------------------
 
 
-def test_sidebar_renders_groups_with_members(monkeypatch, tmp_path):
+def test_sidebar_renders_groups_with_members(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
     nursery_mod.assign(app.root, "fern", "thinkers")
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._refresh_sidebar()
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             lv = app.query_one("#sidebar-list", ListView)
-            entries = [(item.name, str(_renderable_text(item.children[0]))) for item in lv.children]
+            entries = [(item.name, renderable_text(item.children[0])) for item in lv.children]
             names = [n for n, _label in entries]
             # group header present, fern nested under it, default stays flat
             assert "group:thinkers" in names
@@ -395,31 +373,31 @@ def test_sidebar_renders_groups_with_members(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_header_selection_opens_group_menu(monkeypatch, tmp_path):
+def test_group_header_selection_opens_group_menu(nursery_app):
     from replicanta import nursery as nursery_mod
     from replicanta.tui import GroupMenuScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     nursery_mod.create_group(app.root, "thinkers")
 
     async def check():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._refresh_sidebar()
-            await asyncio.sleep(0.05)
+            await pilot.pause()
             lv = app.query_one("#sidebar-list", ListView)
             header = next(item for item in lv.children if item.name == "group:thinkers")
-            event = type("Selected", (), {"item": header})()
-            app.on_list_view_selected(event)
-            await asyncio.sleep(0.05)
+            index = list(lv.children).index(header)
+            app.on_list_view_selected(ListView.Selected(lv, header, index))
+            await pilot.pause()
             assert isinstance(app.screen, GroupMenuScreen)
 
     asyncio.run(check())
 
 
-def test_rename_group_flow_updates_disk_and_sidebar(monkeypatch, tmp_path):
+def test_rename_group_flow_updates_disk_and_sidebar(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
     nursery_mod.assign(app.root, "fern", "thinkers")
@@ -439,10 +417,10 @@ def test_rename_group_flow_updates_disk_and_sidebar(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_organism_menu_move_to_group_assigns(monkeypatch, tmp_path):
+def test_organism_menu_move_to_group_assigns(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
 
@@ -462,10 +440,10 @@ def test_organism_menu_move_to_group_assigns(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_pick_new_group_creates_and_assigns(monkeypatch, tmp_path):
+def test_group_pick_new_group_creates_and_assigns(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
 
     async def check():
@@ -484,11 +462,11 @@ def test_group_pick_new_group_creates_and_assigns(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_right_click_group_header_opens_rename_prompt(monkeypatch, tmp_path):
+def test_right_click_group_header_opens_rename_prompt(nursery_app):
     from replicanta import nursery as nursery_mod
     from replicanta.tui import NamePromptScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     nursery_mod.create_group(app.root, "thinkers")
 
     async def check():
@@ -506,10 +484,10 @@ def test_right_click_group_header_opens_rename_prompt(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_right_click_empty_sidebar_opens_new_group_prompt(monkeypatch, tmp_path):
+def test_right_click_empty_sidebar_opens_new_group_prompt(nursery_app):
     from replicanta.tui import NamePromptScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test() as pilot:
@@ -531,10 +509,10 @@ def _sidebar_regions(app):
     return {item.name: item.region for item in lv.children}
 
 
-def test_drag_organism_onto_group_header_assigns(monkeypatch, tmp_path):
+def test_drag_organism_onto_group_header_assigns(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
 
@@ -554,10 +532,10 @@ def test_drag_organism_onto_group_header_assigns(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_drag_organism_onto_group_member_assigns(monkeypatch, tmp_path):
+def test_drag_organism_onto_group_member_assigns(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
     nursery_mod.assign(app.root, "default", "thinkers")
@@ -578,10 +556,10 @@ def test_drag_organism_onto_group_member_assigns(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_drag_member_onto_empty_space_ungroups(monkeypatch, tmp_path):
+def test_drag_member_onto_empty_space_ungroups(nursery_app):
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
     nursery_mod.assign(app.root, "fern", "thinkers")
@@ -603,13 +581,13 @@ def test_drag_member_onto_empty_space_ungroups(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_plain_click_does_not_become_a_drag(monkeypatch, tmp_path):
+def test_plain_click_does_not_become_a_drag(nursery_app):
     """A left click without movement still opens the action menu and
     never assigns anything."""
     from replicanta import nursery as nursery_mod
     from replicanta.tui import OrganismMenuScreen
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
 
@@ -627,11 +605,11 @@ def test_plain_click_does_not_become_a_drag(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_command_start_expands_nursery_groups(monkeypatch, tmp_path):
+def test_group_command_start_expands_nursery_groups(nursery_app):
     """'/group start <groupname>' seats every member of the nursery group."""
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "thinkers")
     nursery_mod.assign(app.root, "fern", "thinkers")
@@ -645,11 +623,11 @@ def test_group_command_start_expands_nursery_groups(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_group_command_start_organism_beats_same_named_group(monkeypatch, tmp_path):
+def test_group_command_start_organism_beats_same_named_group(nursery_app):
     """When an organism and a group share a name, the organism wins."""
     from replicanta import nursery as nursery_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     _make_fern(app)
     nursery_mod.create_group(app.root, "fern")  # group named like the org
     nursery_mod.assign(app.root, "default", "fern")
@@ -664,8 +642,8 @@ def test_group_command_start_organism_beats_same_named_group(monkeypatch, tmp_pa
     asyncio.run(check())
 
 
-def test_group_command_unknown_group_reports(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, tmp_path)
+def test_group_command_unknown_group_reports(nursery_app):
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -678,13 +656,13 @@ def test_group_command_unknown_group_reports(monkeypatch, tmp_path):
 # -- mud turn-generation race ------------------------------------------------
 
 
-def test_mud_stale_organism_move_dropped_after_user_move(monkeypatch, tmp_path):
+def test_mud_stale_organism_move_dropped_after_user_move(nursery_app):
     """A move chosen before the user's command must not land after it:
     the generation captured when the choice worker started no longer
     matches once the user acts."""
     from replicanta import mud as mud_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -701,12 +679,12 @@ def test_mud_stale_organism_move_dropped_after_user_move(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_mud_stale_organism_move_dropped_after_hint(monkeypatch, tmp_path):
+def test_mud_stale_organism_move_dropped_after_hint(nursery_app, monkeypatch):
     """A typed hint (not a command) also invalidates an in-flight move —
     the hint was meant for the next choice, not the one already made."""
     from replicanta import mud as mud_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
     monkeypatch.setattr(app, "_maybe_respond", lambda text: None)
 
     async def check():
@@ -723,11 +701,11 @@ def test_mud_stale_organism_move_dropped_after_hint(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_mud_fresh_organism_move_still_applies(monkeypatch, tmp_path):
+def test_mud_fresh_organism_move_still_applies(nursery_app):
     """A move chosen at the current generation applies normally."""
     from replicanta import mud as mud_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -739,14 +717,14 @@ def test_mud_fresh_organism_move_still_applies(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_mud_organism_move_shows_its_reason(monkeypatch, tmp_path):
+def test_mud_organism_move_shows_its_reason(nursery_app):
     """The organism's stated reason is logged (dim) just before its
     command, so a move never appears unmotivated."""
     from textual.widgets import RichLog
 
     from replicanta import mud as mud_mod
 
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test():
@@ -765,13 +743,54 @@ def test_mud_organism_move_shows_its_reason(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_quick_actions_buttons_exist(monkeypatch, tmp_path):
+def test_quick_actions_buttons_exist(nursery_app):
     """The sidebar must expose one-click action buttons."""
-    app = _headless_app(monkeypatch, tmp_path)
+    app = nursery_app
 
     async def check():
         async with app.run_test():
             for bid in ("qa-sleep", "qa-voice", "qa-listen", "qa-look", "qa-mud"):
                 assert app.query_one(f"#{bid}", Button)
+
+    asyncio.run(check())
+
+
+def test_swap_ends_active_group_chat(nursery_app):
+    """Swapping organisms must end an active group chat: the group keeps
+    the old (closed) organism object and would keep broadcasting against
+    unpersisted state."""
+
+    from textual.widgets import RichLog
+
+    app = nursery_app
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app._group_command(["start", "fern"])
+            assert app._group is not None, "group chat did not start"
+            app._swap_to("fern")
+            assert app._group is None, "swap left the stale group chat active"
+            assert app.org.dir_path.name == "fern"
+            lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
+            assert any("group chat ended" in line for line in lines), lines
+
+    asyncio.run(check())
+
+
+def test_swap_without_group_is_quiet(nursery_app):
+    """A swap with no active group chat must not log a group-ended line."""
+
+    from textual.widgets import RichLog
+
+    app = nursery_app
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test():
+            app._swap_to("fern")
+            assert app._group is None
+            lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
+            assert not any("group chat ended" in line for line in lines), lines
 
     asyncio.run(check())
