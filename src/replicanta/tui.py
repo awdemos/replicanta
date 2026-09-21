@@ -1717,7 +1717,7 @@ class OrganismApp(App):
             # the session tracks map/story but not room/inventory: replay
             # the logged commands to bring back the exact game state
             for actor, command, _turn in session.command_log:
-                game.act_event(command, actor=actor)
+                game.act_event(command, actor_name=actor)
             game.session = session
         self._mud_game = game
         self._mud_paused = True
@@ -1880,7 +1880,7 @@ class OrganismApp(App):
         if actor == "organism" and reason:
             self._append_log(reason, STYLE_DIM)
         self._append_log(f"> {command}", STYLE_SELF)
-        result = game.act_event(command, actor=actor)
+        result = game.act_event(command, actor_name=actor)
         self._append_log(result.text, STYLE_DREAM)
         if result.plot:
             self._append_log(result.plot, STYLE_LEARNED)

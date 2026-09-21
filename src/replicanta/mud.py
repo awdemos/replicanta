@@ -532,15 +532,13 @@ class MudGame:
         'the' are ignored."""
         return self.act_event(command, actor_name=actor_name).text
 
-    def act_event(self, command, actor_name=None, actor=None) -> TurnResult:
+    def act_event(self, command, actor_name=None) -> TurnResult:
         """Execute one command and return a structured TurnResult.
 
-        ``actor`` is a deprecated alias for ``actor_name`` kept for
-        backward compatibility with the single-player API. When the named
-        actor does not exist, the current actor acts and the provided name
-        is used only for the command log.
+        When the named actor does not exist, the current actor acts and
+        the provided name is used only for the command log.
         """
-        provided_name = actor_name or actor
+        provided_name = actor_name
         if provided_name and provided_name in self.actors:
             actor = self.actors[provided_name]
             log_name = provided_name

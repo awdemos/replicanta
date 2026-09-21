@@ -179,7 +179,7 @@ def test_default_scenario_walkthrough():
 
 def test_act_event_returns_turn_result():
     game = MudGame()
-    result = game.act_event("go north", actor="user")
+    result = game.act_event("go north", actor_name="user")
     assert isinstance(result, mud.TurnResult)
     assert result.moved
     assert result.text == game.look()
