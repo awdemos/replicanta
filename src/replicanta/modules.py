@@ -100,6 +100,13 @@ class CommandService:
             runtime = getattr(self._loader, "_current_lua", None)
         self._commands[name] = (handler, runtime)
 
+    def has(self, name):
+        """True when a handler is registered for ``name``.
+
+        Lets dispatch callers distinguish an unknown command from a
+        handler that ran and returned nothing."""
+        return name in self._commands
+
     def _table_from(self, runtime, args):
         if runtime is None:
             if self._loader is None:

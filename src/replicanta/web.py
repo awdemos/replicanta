@@ -35,6 +35,10 @@ from replicanta.web_static import APP_CSS, APP_HTML, APP_JS
 
 logger = logging.getLogger(__name__)
 
+# Counter set behind the Inner tab's ACTIVITY table (totals + per-cycle
+# rates with the same math as activity.summary_lines).
+_ACTIVITY_COUNTERS = activity.SYMBOLIC_KEYS + activity.NEURAL_KEYS + activity.COUPLING_KEYS
+
 
 class WebError(ValueError):
     """A safe client-facing request error."""
@@ -66,10 +70,10 @@ class Glasshouse:
     def auth_ok(self, request):
         header = request.headers.get("Authorization", "")
         if header.startswith("Bearer "):
-            ok = secrets.compare_digest(header[7:], self.token)
+            provided = header[7:]
         else:
             provided = request.headers.get("X-Replicanta-Token")
-            ok = provided is not None and secrets.compare_digest(provided, self.token)
+        ok = self._token_matches(provided, self.token)
         if not ok:
             # Never log the presented credential — a typo'd real token must
             # not end up in a log file.
@@ -80,6 +84,23 @@ class Glasshouse:
                 request.client_address[0],
             )
         return ok
+
+    @staticmethod
+    def _token_matches(provided, expected):
+        """Constant-time token check that denies non-ASCII input cleanly.
+
+        secrets.compare_digest raises TypeError on non-ASCII str arguments;
+        that escapes auth_ok before any response is sent and resets the
+        connection. ASCII-encode both sides first and fail closed instead.
+        """
+        if not provided:
+            return False
+        try:
+            candidate = provided.encode("ascii")
+            wanted = expected.encode("ascii")
+        except UnicodeEncodeError:
+            return False
+        return secrets.compare_digest(candidate, wanted)
 
     @property
     def name(self):
@@ -114,6 +135,12 @@ class Glasshouse:
             registry = extensions.registry()
             mud_state = self._mud_snapshot()
             persona_state = self._persona_snapshot()
+            cycle = store.cycle
+            activity_table = {
+                key: {"total": total, "per_cycle": round(total / max(cycle, 1), 2)}
+                for key, total in ((key, store.activity.get(key, 0)) for key in _ACTIVITY_COUNTERS)
+                if total
+            }
             return {
                 "organism": {
                     "name": self.name,
@@ -152,6 +179,16 @@ class Glasshouse:
                 "skills": skills,
                 "attention": [list(pair) for pair in sorted(store.attention)],
                 "activity": activity.summary_lines(store),
+                "activity_table": activity_table,
+                "mind_metrics": {
+                    "beliefs": metrics.belief_count,
+                    "rules": metrics.rule_count,
+                    "memories": len(store.memory),
+                    "cycle": store.cycle,
+                    "score": round(metrics.score(), 1),
+                    "goals_active": sum(1 for g in store.goals if g.get("done_cycle") is None),
+                    "goals_done": sum(1 for g in store.goals if g.get("done_cycle") is not None),
+                },
                 "speech": {
                     "enabled": speech.enabled,
                     "available": speech.available(),
@@ -489,25 +526,22 @@ class Glasshouse:
             elif name == "/doom":
                 messages.append(self._doom_command(args))
             elif name == "/hand":
-                arm = getattr(self.org, "module_loader", None)
-                if arm is None:
-                    raise WebError("arm service unavailable")
-                svc = arm.registry.get("arm")
-                if svc is None:
+                loader = getattr(self.org, "module_loader", None)
+                if loader is None:
+                    raise WebError("module loader unavailable")
+                commands = loader.registry.get("commands")
+                if commands is None or not commands.has("/hand"):
                     raise WebError("tendon-hand module not loaded (enable it via /modules)")
-                result = svc.dispatch(args if args else ["state"])
+                result = commands.dispatch("/hand", args if args else ["state"])
                 if result:
                     messages.extend(str(result).splitlines())
             elif name == "/brain":
                 loader = getattr(self.org, "module_loader", None)
                 if loader is None:
                     raise WebError("module loader unavailable")
-                svc = loader.registry.get("brain")
-                if svc is None:
-                    raise WebError("fly-brain module not loaded (enable it via /modules)")
                 commands = loader.registry.get("commands")
-                if commands is None:
-                    raise WebError("command service unavailable")
+                if commands is None or not commands.has("/brain"):
+                    raise WebError("fly-brain module not loaded (enable it via /modules)")
                 result = commands.dispatch("/brain", args if args else [])
                 if result:
                     messages.extend(str(result).splitlines())
@@ -574,7 +608,13 @@ class Glasshouse:
             elif name == "/quit":
                 messages.append("Use the browser tab close button to exit.")
             else:
-                raise WebError(f"unknown command {name} (try /help)")
+                loader = getattr(self.org, "module_loader", None)
+                commands = loader.registry.get("commands") if loader is not None else None
+                if commands is None or not commands.has(name):
+                    raise WebError(f"unknown command {name} (try /help)")
+                result = commands.dispatch(name, args)
+                if result:
+                    messages.extend(str(result).splitlines())
             self.org.flush(force=True)
             return {"messages": messages, "state": self.snapshot()}
 
@@ -742,6 +782,10 @@ class Glasshouse:
         host_name = self.name
         if host_name in self._mud_games:
             return "mud: a game is already running"
+        if self._mud_member_of.get(host_name) is not None:
+            # Still seated in another host's game; auto-step would keep
+            # pulling this organism back into that game's turns.
+            return "mud: already in a game; /mud leave first"
         if description:
             scenario = mud.generate_scenario(description, self.org)
             self._mud_save_scenario(scenario)
@@ -860,12 +904,12 @@ class Glasshouse:
         if sub == "step":
             return self._mud_step(game)
         if sub == "reset":
-            scenario = game.world.scenario
             host = self._mud_host_for(self.org)
+            if host != self.name:
+                return "mud: only the host can reset the scenario"
+            scenario = game.world.scenario
             self._mud_stop()
-            if host == self.name:
-                return self._mud_start(scenario=scenario)
-            return "mud: reset the scenario"
+            return self._mud_start(scenario=scenario)
         if sub == "scenario":
             description = " ".join(args[1:]).strip()
             if not description:
@@ -1065,9 +1109,12 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
         if size > 1_000_000:
             raise WebError("request too large")
         try:
-            return json.loads(self.rfile.read(size) or b"{}")
+            data = json.loads(self.rfile.read(size) or b"{}")
         except json.JSONDecodeError as exc:
             raise WebError("invalid JSON") from exc
+        if not isinstance(data, dict):
+            raise WebError("invalid JSON body: expected an object")
+        return data
 
     def _json(self, status, value):
         return self._send(status, "application/json", json.dumps(value).encode())

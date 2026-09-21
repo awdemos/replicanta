@@ -45,7 +45,6 @@ except Exception:  # noqa: BLE001 — optional convenience, not load-bearing
 from textual.widgets.option_list import Option
 
 from replicanta import (
-    activity,
     camera,
     extensions,
     fileutil,
@@ -2714,301 +2713,91 @@ class OrganismApp(App):
                 self._append_log(f"{name}: {exc}", STYLE_WARN)
 
     def _dispatch(self, name, parts):
-        if name == "/chaos":
-            if len(parts) != 2:
-                self._append_log(
-                    f"/chaos needs a number 0-1 (now {self.org.store.chaos:.2f})",
-                    STYLE_DIM,
-                )
-                return
-            value = float(parts[1])
-            if not 0.0 <= value <= 1.0:
-                raise ValueError("chaos must be between 0 and 1")
-            self.org.store.chaos = value
-            self._append_log(f"chaos: {value:.2f}", STYLE_DIM)
-            self.refresh_status()
-        elif name == "/focus" and len(parts) == 2:
-            self.org.window.focus(parts[1])
-            self.org.store.attention = self.org.window.pairs
-            self._append_log(f"attention locked on {parts[1]}", STYLE_DIM)
-        elif name == "/focus":
-            self.org.window.focus(None)
-            self._append_log("attention floating free", STYLE_DIM)
-        elif name == "/sleep":
-            for event in self.org.force_state("sleep"):
-                self._render_event(event)
-        elif name == "/wake":
-            for event in self.org.force_state("wake"):
-                self._render_event(event)
-        elif name == "/revive":
-            if self.org.revive():
-                self._append_log("revived: the organism stirs back into existence.", STYLE_DIM)
-                self._maybe_narrate()
-            else:
-                self._append_log(
-                    f"/revive: it is not faded (state {self.org.lifecycle.state}).",
-                    STYLE_DIM,
-                )
-        elif name == "/stats":
-            m = self.org.metrics()
-            s = self.org.store
-            self._append_log(
-                f"stats: beliefs={m.belief_count} rules={m.rule_count} depth={m.total_depth} score={m.score():.1f}",
-                STYLE_DIM,
-            )
-            self._append_log(
-                f"mental: arousal={s.arousal:.2f} "
-                f"rationality={s.rationality:.2f} "
-                f"irrationality={s.irrationality:.2f} "
-                f"insane={s.insane}",
-                STYLE_DIM,
-            )
-            for line in activity.summary_lines(self.org.store):
-                self._append_log(line, STYLE_DIM)
-        elif name == "/save":
-            self.action_save_now()
-        elif name == "/export":
+        """Dispatch a parsed slash command: registry lookup first, then the
+        module CommandService seam, then the unknown-command fallback."""
+        handler = tui_commands.COMMAND_HANDLERS.get(name)
+        if handler is not None:
+            handler(self, parts)
+            return
+        self._dispatch_module_command(name, parts)
+
+    def _dispatch_module_command(self, name, parts):
+        """Fall through to module-registered commands; report unknowns.
+
+        Any verb a Lua module registered with the CommandService works
+        here without a native TUI branch."""
+        loader = getattr(self.org, "module_loader", None)
+        commands = loader.registry.get("commands") if loader is not None else None
+        if commands is not None and commands.has(name):
             try:
-                dest = self._export_chat(parts[1] if len(parts) > 1 else None)
-                self._append_log(f"— chat exported to {dest} —", STYLE_DIM, stamp=True)
-            except OSError as exc:
-                self._append_log(f"— export failed: {exc} —", STYLE_WARN, stamp=True)
-        elif name == "/think":
-            self.action_think_now()
-        elif name == "/listen":
-            self._toggle_listen()
-        elif name == "/microphone":
-            self._microphone(parts[1:])
-        elif name == "/look":
-            self._look_now()
-        elif name == "/camera":
-            self._camera(parts[1:])
-        elif name == "/mud":
-            self._mud_command(parts[1:])
-        elif name == "/reload":
-            self.org.hooks.reload()
-            count = len(self.org.hooks.scripts)
-            self._append_log(
-                f"lua hooks reloaded ({count} script{'s' if count != 1 else ''})",
-                STYLE_DIM,
-            )
-        elif name == "/lua":
-            if len(parts) != 2:
-                names = ", ".join(s.name for s in self.org.hooks.scripts)
-                self._append_log(f"/lua needs a script name (scripts/: {names or 'none'})", STYLE_DIM)
+                result = commands.dispatch(name, parts[1:])
+            except Exception as exc:  # noqa: BLE001 — user command must not crash
+                self._append_log(f"{name} failed: {exc}", STYLE_WARN)
                 return
-            self._append_log(self.org.hooks.run(parts[1], self.org), STYLE_DIM)
-        elif name == "/organisms":
-            names = nursery.list_organisms(self.root)
-            current = self.org.dir_path.name
-            listing = ", ".join(f"*{n}" if n == current else n for n in names) or "(none)"
-            self._append_log(f"organisms: {listing}  (* = current)", STYLE_DIM)
-        elif name == "/group":
-            self._group_command(parts[1:])
-        elif name == "/new":
-            new_name = parts[1] if len(parts) == 2 else nursery.next_name(self.root)
-            try:
-                nursery.create(self.root, new_name, Path(self.root) / "organism.scl")
-            except (ValueError, OSError) as exc:
-                self._append_log(f"/new: {exc}", STYLE_WARN)
-            else:
-                self._swap_to(new_name)
-        elif name == "/swap":
-            if len(parts) != 2:
-                self._append_log("/swap needs a name — /organisms to list.", STYLE_DIM)
-                return
-            if parts[1] not in nursery.list_organisms(self.root):
-                names = ", ".join(nursery.list_organisms(self.root)) or "(none)"
-                self._append_log(f"/swap: no organism {parts[1]!r} — have: {names}", STYLE_WARN)
-                return
-            self._swap_to(parts[1])
-        elif name == "/voice":
-            args = parts[1:]
-            if not args or args[0] in ("on", "off"):
-                if args:
-                    speech.set_enabled(args[0] == "on")
-                else:
-                    speech.set_enabled(not speech.enabled)
-                state = "on" if speech.enabled else "off"
-                if speech.enabled and not speech.available():
-                    self._append_log(
-                        f"spoken voice {state}, but no piper model at "
-                        f"{speech.model_path()} — staying mute "
-                        f"(/voice get en_US-lessac-medium)",
-                        STYLE_WARN,
-                    )
-                elif speech.enabled:
-                    self._append_log(
-                        "spoken voice on — the organism speaks aloud (piper tts)",
-                        STYLE_DIM,
-                    )
-                    speech.say("I can speak now.")
-                else:
-                    self._append_log("spoken voice off", STYLE_DIM)
-                self.refresh_status()
-            elif args[0] == "list":
-                voices = speech.list_voices()
-                active = speech.voice_name()
-                listing = (
-                    ", ".join(f"*{v}" if v == active else v for v in voices)
-                    or "(none — /voice get en_US-lessac-medium)"
-                )
-                self._append_log(f"voices: {listing}  (* = active)", STYLE_DIM)
-            elif args[0] == "use" and len(args) == 2:
-                if speech.set_voice(args[1]):
-                    self._append_log(f"voice: {speech.voice_name()}", STYLE_DIM)
-                    speech.say("This is my new voice.")
-                else:
-                    have = ", ".join(speech.list_voices()) or "(none)"
-                    self._append_log(
-                        f"/voice use: no voice {args[1]!r} — have: {have}. /voice get {args[1]} downloads it",
-                        STYLE_WARN,
-                    )
-            elif args[0] == "get" and len(args) == 2:
-                self._voice_download(args[1])
-            else:
-                self._append_log(
-                    "/voice [on|off] · /voice list · /voice use name · /voice get name",
-                    STYLE_DIM,
-                )
-        elif name == "/self-talk":
-            self._self_talk_on = not self._self_talk_on
-            if self._self_talk_on:
-                self._append_log("self-talk on — the organism may speak to itself.", STYLE_DIM)
-                if self.org.lifecycle.state == "wake":
-                    self._maybe_self_talk()
-            else:
-                self._append_log("self-talk off", STYLE_DIM)
-        elif name == "/approve":
-            entry = extensions.approve(self.org.dir_path / "artifacts" / "extensions.json")
-            if entry:
-                self.org.store.remember("skill", f"patch applied ({entry['kind']})")
-                self._append_log(
-                    f"patch applied ({entry['kind']}) — live now, no restart needed",
-                    STYLE_LEARNED,
-                    stamp=True,
-                )
-            else:
-                self._append_log("/approve: no pending patch.", STYLE_DIM)
-        elif name == "/reject":
-            entry = extensions.reject(self.org.dir_path / "artifacts" / "extensions.json")
-            if entry:
-                self.org.store.remember("skill", f"patch rejected ({entry['kind']})")
-                self._append_log(f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True)
-            else:
-                self._append_log("/reject: no pending patch.", STYLE_DIM)
-        elif name == "/auto-apply":
-            args = parts[1:]
-            if args and args[0] in ("on", "off"):
-                self.org.store.auto_apply_patches = args[0] == "on"
-                self.org.store.dirty = True
-                state = "on" if self.org.store.auto_apply_patches else "off"
-                self._append_log(f"auto-apply patches: {state}", STYLE_DIM)
-            else:
-                state = "on" if self.org.store.auto_apply_patches else "off"
-                self._append_log(f"auto-apply patches is {state} — use /auto-apply on|off", STYLE_DIM)
-        elif name == "/revert":
-            entry = extensions.revert_last(self.org.dir_path / "artifacts" / "extensions.json")
-            if entry:
-                self.org.store.remember("skill", f"patch reverted ({entry['kind']})")
-                self._append_log(f"patch reverted ({entry['kind']})", STYLE_LEARNED, stamp=True)
-            else:
-                self._append_log("/revert: no applied patches yet.", STYLE_DIM)
-        elif name == "/quit":
-            self.action_quit()
-        elif name == "/help":
-            self.action_help()
-        elif name == "/git":
-            self._git_command(parts[1:])
-        elif name == "/persona":
-            self._persona_command(parts[1:])
-        elif name == "/modules":
-            self._modules_command(parts[1:])
-        elif name == "/visualize":
-            self._visualize_command(parts[1:])
-        elif name == "/hand":
-            self._hand_command(parts[1:])
-        elif name == "/brain":
-            self._brain_command(parts[1:])
-        elif name == "/doom":
-            self._doom_command(parts[1:])
-        else:
-            self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
-            self.show_toast(f"Invalid command: {name}")
+            self._append_log_lines(str(result or ""), STYLE_DIM)
+            return
+        self._append_log(f"unknown: {name} (try /help)", STYLE_WARN)
+        self.show_toast(f"Invalid command: {name}")
 
     def _visualize_command(self, args):
-        kind = args[0] if args else "summary"
-        if kind not in rdd.supported_kinds():
-            self._append_log(f"/visualize {rdd.supported_kinds()} — got {kind!r}", STYLE_WARN)
-            return
-        self._render_visual(kind, log=True)
-
-    def _hand_command(self, args):
-        arm = getattr(self.org, "module_loader", None)
-        if arm is None:
-            self._append_log("arm service unavailable", STYLE_WARN)
-            return
-        svc = arm.registry.get("arm")
-        if svc is None:
-            self._append_log("tendon-hand module not loaded (enable it via /modules)", STYLE_WARN)
-            return
-        try:
-            result = svc.dispatch(args if args else ["state"])
-        except Exception as exc:  # noqa: BLE001
-            self._append_log(f"hand command failed: {exc}", STYLE_WARN)
-            return
-        for line in str(result or "").splitlines():
-            self._append_log(line, STYLE_DIM)
-
-    def _brain_command(self, args):
+        """Dispatch /visualize through the visual-state module's Lua-registered
+        handler, then refresh the TUI's live visual pane."""
         loader = getattr(self.org, "module_loader", None)
         if loader is None:
             self._append_log("module loader unavailable", STYLE_WARN)
             return
-        svc = loader.registry.get("brain")
-        if svc is None:
-            self._append_log("fly-brain module not loaded (enable it via /modules)", STYLE_WARN)
+        commands = loader.registry.get("commands")
+        if commands is None or not commands.has("/visualize"):
+            self._append_log("visual-state module not loaded (enable it via /modules)", STYLE_WARN)
+            return
+        try:
+            result = commands.dispatch("/visualize", args if args else [])
+        except Exception as exc:  # noqa: BLE001 — user command must not crash
+            self._append_log(f"visualize failed: {exc}", STYLE_WARN)
+            return
+        self._append_log_lines(str(result or ""), STYLE_DIM)
+        # Keep the visual tab live: the Lua handler owns the verb and the
+        # text chart, while the pane re-renders the SVG silently.
+        kind = args[0] if args else "summary"
+        if kind in rdd.supported_kinds():
+            self._render_visual(kind, log=False)
+            self.action_show_tab("visual-pane")
+
+    def _hand_command(self, args):
+        """Dispatch /hand through the tendon-hand module's Lua-registered
+        handler."""
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
             return
         commands = loader.registry.get("commands")
-        result = None
-        if commands is not None:
-            try:
-                result = commands.dispatch("/brain", args if args else [])
-            except Exception as exc:  # noqa: BLE001
-                self._append_log(f"brain command dispatch failed: {exc}", STYLE_WARN)
-        # Fallback: call the brain service directly if dispatch failed or returned nothing.
-        if not result:
-            try:
-                verb = (args[0] if args else "status").lower()
-                if verb in ("status", ""):
-                    result = svc.status()
-                elif verb == "bank":
-                    result = svc.bank()
-                elif verb in ("run", "optimize"):
-                    task = args[1] if len(args) > 1 else "digits"
-                    try:
-                        if svc.optimize(task):
-                            result = f"fly brain: optimizing {task} harness (async)"
-                        else:
-                            result = "fly brain: optimize not started"
-                    except Exception:
-                        # Fall back to the simpler run-only CLI if optimize is unavailable.
-                        if svc.run_task(task):
-                            result = f"fly brain: running {task} harness (async)"
-                        else:
-                            result = "fly brain: run not started"
-                elif verb == "adapt":
-                    if svc.adapt():
-                        result = "fly brain: drift rehearsal started (async)"
-                    else:
-                        result = "fly brain: run not started"
-                else:
-                    result = "usage: /brain [status|bank|run <task>|optimize <task>|adapt]"
-            except Exception as exc:  # noqa: BLE001
-                self._append_log(f"brain command failed: {exc}", STYLE_WARN)
-                return
-        for line in str(result or "").splitlines():
-            self._append_log(line, STYLE_DIM)
+        if commands is None or not commands.has("/hand"):
+            self._append_log("tendon-hand module not loaded (enable it via /modules)", STYLE_WARN)
+            return
+        try:
+            result = commands.dispatch("/hand", args if args else ["state"])
+        except Exception as exc:  # noqa: BLE001 — user command must not crash
+            self._append_log(f"hand command failed: {exc}", STYLE_WARN)
+            return
+        self._append_log_lines(str(result or ""), STYLE_DIM)
+
+    def _brain_command(self, args):
+        """Dispatch /brain through the fly-brain module's Lua-registered
+        handler; the module owns the verb ladder."""
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            self._append_log("module loader unavailable", STYLE_WARN)
+            return
+        commands = loader.registry.get("commands")
+        if commands is None or not commands.has("/brain"):
+            self._append_log("fly-brain module not loaded (enable it via /modules)", STYLE_WARN)
+            return
+        try:
+            result = commands.dispatch("/brain", args if args else [])
+        except Exception as exc:  # noqa: BLE001 — user command must not crash
+            self._append_log(f"brain command failed: {exc}", STYLE_WARN)
+            return
+        self._append_log_lines(str(result or ""), STYLE_DIM)
         # If the command started an async run, refresh status so the indicator appears.
         if args and args[0].lower() in ("run", "optimize", "adapt"):
             self.refresh_status()

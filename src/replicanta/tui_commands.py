@@ -1,6 +1,12 @@
-"""Pure UI helpers for the organism TUI: slash-command registry, tab
-completion, activity sparkline, help text. No textual imports — unit
-testable without a terminal. Sentiment scorers live in sentiment.py."""
+"""Pure UI helpers for the organism TUI: slash-command metadata, the
+dispatch registry, tab completion, activity sparkline, help text. No
+textual imports — unit testable without a terminal. Sentiment scorers
+live in sentiment.py."""
+
+from pathlib import Path
+
+from replicanta import activity, extensions, nursery, speech
+from replicanta.tui_views import STYLE_DIM, STYLE_LEARNED, STYLE_WARN
 
 COMMANDS = [
     # State
@@ -138,22 +144,336 @@ def filter_commands(query):
     return [c for c in COMMANDS if any(q in part.lower() for part in c[:3])]
 
 
+# -- dispatch registry --------------------------------------------------------
+#
+# COMMAND_HANDLERS maps every COMMANDS name to its handler so tui.py's
+# _dispatch is a plain dict lookup. Handlers take (app, parts) where parts
+# is the split command line, and keep the exact behavior of the former
+# if/elif branches — validation, store mutation, and log styling included.
+# Module-owned verbs (/visualize /hand /brain /doom) delegate to the app's
+# thin dispatch wrappers, which route through the module CommandService.
+
+
+def _cmd_chaos(app, parts):
+    if len(parts) != 2:
+        app._append_log(
+            f"/chaos needs a number 0-1 (now {app.org.store.chaos:.2f})",
+            STYLE_DIM,
+        )
+        return
+    value = float(parts[1])
+    if not 0.0 <= value <= 1.0:
+        raise ValueError("chaos must be between 0 and 1")
+    app.org.store.chaos = value
+    app._append_log(f"chaos: {value:.2f}", STYLE_DIM)
+    app.refresh_status()
+
+
+def _cmd_focus(app, parts):
+    if len(parts) == 2:
+        app.org.window.focus(parts[1])
+        app.org.store.attention = app.org.window.pairs
+        app._append_log(f"attention locked on {parts[1]}", STYLE_DIM)
+    else:
+        app.org.window.focus(None)
+        app._append_log("attention floating free", STYLE_DIM)
+
+def _cmd_sleep(app, parts):
+    for event in app.org.force_state("sleep"):
+        app._render_event(event)
+
+def _cmd_wake(app, parts):
+    for event in app.org.force_state("wake"):
+        app._render_event(event)
+
+def _cmd_revive(app, parts):
+    if app.org.revive():
+        app._append_log("revived: the organism stirs back into existence.", STYLE_DIM)
+        app._maybe_narrate()
+    else:
+        app._append_log(
+            f"/revive: it is not faded (state {app.org.lifecycle.state}).",
+            STYLE_DIM,
+        )
+
+def _cmd_stats(app, parts):
+    m = app.org.metrics()
+    s = app.org.store
+    app._append_log(
+        f"stats: beliefs={m.belief_count} rules={m.rule_count} depth={m.total_depth} score={m.score():.1f}",
+        STYLE_DIM,
+    )
+    app._append_log(
+        f"mental: arousal={s.arousal:.2f} "
+        f"rationality={s.rationality:.2f} "
+        f"irrationality={s.irrationality:.2f} "
+        f"insane={s.insane}",
+        STYLE_DIM,
+    )
+    for line in activity.summary_lines(app.org.store):
+        app._append_log(line, STYLE_DIM)
+
+def _cmd_save(app, parts):
+    app.action_save_now()
+
+def _cmd_export(app, parts):
+    try:
+        dest = app._export_chat(parts[1] if len(parts) > 1 else None)
+        app._append_log(f"— chat exported to {dest} —", STYLE_DIM, stamp=True)
+    except OSError as exc:
+        app._append_log(f"— export failed: {exc} —", STYLE_WARN, stamp=True)
+
+def _cmd_think(app, parts):
+    app.action_think_now()
+
+def _cmd_listen(app, parts):
+    app._toggle_listen()
+
+def _cmd_microphone(app, parts):
+    app._microphone(parts[1:])
+
+def _cmd_look(app, parts):
+    app._look_now()
+
+def _cmd_camera(app, parts):
+    app._camera(parts[1:])
+
+def _cmd_mud(app, parts):
+    app._mud_command(parts[1:])
+
+def _cmd_reload(app, parts):
+    app.org.hooks.reload()
+    count = len(app.org.hooks.scripts)
+    app._append_log(
+        f"lua hooks reloaded ({count} script{'s' if count != 1 else ''})",
+        STYLE_DIM,
+    )
+
+def _cmd_lua(app, parts):
+    if len(parts) != 2:
+        names = ", ".join(s.name for s in app.org.hooks.scripts)
+        app._append_log(f"/lua needs a script name (scripts/: {names or 'none'})", STYLE_DIM)
+        return
+    app._append_log(app.org.hooks.run(parts[1], app.org), STYLE_DIM)
+
+def _cmd_organisms(app, parts):
+    names = nursery.list_organisms(app.root)
+    current = app.org.dir_path.name
+    listing = ", ".join(f"*{n}" if n == current else n for n in names) or "(none)"
+    app._append_log(f"organisms: {listing}  (* = current)", STYLE_DIM)
+
+def _cmd_group(app, parts):
+    app._group_command(parts[1:])
+
+def _cmd_new(app, parts):
+    new_name = parts[1] if len(parts) == 2 else nursery.next_name(app.root)
+    try:
+        nursery.create(app.root, new_name, Path(app.root) / "organism.scl")
+    except (ValueError, OSError) as exc:
+        app._append_log(f"/new: {exc}", STYLE_WARN)
+    else:
+        app._swap_to(new_name)
+
+def _cmd_swap(app, parts):
+    if len(parts) != 2:
+        app._append_log("/swap needs a name — /organisms to list.", STYLE_DIM)
+        return
+    if parts[1] not in nursery.list_organisms(app.root):
+        names = ", ".join(nursery.list_organisms(app.root)) or "(none)"
+        app._append_log(f"/swap: no organism {parts[1]!r} — have: {names}", STYLE_WARN)
+        return
+    app._swap_to(parts[1])
+
+def _cmd_voice(app, parts):
+    args = parts[1:]
+    if not args or args[0] in ("on", "off"):
+        if args:
+            speech.set_enabled(args[0] == "on")
+        else:
+            speech.set_enabled(not speech.enabled)
+        state = "on" if speech.enabled else "off"
+        if speech.enabled and not speech.available():
+            app._append_log(
+                f"spoken voice {state}, but no piper model at "
+                f"{speech.model_path()} — staying mute "
+                f"(/voice get en_US-lessac-medium)",
+                STYLE_WARN,
+            )
+        elif speech.enabled:
+            app._append_log(
+                "spoken voice on — the organism speaks aloud (piper tts)",
+                STYLE_DIM,
+            )
+            speech.say("I can speak now.")
+        else:
+            app._append_log("spoken voice off", STYLE_DIM)
+        app.refresh_status()
+    elif args[0] == "list":
+        voices = speech.list_voices()
+        active = speech.voice_name()
+        listing = (
+            ", ".join(f"*{v}" if v == active else v for v in voices)
+            or "(none — /voice get en_US-lessac-medium)"
+        )
+        app._append_log(f"voices: {listing}  (* = active)", STYLE_DIM)
+    elif args[0] == "use" and len(args) == 2:
+        if speech.set_voice(args[1]):
+            app._append_log(f"voice: {speech.voice_name()}", STYLE_DIM)
+            speech.say("This is my new voice.")
+        else:
+            have = ", ".join(speech.list_voices()) or "(none)"
+            app._append_log(
+                f"/voice use: no voice {args[1]!r} — have: {have}. /voice get {args[1]} downloads it",
+                STYLE_WARN,
+            )
+    elif args[0] == "get" and len(args) == 2:
+        app._voice_download(args[1])
+    else:
+        app._append_log(
+            "/voice [on|off] · /voice list · /voice use name · /voice get name",
+            STYLE_DIM,
+        )
+
+def _cmd_self_talk(app, parts):
+    app._self_talk_on = not app._self_talk_on
+    if app._self_talk_on:
+        app._append_log("self-talk on — the organism may speak to itself.", STYLE_DIM)
+        if app.org.lifecycle.state == "wake":
+            app._maybe_self_talk()
+    else:
+        app._append_log("self-talk off", STYLE_DIM)
+
+def _cmd_approve(app, parts):
+    entry = extensions.approve(app.org.dir_path / "artifacts" / "extensions.json")
+    if entry:
+        app.org.store.remember("skill", f"patch applied ({entry['kind']})")
+        app._append_log(
+            f"patch applied ({entry['kind']}) — live now, no restart needed",
+            STYLE_LEARNED,
+            stamp=True,
+        )
+    else:
+        app._append_log("/approve: no pending patch.", STYLE_DIM)
+
+def _cmd_reject(app, parts):
+    entry = extensions.reject(app.org.dir_path / "artifacts" / "extensions.json")
+    if entry:
+        app.org.store.remember("skill", f"patch rejected ({entry['kind']})")
+        app._append_log(f"patch rejected ({entry['kind']})", STYLE_DIM, stamp=True)
+    else:
+        app._append_log("/reject: no pending patch.", STYLE_DIM)
+
+def _cmd_auto_apply(app, parts):
+    args = parts[1:]
+    if args and args[0] in ("on", "off"):
+        app.org.store.auto_apply_patches = args[0] == "on"
+        app.org.store.dirty = True
+        state = "on" if app.org.store.auto_apply_patches else "off"
+        app._append_log(f"auto-apply patches: {state}", STYLE_DIM)
+    else:
+        state = "on" if app.org.store.auto_apply_patches else "off"
+        app._append_log(f"auto-apply patches is {state} — use /auto-apply on|off", STYLE_DIM)
+
+def _cmd_revert(app, parts):
+    entry = extensions.revert_last(app.org.dir_path / "artifacts" / "extensions.json")
+    if entry:
+        app.org.store.remember("skill", f"patch reverted ({entry['kind']})")
+        app._append_log(f"patch reverted ({entry['kind']})", STYLE_LEARNED, stamp=True)
+    else:
+        app._append_log("/revert: no applied patches yet.", STYLE_DIM)
+
+def _cmd_quit(app, parts):
+    app.action_quit()
+
+def _cmd_help(app, parts):
+    app.action_help()
+
+def _cmd_git(app, parts):
+    app._git_command(parts[1:])
+
+def _cmd_persona(app, parts):
+    app._persona_command(parts[1:])
+
+def _cmd_modules(app, parts):
+    app._modules_command(parts[1:])
+
+def _cmd_visualize(app, parts):
+    app._visualize_command(parts[1:])
+
+def _cmd_hand(app, parts):
+    app._hand_command(parts[1:])
+
+def _cmd_brain(app, parts):
+    app._brain_command(parts[1:])
+
+def _cmd_doom(app, parts):
+    app._doom_command(parts[1:])
+
+COMMAND_HANDLERS = {
+    "/chaos": _cmd_chaos,
+    "/focus": _cmd_focus,
+    "/sleep": _cmd_sleep,
+    "/wake": _cmd_wake,
+    "/revive": _cmd_revive,
+    "/stats": _cmd_stats,
+    "/think": _cmd_think,
+    "/self-talk": _cmd_self_talk,
+    "/persona": _cmd_persona,
+    "/auto-apply": _cmd_auto_apply,
+    "/visualize": _cmd_visualize,
+    "/hand": _cmd_hand,
+    "/brain": _cmd_brain,
+    "/doom": _cmd_doom,
+    "/voice": _cmd_voice,
+    "/listen": _cmd_listen,
+    "/microphone": _cmd_microphone,
+    "/look": _cmd_look,
+    "/camera": _cmd_camera,
+    "/mud": _cmd_mud,
+    "/new": _cmd_new,
+    "/swap": _cmd_swap,
+    "/organisms": _cmd_organisms,
+    "/group": _cmd_group,
+    "/export": _cmd_export,
+    "/save": _cmd_save,
+    "/modules": _cmd_modules,
+    "/approve": _cmd_approve,
+    "/reject": _cmd_reject,
+    "/revert": _cmd_revert,
+    "/reload": _cmd_reload,
+    "/lua": _cmd_lua,
+    "/git": _cmd_git,
+    "/quit": _cmd_quit,
+    "/help": _cmd_help,
+}
+
+
 _SPARK_BARS = "▁▂▃▄▅▆▇█"
 
 CHAT_HISTORY_LIMIT = 50
 
 
-def complete_command(value, index=0):
-    """Tab-cycle slash completion. `index` is the previously used match
-    index (0 = first match). Returns (completed_value, next_index)."""
+def completion_matches(value):
+    """Every command name completing value's first token, or None when
+    the value isn't a completable slash command."""
     token = value.split()[0] if value.strip() else ""
     if not token.startswith("/"):
-        return value, index
-    matches = [n for n in COMMAND_NAMES if n.startswith(token)]
+        return None
+    return [n for n in COMMAND_NAMES if n.startswith(token)]
+
+
+def complete_command(value, matches, index):
+    """Tab-cycle slash completion over a fixed candidate list.
+
+    `matches` are the candidates captured when the typed token last
+    changed (see completion_matches); `index` is the previously used
+    match index (0 = first match). Returns (completed_value, next_index).
+    Anything typed after the first word of `value` is preserved."""
     if not matches:
-        return value, index
+        return value, 0
     used = index % len(matches)
-    return matches[used] + value[len(token) :], (used + 1) % len(matches)
+    first = value.split()[0] if value.strip() else ""
+    return matches[used] + value[len(first) :], (used + 1) % len(matches)
 
 
 def history_push(history, text):
@@ -210,22 +530,30 @@ def help_text():
         "ctrl+p  command palette",
         "F1      this help",
         "F2/F3/F4 chat / mind / memory tabs",
-        "F5       push-to-talk (same as /listen)",
-        "F6       look through the camera (same as /look)",
-        "F7       inner tab: mental-state gauges + thought metabolism",
-        "F8       cells tab: top-down neural memory grid (click a cell)",
+        "F5       push-to-talk (/listen)",
+        "F6       look through the camera (/look)",
+        "F7       inner tab: mental-state gauges",
+        "F8       cells tab: neural memory grid",
+        "shift+F8 visual tab: live SVG charts",
         "F9       module manager: enable/disable Lua modules",
+        "F10      quit (now asks for confirmation)",
+        "ctrl+q   quit immediately",
+        "ctrl+c   press twice to quit",
         "ctrl+s   save now",
         "ctrl+t   think now",
-        "tab     complete a slash command",
-        "up/down recall previous chat lines",
-        "click   a sidebar organism for its menu (swap / rename / move",
-        "        to group); click a group header for the group menu",
-        "drag    a sidebar organism onto a group (empty space ungroups)",
-        "rclick  a group header to rename it; right-click empty sidebar",
-        "        space to create a group",
-        "F10     quit (ctrl+q too, but terminals may eat it via flow control;",
-        "        ctrl+c twice also works)",
+        "ctrl+m   toggle terminal mouse capture (off by default = text selectable)",
+        "ctrl+shift+c copy the chat log",
+        "tab      complete a slash command",
+        "up/down  recall previous chat lines",
+        "mouse    disabled for selection by default; ctrl+m to enable clicks",
+        "",
+        "modules: /modules opens the manager. enable fly-brain, save, then use",
+        "/brain status | optimize <task> | adapt | bank. /brain optimize digits",
+        "runs the real larval-Drosophila connectome reservoir.",
+        "",
+        "voice: /voice on|off toggles piper TTS. /voice list shows installed",
+        "voices, /voice use <name> switches, /voice get <name> downloads one.",
+        "If enabled but no model is present the organism stays mute.",
         "",
         "mud: /mud toggles; while it runs, type moves directly",
         "(go north, take torch, look, inventory) or prose as a hint.",
