@@ -12,9 +12,9 @@ Multi-actor support: a MudGame can host any number of actors (organisms
 or users). All actors share the same world, but each has its own room
 and inventory. Turns advance round-robin through the turn order.
 
-Deliberate style island: this module keeps type annotations (the rest
-of the codebase is unannotated) because scenario JSON crosses a
-parsing boundary where the shapes earn their keep.
+Deliberate style island: this module keeps type annotations because
+scenario JSON crosses a parsing boundary where the shapes earn their
+keep.
 """
 
 import json
