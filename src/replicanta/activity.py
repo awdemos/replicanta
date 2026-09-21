@@ -143,12 +143,14 @@ def summary_lines(store):
 
 
 def record_digest(store, cycles=30):
-    """Record an activity snapshot and return a short narrative of recent
-    learning activity, for the voice prompt. Mutates store.activity
+    """Record an activity snapshot for the current cycle (plus pruning)
+    and return digest_text(store, cycles). Mutates store.activity
     (appends/prunes snapshots) — the name says so.
 
-    Compares current counters against a snapshot taken roughly `cycles`
-    cycles ago. If no history exists yet, reports lifetime totals.
+    The rendering used to be folded into this bookkeeping, which forced
+    every reader of the digest to mutate the store; narration's
+    state_snapshot now renders via the pure digest_text instead, and the
+    arena calls this once per utterance.
     """
     a = store.activity
     if not a:
@@ -170,7 +172,23 @@ def record_digest(store, cycles=30):
     while len(snapshots) > 1 and snapshots[1]["cycle"] <= cutoff:
         snapshots.pop(0)
 
-    anchor = snapshots[0]
+    return digest_text(store, cycles=cycles)
+
+
+def digest_text(store, cycles=30):
+    """Pure render of recent learning activity for the voice prompt:
+    current counters compared against the oldest recorded snapshot
+    within roughly `cycles` cycles (no recorded history yet means the
+    implicit anchor is empty counters, i.e. lifetime totals). Never
+    mutates the store.
+    """
+    a = store.activity
+    if not a:
+        return "you have not done much yet"
+
+    snapshots = a.get("snapshots") or []
+    anchor = snapshots[0] if snapshots else {"cycle": 0, "counters": {}}
+    now = store.cycle
     elapsed = max(now - anchor["cycle"], 1)
     before = anchor["counters"]
 

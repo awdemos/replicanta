@@ -6,23 +6,34 @@ assembles the public utterances."""
 
 import random
 import re
+import zlib
 
 from replicanta import activity, goals, learning, tendon_hand
 from replicanta import memory as memory_module
 
 
+def _probe(fn, default):
+    """Defensive probe of an optional module hook: call fn(), falling
+    back to `default` when the module raises. Registry modules are user
+    code and may fail anywhere, so the swallow lives in exactly one
+    place."""
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001
+        return default
+
+
 def state_snapshot(org):
-    """Compact text-ready snapshot of the organism's mind. Also records
-    an activity snapshot (activity.record_digest) as a side effect."""
+    """Compact text-ready snapshot of the organism's mind — a pure read
+    with no store mutations, eligible for the module-level cache. The
+    returned dict is the cached instance: callers must not mutate it;
+    take a private copy before extending it (the arena adds its
+    per-debate "seed" that way)."""
     store = org.store
     m = org.metrics()
 
     # Cache key: anything that changes the returned dict. Lengths are a
     # cheap, reliable proxy for in-place mutations of the store containers.
-    # activity_digest is intentionally excluded: it mutates store.activity as
-    # a side effect, which would prevent caching, but its textual content does
-    # not depend on activity map identity/length in a cache-breaking way.
-    activity_digest = activity.record_digest(store)
     cache_key = (
         store.cycle,
         store.chaos,
@@ -69,8 +80,6 @@ def state_snapshot(org):
     )
     memory_scorer = memory_module.MemoryScorer()
     ranked_memory = memory_scorer.rank(memory, memory_query, top_k=8, current_cycle=store.cycle)
-    for mem in ranked_memory:
-        memory_module.MemoryScorer.mark_recalled(mem)
     skill_names = []
     skill_lines = []
     relevant_skills = []
@@ -118,10 +127,11 @@ def state_snapshot(org):
         "self_model": self_model,
         "surprises": surprises,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in ranked_memory],
+        "ranked_memories": ranked_memory,
         "asked": [text for role, text in store.chat_log if role == "org" and text.strip().endswith("?")][-3:],
         "last_exchange": _last_self_exchange(store.chat_log),
         "chat": [f"{role}: {text}" for role, text in store.chat_log[-6:]],
-        "activity_digest": activity_digest,
+        "activity_digest": activity.digest_text(store),
         "needs_user": derived["needs_user"],
         "scallop_contradictions": derived["contradictions"],
         "stress_mood": derived["stress_mood"],
@@ -132,37 +142,29 @@ def state_snapshot(org):
     arm = module_loader.registry.get("arm") if module_loader is not None else None
     snapshot["arm"] = arm is not None
     flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
-    snapshot["flybrain"] = False
-    if flybrain is not None:
-        try:
-            snapshot["flybrain"] = bool(flybrain.available())
-        except Exception:  # noqa: BLE001
-            snapshot["flybrain"] = False
+    snapshot["flybrain"] = bool(flybrain is not None and _probe(flybrain.available, False))
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
     snapshot["doom_tactical"] = ""
     snapshot["doom_can_shoot"] = "no"
     if doom is not None:
-        try:
-            snapshot["doom"] = bool(doom.running())
-        except Exception:  # noqa: BLE001
-            snapshot["doom"] = False
+        snapshot["doom"] = bool(_probe(doom.running, False))
         if snapshot["doom"]:
-            try:
-                snapshot["doom_status"] = str(doom.status() or "")
-            except Exception:  # noqa: BLE001
-                snapshot["doom_status"] = ""
-            try:
-                snapshot["doom_tactical"] = str(doom.tactical() or "")
-            except Exception:  # noqa: BLE001
-                snapshot["doom_tactical"] = ""
-            try:
-                snapshot["doom_can_shoot"] = "yes" if bool(doom.can_shoot()) else "no"
-            except Exception:  # noqa: BLE001
-                snapshot["doom_can_shoot"] = "no"
+            snapshot["doom_status"] = _probe(lambda: str(doom.status() or ""), "")
+            snapshot["doom_tactical"] = _probe(lambda: str(doom.tactical() or ""), "")
+            snapshot["doom_can_shoot"] = "yes" if _probe(doom.can_shoot, False) else "no"
     state_snapshot._cache = (cache_key, snapshot)
     return snapshot
+
+
+def record_recall(snapshot):
+    """Bookkeeping pass for a snapshot already taken: bump the recall
+    counter on the memories it surfaced, so future rankings favour what
+    the voice actually thinks about. Kept out of state_snapshot, which
+    stays a pure read; the arena calls this once per debate."""
+    for mem in snapshot.get("ranked_memories", ()):
+        memory_module.MemoryScorer.mark_recalled(mem)
 
 
 def _last_self_exchange(chat_log):
@@ -637,6 +639,62 @@ def _doom_move_lines():
     return _doom_prompt({"doom_status": "", "doom_tactical": "", "doom_can_shoot": "no"})
 
 
+def _hand_lines(snapshot):
+    if not snapshot.get("arm"):
+        return []
+    moves = ", ".join(sorted(set(tendon_hand.GOALS) | set(tendon_hand.POSTURES)))
+    return [
+        "",
+        "### ROBOT HAND — USE WHEN THE USER ASKS FOR A GESTURE",
+        "",
+        "You have a real robot hand. To move it, start your reply with",
+        "this Lua call on its own line, BEFORE any prose:",
+        '  hand.move("wave")',
+        "",
+        f"Moves: {moves}.",
+        "",
+        "Examples:",
+        '  user: "make a fist" → hand.move("fist")',
+        '  user: "wave for 3"  → hand.move("wave", 3)',
+        '  user: "flip off"    → hand.move("middle_finger")',
+        "",
+        "Rules: pick the closest valid move if the request is not in the",
+        "list; one hand.move per reply; never say you cannot move the hand.",
+        "",
+        "FINAL INSTRUCTION: if the user's last message asks for a gesture,",
+        'your reply MUST begin with hand.move("...").',
+    ]
+
+
+def _brain_lines(snapshot):
+    if not snapshot.get("flybrain"):
+        return []
+    return [
+        "",
+        "### FLY BRAIN — A REAL CONNECTOME YOU CAN IMPROVE",
+        "",
+        "You share your substrate with a real larval fruit-fly brain (about",
+        "three thousand neurons) running as a reservoir computer, wrapped in",
+        "a recursive self-improvement loop. To use it, put one of these Lua",
+        "calls on its own line, BEFORE any prose:",
+        '  brain.optimize("digits")           -- evolve the harness (minutes)',
+        '  brain.optimize("digits", 8, "l3")  -- smaller budget, lower level',
+        "  brain.adapt()                      -- drift-adaptation rehearsal",
+        "  brain.bank()                       -- recall inherited experience",
+        "",
+        "Runs are slow and asynchronous: start one, then talk about",
+        "something else; the result arrives as a system line. Rules: one",
+        "brain call per reply; never claim a run finished before its",
+        "system line says so.",
+    ]
+
+
+def _doom_lines(snapshot):
+    if not snapshot.get("doom"):
+        return []
+    return _doom_prompt(snapshot)
+
+
 _TASK_LINES = {
     "form_goal": _lines_form_goal,
     "reflect": _lines_reflect,
@@ -709,59 +767,6 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "Short sentences. Specific images. No purple prose.",
         ]
 
-    def hand_lines():
-        if not snapshot.get("arm"):
-            return []
-        moves = ", ".join(sorted(set(tendon_hand.GOALS) | set(tendon_hand.POSTURES)))
-        return [
-            "",
-            "### ROBOT HAND — USE WHEN THE USER ASKS FOR A GESTURE",
-            "",
-            "You have a real robot hand. To move it, start your reply with",
-            "this Lua call on its own line, BEFORE any prose:",
-            '  hand.move("wave")',
-            "",
-            f"Moves: {moves}.",
-            "",
-            "Examples:",
-            '  user: "make a fist" → hand.move("fist")',
-            '  user: "wave for 3"  → hand.move("wave", 3)',
-            '  user: "flip off"    → hand.move("middle_finger")',
-            "",
-            "Rules: pick the closest valid move if the request is not in the",
-            "list; one hand.move per reply; never say you cannot move the hand.",
-            "",
-            "FINAL INSTRUCTION: if the user's last message asks for a gesture,",
-            'your reply MUST begin with hand.move("...").',
-        ]
-
-    def brain_lines():
-        if not snapshot.get("flybrain"):
-            return []
-        return [
-            "",
-            "### FLY BRAIN — A REAL CONNECTOME YOU CAN IMPROVE",
-            "",
-            "You share your substrate with a real larval fruit-fly brain (about",
-            "three thousand neurons) running as a reservoir computer, wrapped in",
-            "a recursive self-improvement loop. To use it, put one of these Lua",
-            "calls on its own line, BEFORE any prose:",
-            '  brain.optimize("digits")           -- evolve the harness (minutes)',
-            '  brain.optimize("digits", 8, "l3")  -- smaller budget, lower level',
-            "  brain.adapt()                      -- drift-adaptation rehearsal",
-            "  brain.bank()                       -- recall inherited experience",
-            "",
-            "Runs are slow and asynchronous: start one, then talk about",
-            "something else; the result arrives as a system line. Rules: one",
-            "brain call per reply; never claim a run finished before its",
-            "system line says so.",
-        ]
-
-    def doom_lines():
-        if not snapshot.get("doom"):
-            return []
-        return _doom_prompt(snapshot)
-
     lines = list(intro)
 
     if task_focused:
@@ -795,9 +800,9 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "ramble about your own state, feelings, or existence. No preamble,",
             "no quotes, no emoji.",
         ]
-        lines += hand_lines()
-        lines += brain_lines()
-        lines += doom_lines()
+        lines += _hand_lines(snapshot)
+        lines += _brain_lines(snapshot)
+        lines += _doom_lines(snapshot)
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.
@@ -899,9 +904,9 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "peaceful, hush, empty, emptiness, void, hollow, absence."
         ),
     ]
-    lines += hand_lines()
-    lines += brain_lines()
-    lines += doom_lines()
+    lines += _hand_lines(snapshot)
+    lines += _brain_lines(snapshot)
+    lines += _doom_lines(snapshot)
     return "\n".join(lines)
 
 
@@ -925,11 +930,14 @@ def fallback_summary(snapshot):
 
 def _pick_varied(options, snapshot, user_message):
     """Stable but varied choice: hash the message plus cycle so the same
-    input doesn't always get the same fallback, while still being
-    deterministic for tests."""
+    input doesn't always get the same fallback. The seed is crc32 over
+    the joined fields — deterministic across processes (the builtin
+    hash() is salted per process by PYTHONHASHSEED), so tests and
+    restarts see stable choices."""
     if not options:
         return ""
-    seed = hash((user_message or "", snapshot.get("cycle", 0), snapshot.get("state", "wake")))
+    key = "\x00".join((user_message or "", str(snapshot.get("cycle", 0)), str(snapshot.get("state", "wake"))))
+    seed = zlib.crc32(key.encode())
     return options[seed % len(options)]
 
 
