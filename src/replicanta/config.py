@@ -49,9 +49,10 @@ def load_config(root):
 
 def save_config(root, config):
     """Write config back to replicanta.toml. Preserves top-level sections
-    and handles bool, int, float, str, and flat-dict values. None and
-    unsupported values are written as comments (never invalid TOML) and
-    a warning is logged."""
+    and handles bool, int, float, str, flat-dict, and list-of-scalar
+    values (e.g. the modules `enabled` roster). None and unsupported
+    values are written as comments (never invalid TOML) and a warning is
+    logged."""
     atomic_write_text(config_path(root), _render_config(config))
 
 
@@ -91,6 +92,12 @@ def _render_key_value(key, val):
         return f"{key} = {val}"
     if isinstance(val, str):
         return f"{key} = {_toml_string(val)}"
+    if isinstance(val, (list, tuple)):
+        rendered = [_render_literal(v) for v in val]
+        if all(r is not None for r in rendered):
+            return f"{key} = [{', '.join(rendered)}]"
+        logger.warning("config: skipping key %r: unrenderable list element", key)
+        return f"# {key}  # skipped: list with unsupported element type"
     if isinstance(val, dict):
         pairs = ", ".join(f"{k} = {lit}" for k, v in val.items() if (lit := _render_literal(v)) is not None)
         if pairs:

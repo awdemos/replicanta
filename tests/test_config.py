@@ -70,7 +70,6 @@ def test_save_config_none_and_nested_values_never_corrupt_file(tmp_path, caplog)
     cfg = config.load_config(tmp_path)
     cfg["git"]["enabled"] = None
     cfg["persona"] = {"name": "fern", "meta": {"deep": {"x": 1}}}
-    cfg["voice"] = ["a", "list"]
     with caplog.at_level("WARNING"):
         config.save_config(tmp_path, cfg)
     text = (tmp_path / "replicanta.toml").read_text()
@@ -80,5 +79,27 @@ def test_save_config_none_and_nested_values_never_corrupt_file(tmp_path, caplog)
     assert loaded["git"]["enabled"] is False  # omitted key falls back to default
     assert loaded["persona"]["name"] == "fern"
     assert "meta" not in loaded["persona"]  # unrenderable inline value skipped
-    assert "voice" not in loaded  # unsupported top-level value skipped
     assert "unsupported" in caplog.text
+
+
+def test_save_config_list_of_scalars_roundtrips(tmp_path):
+    """The module manager persists `modules.enabled` as a TOML array;
+    lists of scalars must survive save/load (regression: they rendered
+    as a comment, silently discarding the user's module toggles)."""
+    cfg = config.load_config(tmp_path)
+    cfg["modules"] = {"enabled": ["base", "fly-brain", "nano-doom"]}
+    config.save_config(tmp_path, cfg)
+    text = (tmp_path / "replicanta.toml").read_text()
+    assert 'enabled = ["base", "fly-brain", "nano-doom"]' in text
+    loaded = config.load_config(tmp_path)
+    assert loaded["modules"]["enabled"] == ["base", "fly-brain", "nano-doom"]
+
+
+def test_save_config_list_with_unrenderable_element_is_commented(tmp_path, caplog):
+    cfg = config.load_config(tmp_path)
+    cfg["modules"] = {"enabled": ["base", {"bad": "dict"}]}
+    with caplog.at_level("WARNING"):
+        config.save_config(tmp_path, cfg)
+    loaded = config.load_config(tmp_path)
+    assert "enabled" not in loaded["modules"]
+    assert "unrenderable list element" in caplog.text

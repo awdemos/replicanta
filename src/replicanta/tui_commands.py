@@ -581,7 +581,14 @@ def sparkline(values):
 
 def help_text():
     lines = ["REPLICANTA — type / in the chat line; tab completes.", ""]
-    lines += [f"{usage:<14} {desc}" for _name, usage, desc, _category in COMMANDS]
+    for _name, usage, desc, _category in COMMANDS:
+        if len(usage) <= 24:
+            lines.append(f"{usage:<26} {desc}")
+        else:
+            # long signatures (/visualize, /hand, /doom): signature on its
+            # own line, description indented beneath the command column
+            lines.append(f"  {usage}")
+            lines.append(f"{'':<26} {desc}")
     lines += [
         "",
         "keyboard",

@@ -151,9 +151,9 @@ def test_bottom_bar_shows_counts_and_keys(nursery_app):
     app = nursery_app
 
     async def check():
-        async with app.run_test():
+        async with app.run_test(size=(160, 48)):
             app.refresh_status()
-            text = renderable_text(app.query_one("#bottombar-text", Static), width=120)
+            text = renderable_text(app.query_one("#bottombar-text", Static), width=160)
             assert "beliefs" in text
             assert "rules" in text
             assert "ctrl+p" in text
@@ -161,6 +161,42 @@ def test_bottom_bar_shows_counts_and_keys(nursery_app):
             assert "ctrl+m" in text
             assert "ctrl+q quit" in text
             assert text.strip() == app._bottombar_text
+
+    asyncio.run(check())
+
+
+def test_bottom_bar_drops_middle_hints_when_narrow(nursery_app):
+    """The status line must never wrap: as the terminal narrows, hints
+    drop from the middle (tabs first, then mouse) while palette and quit
+    stay anchored at the ends."""
+
+    async def check():
+        app = nursery_app
+        async with app.run_test(size=(90, 40)):
+            app.refresh_status()
+            text = app._bottombar_text
+            assert len(text) <= 90
+            assert "ctrl+p" in text
+            assert "ctrl+q quit" in text
+            assert "F2-F8" not in text  # tabs hint drops first
+            assert "ctrl+m" not in text  # mouse hint drops next
+
+    asyncio.run(check())
+
+
+def test_bottom_bar_keeps_anchored_ends_at_the_floor(nursery_app):
+    """Below the fit floor only the anchored ends survive: palette and
+    quit stay, everything in between drops."""
+
+    async def check():
+        app = nursery_app
+        async with app.run_test(size=(60, 40)):
+            app.refresh_status()
+            text = app._bottombar_text
+            assert "ctrl+p" in text
+            assert "ctrl+q quit" in text
+            assert "F1" not in text
+            assert "ctrl+m" not in text
 
     asyncio.run(check())
 

@@ -55,6 +55,9 @@ For the web interface: `.venv/bin/replicanta --web`
   `/persona creative-writer`, or `/persona socratic-philosopher`.
 - **MUD** — dungeon crawl with `/mud`; type moves like `go north` or
   `take torch`.
+- **Nano-doom** — a tiny ASCII DOOM-style shooter the organism plays and
+  narrates in the DOOM tab: `/doom start [map]`, then `/doom w/a/s/d` to
+  move, `q/e` to turn, `shoot` to fire.
 - **Self-modification** — it can propose patches to its own code; auto-apply is
   off by default (`/auto-apply on` to apply patches without approval).
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
@@ -253,6 +256,7 @@ container-use checkout <env-id>
 | `/chaos 0.8` | Set live randomness (0..1) |
 | `/focus color` | Steer attention; bare `/focus` clears |
 | `/sleep`, `/wake`, `/revive` | Lifecycle control |
+| `/soothe` | Comfort the organism: relieve its stress |
 | `/stats` | Metrics |
 | `/save` | Persist state |
 | `/think` | Narrate now |
@@ -261,6 +265,7 @@ container-use checkout <env-id>
 | `/listen` (F5) | Push-to-talk |
 | `/look` (F6) | Capture and describe camera frame |
 | `/mud` | Toggle dungeon crawl |
+| `/doom [start [map]\|stop\|status\|w/a/s/d\|shoot\|q/e]` | Tiny ASCII shooter the organism plays and narrates |
 | `/approve`, `/reject`, `/revert` | Manage self-patches |
 | `/reload` | Re-read Lua hook scripts |
 | `/lua name.lua` | Run one script on demand |
@@ -275,7 +280,7 @@ container-use checkout <env-id>
 
 Kinds for `/visualize`: `beliefs`, `attributes`, `activity`, `memories`, `recent`, `mood`, `sentiment`, `stress`, or `summary`.
 
-Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **visual** (F8 / shift+F8).
+Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **cells** (F8), **visual** (shift+F8). The MUD and DOOM tabs open from their commands.
 
 ### Learning
 

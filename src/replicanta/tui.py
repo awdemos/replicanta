@@ -209,11 +209,21 @@ class QuickActions(Grid):
     """One-click sidebar buttons for common state changes."""
 
     def compose(self) -> ComposeResult:
-        yield Button("Sleep / Wake", id="qa-sleep")
-        yield Button("Voice", id="qa-voice")
+        yield Button("Sleep", id="qa-sleep")
+        yield Button("Voice off", id="qa-voice")
         yield Button("Listen", id="qa-listen")
         yield Button("Look", id="qa-look")
-        yield Button("MUD", id="qa-mud")
+        yield Button("MUD off", id="qa-mud")
+
+
+# Sidebar badge glyphs for loaded capability modules (persona modules stay
+# unbadged; capability modules get a persistent per-entity marker).
+MODULE_BADGES = {
+    "fly-brain": "\U0001fab0",  # 🪰
+    "tendon-hand": "\U0001f9be",  # 🦾
+    "visual-state": "\U0001f441",  # 👁
+    "nano-doom": "\U0001f480",  # 💀
+}
 
 
 class Toast(Static):
@@ -236,31 +246,59 @@ class HelpScreen(ModalScreen):
 
 
 class CommandPalette(Screen):
-    """Searchable slash-command palette."""
+    """Searchable slash-command palette: a centered card with a filter
+    box, grouped results with the matched text highlighted, and a count
+    plus key hints."""
 
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Type a command…", id="palette-input")
-        yield ListView(id="palette-results")
+        with Vertical(id="palette"):
+            yield Static("Command Palette", id="palette-title")
+            yield Input(placeholder="type to filter commands…", id="palette-input")
+            yield ListView(id="palette-results")
+            yield Static("", id="palette-meta")
 
-    def on_show(self):
-        self.query_one("#palette-input", Input).focus()
+    def on_mount(self):
+        # on_mount, not on_show: the input and results are composed inside
+        # #palette, and on_show can fire before that subtree is queryable.
+        # A caller may also dismiss the palette before its subtree mounts
+        # (push then immediate dismiss), which must not raise here.
+        try:
+            self.query_one("#palette-input", Input).focus()
+        except NoMatches:
+            return
         self._refresh_palette("")
 
     def on_input_changed(self, event):
         self._refresh_palette(event.value)
 
+    @staticmethod
+    def _highlight(text, query):
+        """Render ``text`` with the first case-insensitive ``query`` match
+        reversed+bold so the eye lands on why a row matched."""
+        if not query:
+            return text
+        low = text.lower()
+        q = query.lower()
+        i = low.find(q)
+        if i < 0:
+            return text
+        return f"{text[:i]}[bold reverse u]{text[i : i + len(q)]}[/]{text[i + len(q) :]}"
+
     def _refresh_palette(self, query):
         results = self.query_one("#palette-results", ListView)
-        results.clear()
+        self._clear_await = results.clear()  # AwaitRemove; completes on the next tick
         items = tui_commands.filter_commands(query)
+        meta = self.query_one("#palette-meta", Static)
         if not items:
-            results.append(ListItem(Static("No matches")))
+            results.append(ListItem(Static("[dim]no matching commands[/dim]")))
+            meta.update("[dim]esc closes[/dim]")
             return
         categories = {}
         for name, usage, desc, category in items:
             categories.setdefault(category, []).append((name, usage, desc))
+        count = 0
         for category in (
             "State",
             "Voice",
@@ -272,18 +310,20 @@ class CommandPalette(Screen):
         ):
             if category not in categories:
                 continue
-            header = ListItem(Static(f"[dim]{category}[/dim]"))
+            header = ListItem(Static(f"[bold]{category}[/bold]"))
             header.disabled = True
             results.append(header)
             for name, usage, desc in categories[category]:
+                count += 1
                 item = ListItem(
                     Vertical(
-                        Static(f"[bold]{usage}[/bold]", classes="palette-usage"),
-                        Static(f"{desc}", classes="palette-desc"),
+                        Static(self._highlight(usage, query), classes="palette-usage"),
+                        Static(self._highlight(desc, query), classes="palette-desc"),
                     )
                 )
                 item.data = name
                 results.append(item)
+        meta.update(f"[dim]{count} command{'s' if count != 1 else ''} · ↑↓ select · enter run · esc close[/dim]")
 
     def on_list_view_selected(self, event):
         item = event.item
@@ -501,7 +541,7 @@ class ModulesScreen(ModalScreen):
         """Build the title, checkbox list, and detail label."""
         with Vertical(id="modules-box"):
             yield Label(
-                "Modules — space/enter toggles · s saves & reloads · esc closes",
+                "Modules — space toggles · s saves · esc closes",
                 id="modules-title",
             )
             with _ModuleList(id="module-list"):
@@ -560,9 +600,9 @@ class ModulesScreen(ModalScreen):
         container.remove_children()
         for manifest in self._discovered():
             name = manifest.get("name", "")
-            desc = manifest.get("description", "")
-            label = f"{name}" + (f" — {desc}" if desc else "")
-            cb = Checkbox(label, value=name in self._enabled, id=f"mod-{name}")
+            # name only: the focused module's description renders in the
+            # detail pane below, so the list row stays uncluttered
+            cb = Checkbox(name, value=name in self._enabled, id=f"mod-{name}")
             container.mount(cb)
         checkboxes = list(container.query(Checkbox))
         if checkboxes:
@@ -699,7 +739,10 @@ class OrganismApp(App):
     #sidebar-header { height: 1; padding: 0 1; background: $surface;
                       color: $text-muted; text-style: bold; }
     #quick-actions { height: auto; padding: 1 0; grid-size: 2; grid-gutter: 0 1; }
-    #quick-actions > Button { width: 1fr; margin: 0; }
+    #quick-actions > Button { width: 1fr; margin: 0; height: 1; border: none;
+                              background: transparent; color: $text-muted; }
+    #quick-actions > Button:hover { background: $boost; color: $text; }
+    #quick-actions > Button:focus { background: $boost; border: none; }
     #sidebar-list { padding: 0; height: 1fr; border: none;
                      background: $surface; }
     #sidebar-list > ListItem { padding: 0 1; }
@@ -710,8 +753,13 @@ class OrganismApp(App):
     #sidebar.-dragging #sidebar-list > ListItem.group-header {
         background: $boost; color: $text; text-style: bold underline; }
     #content { width: 1fr; height: 1fr; }
-    #tab-bar { height: 3; padding: 0 1; }
-    #tab-bar > Button { min-width: 8; margin: 0 1; }
+    #tab-bar { height: 1; padding: 0 1; }
+    #tab-bar > Button { min-width: 8; margin: 0 1; height: 1; border: none;
+                        background: transparent; color: $text-muted; }
+    #tab-bar > Button:hover { background: transparent; color: $text; }
+    #tab-bar > Button:focus { background: transparent; border: none; }
+    #tab-bar > Button.-primary { color: $text; text-style: bold underline;
+                                 background: transparent; }
     TabbedContent { height: 1fr; }
     TabbedContent > ContentTabs { display: none; }
     #dreams { height: 1fr; padding: 0 1; }
@@ -730,7 +778,8 @@ class OrganismApp(App):
     #chat { height: 3; border: solid yellow; }
     #toast { height: auto; display: none; padding: 0 1;
              background: $error-darken-2; color: $text; }
-    #help { border: round green; padding: 1 2; width: 60; height: auto; }
+    #help { border: round green; padding: 1 2; width: 88; height: auto;
+            max-height: 90%; }
     OrganismMenuScreen, RenameScreen, NamePromptScreen, GroupMenuScreen,
     GroupPickScreen { align: center middle; }
     #org-menu, #group-menu, #group-pick { border: round $primary; width: 44;
@@ -744,16 +793,20 @@ class OrganismApp(App):
     #activity { width: auto; }
     #bottombar-text { width: 1fr; content-align: right middle; }
     CommandPalette { align: center middle; }
-    #palette { width: 60; height: auto; max-height: 24; border: round $primary;
+    #palette { width: 72; height: auto; max-height: 26; border: round $primary;
                background: $surface; padding: 1 2; }
+    #palette-title { height: 1; padding: 0 1; text-style: bold;
+                     color: $text; }
     #palette-results { height: auto; max-height: 18; border: none;
-                       background: $surface; }
-    #palette-results > ListItem { padding: 0 1; }
+                       background: $surface; margin-top: 1; }
+    #palette-results > ListItem { padding: 0 1; height: auto; }
+    #palette-results > ListItem > Vertical { height: auto; }
     #palette-results > ListItem.--highlight { background: $primary; color: $text; }
+    #palette-meta { height: 1; padding: 0 1; color: $text-muted; }
     .palette-usage { text-style: bold; }
     .palette-desc { color: $text-muted; }
     ModulesScreen { align: center middle; }
-    #modules-box { width: 60; height: 24; border: round $primary; background: $surface; padding: 0 1; }
+    #modules-box { width: 78; height: 24; border: round $primary; background: $surface; padding: 0 1; }
     #modules-title { width: 100%; height: 1; padding: 0 1; background: $surface; color: $text; text-style: bold; }
     #module-list { width: 100%; height: 1fr; min-height: 12; border: none; background: $surface; padding: 0; }
     #module-list > ListItem { height: auto; padding: 0 1; color: $text; }
@@ -1258,6 +1311,14 @@ class OrganismApp(App):
         if topbar is not None:
             topbar.update(bar)
 
+    def _module_badges(self):
+        """Glyph suffix marking the loaded capability modules (e.g. ' 🪰'),
+        so every entity in the nursery shows what it has activated."""
+        loader = getattr(self.org, "module_loader", None)
+        if loader is None:
+            return ""
+        return "".join(f" {glyph}" for name, glyph in MODULE_BADGES.items() if name in loader.modules)
+
     def _refresh_sidebar(self):
         """Rebuild the nursery sidebar, highlighting the current organism."""
         lv = self._safe_query("#sidebar-list", ListView)
@@ -1269,18 +1330,19 @@ class OrganismApp(App):
         if not names:
             lv.append(ListItem(Label("(no organisms)")))
             return
+        badges = self._module_badges()
         groups = nursery.load_groups(self.root)
         grouped = {m for members in groups.values() for m in members}
         for name in names:
             if name in grouped:
                 continue
             marker = "● " if name == current else "  "
-            lv.append(ListItem(Label(f"{marker}{name}"), name=name))
+            lv.append(ListItem(Label(f"{marker}{name}{badges}"), name=name))
         for gname in sorted(groups):
             lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
             for member in groups[gname]:
                 marker = "● " if member == current else "  "
-                lv.append(ListItem(Label(f"   {marker}{member}"), name=member))
+                lv.append(ListItem(Label(f"   {marker}{member}{badges}"), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection opens a dropdown (left click or Enter): an
@@ -1906,42 +1968,57 @@ class OrganismApp(App):
 
     def refresh_status(self):
         """Render the custom bottom bar: activity counters on the left,
-        keyboard shortcuts as styled key caps on the right."""
+        keyboard shortcuts as styled key caps on the right. Hints drop
+        from the middle as the terminal narrows; palette and quit stay
+        anchored at the ends."""
         m = self.org.metrics()
+        playing = ""
         if self._mud.game is not None:
             playing = " · 🗡 mud (paused)" if self._mud.paused else " · 🗡 mud"
-        else:
-            playing = ""
         if self._group is not None:
             playing += f" · 👥 group ({len(self._group.names())})"
         loader = getattr(self.org, "module_loader", None)
-        doom_svc = loader.registry.get("doom") if loader is not None else None
-        if doom_svc is not None and doom_svc.running():
-            playing += " · 💀 doom"
-        brain_svc = loader.registry.get("brain") if loader is not None else None
-        brain_loaded = brain_svc is not None
-        if brain_loaded:
-            if brain_svc.running():
-                playing += " · \U0001fab0 fly brain running"
-            else:
-                playing += " · \U0001fab0 fly brain ready"
+        if loader is not None:
+            doom_svc = loader.registry.get("doom")
+            if doom_svc is not None and doom_svc.running():
+                playing += " · 💀 doom"
+            if "fly-brain" in loader.modules:
+                brain_svc = loader.registry.get("brain")
+                if brain_svc is not None and brain_svc.running():
+                    playing += " · \U0001fab0 fly brain running"
+                else:
+                    fly_svc = loader.registry.get("flybrain")
+                    if fly_svc is not None and fly_svc.available():
+                        playing += " · \U0001fab0 fly brain ready"
+                    else:
+                        playing += " · \U0001fab0 fly brain (no binary)"
         counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {voice.status()}{playing}"
-        keys = Text.assemble(
-            ("ctrl+p", "reverse"),
-            (" palette ", ""),
-            ("·", "dim"),
-            ("  F1", "reverse"),
-            (" help ", ""),
-            ("·", "dim"),
-            ("  F2-F8", "reverse"),
-            (" tabs ", ""),
-            ("·", "dim"),
-            ("  ctrl+m", "reverse"),
-            (" mouse ", ""),
-            ("·", "dim"),
-            ("  ctrl+q", "reverse"),
-            (" quit", ""),
-        )
+        hints = [
+            ("ctrl+p", " palette "),
+            ("F1", " help "),
+            ("F2-F8", " tabs "),
+            ("ctrl+m", " mouse "),
+            ("ctrl+q", " quit"),
+        ]
+
+        def build(segs):
+            parts = []
+            for i, (key, label) in enumerate(segs):
+                if i:
+                    parts.append((" · ", "dim"))
+                parts.append((key, "reverse"))
+                parts.append((label, ""))
+            return Text.assemble(*parts)
+
+        try:
+            width = self.screen.size.width
+        except Exception:  # noqa: BLE001 — headless/unit contexts may lack a screen
+            width = 80
+        segs = list(hints)
+        keys = build(segs)
+        while len(segs) > 2 and len(f"{counters}   {keys.plain}") > width:
+            segs.pop(-2)  # left of quit: mouse, then tabs, then help
+            keys = build(segs)
         text = f"{counters}   {keys.plain}"
         self._bottombar_text = text
         if text != self._rendered_bottombar_text:
@@ -1956,11 +2033,11 @@ class OrganismApp(App):
         if not isinstance(qa, QuickActions):
             return
         sleep_btn = qa.query_one("#qa-sleep", Button)
-        sleep_btn.label = "Wake" if self.org.lifecycle.state == "sleep" else "Sleep / Wake"
+        sleep_btn.label = "Wake" if self.org.lifecycle.state == "sleep" else "Sleep"
         voice_btn = qa.query_one("#qa-voice", Button)
-        voice_btn.label = f"Voice: {'on' if speech.enabled else 'off'}"
+        voice_btn.label = f"Voice {'on' if speech.enabled else 'off'}"
         mud_btn = qa.query_one("#qa-mud", Button)
-        mud_btn.label = "MUD: on" if self._mud.game is not None else "MUD: off"
+        mud_btn.label = "MUD on" if self._mud.game is not None else "MUD off"
 
     def set_activity(self, text):
         """Show a transient activity message in the status bar."""
