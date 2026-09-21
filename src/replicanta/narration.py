@@ -1042,7 +1042,9 @@ def fallback_diary_entry(snapshot):
 
 def fallback_ask_user(snapshot):
     """Deterministic question for the user, drawn from what is known about
-    them. Used when ollama is unavailable."""
+    them. Used when ollama is unavailable; exercised by the narration
+    tests, while production (voice.ask_user) speaks the stable variant
+    below so offline behavior stays predictable."""
     if snapshot["user_facts"]:
         fact = snapshot["user_facts"][0]
         return f"{fact} — what else should I know about you?"
@@ -1063,8 +1065,10 @@ def fallback_ask_user(snapshot):
     return _pick_varied(options, snapshot, "")
 
 
-def fallback_ask_user_legacy(snapshot):
-    """Stable fallback question used by older tests."""
+def fallback_ask_user_stable(snapshot):
+    """Stable fallback question used in production by voice.ask_user when
+    the LLM backend is unreachable; deliberately unvarying so the offline
+    experience stays predictable."""
     return "What are you working on right now?"
 
 

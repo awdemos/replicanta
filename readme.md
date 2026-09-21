@@ -56,7 +56,7 @@ For the web interface: `.venv/bin/replicanta --web`
 - **MUD** — dungeon crawl with `/mud`; type moves like `go north` or
   `take torch`.
 - **Self-modification** — it can propose patches to its own code; auto-apply is
-  on by default (`/auto-apply off` to require approval).
+  off by default (`/auto-apply on` to apply patches without approval).
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
   utterances, and fades.
 - **Fly brain** — ask the organism to evolve its own reservoir computer: the
@@ -272,8 +272,8 @@ Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **visual** 
 - Harsh words raise stress and mood `hurt`; kind words lower stress and mood
   `grateful`.
 - Self-patches are staged in `artifacts/extensions.json`. By default they
-  auto-apply; use `/auto-apply off` to require approval for every patch,
-  or `/approve` and `/reject` to handle pending patches. `/revert`
+  await approval; use `/approve` and `/reject` to handle pending patches,
+  or `/auto-apply on` to apply every patch without approval. `/revert`
   rolls back the last applied patch.
 - Each organism lives in `organisms/<name>/` with its own state and artifacts.
   Launch directly with `.venv/bin/replicanta --org fern`.
@@ -312,8 +312,8 @@ rules, then return to the awake state.
 
 ### Lifecycle and heartbeat
 
-Replicanta does not need a separate heartbeat service. The TUI and web
-surfaces call `Organism.tick(dt)` on a one-second timer; that tick is the
+Replicanta does not need a separate heartbeat service. The TUI calls
+`Organism.tick(dt)` on a one-second timer; that tick is the
 heartbeat. Each pulse advances:
 
 - lifecycle state (wake → sleep → fade)

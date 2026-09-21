@@ -203,7 +203,7 @@ def ask_user(org, model=None, timeout=None, rng=None, on_token=None):
     return _emerge(
         org,
         task="ask_user",
-        fallback=lambda snap: narration.fallback_ask_user_legacy(snap),
+        fallback=lambda snap: narration.fallback_ask_user_stable(snap),
         on_token=on_token,
         model=model,
         timeout=timeout,

@@ -2,7 +2,8 @@
 same sources btm reads — /proc/stat (CPU), /proc/meminfo (memory),
 /proc/loadavg (load), /proc/uptime, /sys/class/thermal (temperatures),
 /sys/class/power_supply (battery) and statvfs (disk) — plus the UTC wall
-clock and the `uname` shell command (the host's identity), and quantizes
+clock and the host identity (system node release machine, e.g. from
+`platform.uname()`), and quantizes
 the continuous metrics into discrete symbolic
 beliefs the reasoner can use (e.g. cpu:load=high, mem:usage=mid,
 temp:cpu=hot, time:hour=fourteen)."""
@@ -72,8 +73,8 @@ def _read_float(path):
 
 
 def _host_uname():
-    """`uname -snrm` — the host's identity as one line (e.g.
-    'Linux myhost 6.15.3 x86_64'), or None when uname is unavailable.
+    """Host identity as one line — system node release machine (e.g.
+    'Linux myhost 6.15.3 x86_64'), or None when unavailable.
 
     Uses the standard library `platform` module instead of shelling out.
     """
@@ -114,10 +115,10 @@ class SystemProbe:
         return f"{now.hour:02d}:{now.minute:02d} UTC"
 
     def uname(self):
-        """The host machine's identity from the `uname` shell command
-        (e.g. 'Linux myhost 6.15.3 x86_64') — whose body the organism
+        """The host machine's identity as system node release machine (e.g.
+        'Linux myhost 6.15.3 x86_64') — whose body the organism
         lives in. Too specific for a symbolic belief, so it reaches the
-        voice as prompt context instead. None when uname is unavailable."""
+        voice as prompt context instead. None when unavailable."""
         return self._uname()
 
     # -- raw metrics ------------------------------------------------------

@@ -29,9 +29,10 @@ def config_path(root):
 
 
 def load_config(root):
-    """Load replicanta.toml from root, merging defaults over user values.
-    Missing or malformed files fall back to defaults (a warning is logged
-    for malformed files). Unknown sections from the user file are preserved."""
+    """Load replicanta.toml from root, merging defaults under user values
+    (user keys win; defaults fill the gaps). Missing or malformed files
+    fall back to defaults (a warning is logged for malformed files).
+    Unknown sections from the user file are preserved."""
     path = config_path(root)
     if not path.is_file():
         return _copy(DEFAULT_CONFIG)
