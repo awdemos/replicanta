@@ -207,6 +207,14 @@ def note_voice_failure():
         _voice().online = False
 
 
+def mark_voice_offline():
+    """Force the cached voice state offline without waiting for a failure
+    streak (probe worker error, deliberate shutdown). Public seam so no
+    caller mutates ``_voice().online`` directly."""
+    with _VOICE_LOCK:
+        _voice().online = False
+
+
 # -- transport ---------------------------------------------------------------
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)

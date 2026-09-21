@@ -164,6 +164,17 @@ def test_backend_defaults_to_ollama():
     assert llmclient.llm_backend() == "ollama"
 
 
+def test_mark_voice_offline_forces_state_offline():
+    llmclient.reset_voice()
+    assert llmclient.voice_online() is None
+    llmclient.note_voice_success()
+    assert llmclient.voice_online() is True
+    llmclient.mark_voice_offline()
+    assert llmclient.voice_online() is False
+    assert llmclient.voice_status() == "offline"
+    llmclient.reset_voice()
+
+
 def test_describe_image_raises_on_llama_cpp_backend(monkeypatch):
     monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
     with pytest.raises(RuntimeError, match="vision is not supported"):

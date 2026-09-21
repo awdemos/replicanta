@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple, TypedDict
 
-from replicanta import fileutil, llmclient, voice
+from replicanta import fileutil, voice
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,9 @@ class RoomDict(TypedDict, total=False):
 
 
 class ScenarioDict(TypedDict):
-    """JSON shape produced by scenario_to_json and accepted by validate_scenario."""
+    """JSON shape produced by scenario_to_json. validate_scenario takes the
+    untyped ``dict[str, Any]`` form (its job is checking arbitrary JSON) and
+    returns a Scenario when the shape matches."""
 
     title: str
     premise: str
@@ -97,8 +99,13 @@ class ScenarioDict(TypedDict):
     rooms: dict[str, RoomDict]
 
 
-class ActorStateDict(TypedDict):
-    """Serialized state for one actor in a session."""
+class ActorStateDict(TypedDict, total=False):
+    """Serialized state for one actor in a session.
+
+    total=False because from_json tolerates legacy saves that predate
+    fields: room, inventory, and kind are all read via .get() with
+    defaults, so none of them is guaranteed present in old data.
+    """
 
     room: str
     inventory: list[str]
@@ -852,7 +859,7 @@ def choose_action(game, hint=None, rng=None, org=None, actor_name=None, temperat
     else:
         # Fallback small-model path when no organism is available.
         def generate(prompt):
-            return llmclient.generate(
+            return voice.generate_small(
                 prompt,
                 model=_mud_model(),
                 timeout=_mud_timeout(),
@@ -875,7 +882,7 @@ def _choose_from_raw(generate, game, hint=None, rng=None, org=None, actor_name=N
         raw = generate(action_prompt(game, org=org, actor_name=actor_name, hint=hint))
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
-        command, reason = parse_action_with_reason(llmclient.clean_candidate(raw or ""))
+        command, reason = parse_action_with_reason(voice.clean_candidate(raw or ""))
     except Exception:  # noqa: BLE001, S110 # nosec — a silent voice means wandering
         pass
     if command is None:
@@ -1025,7 +1032,7 @@ def generate_scenario(
     if generate is None:
 
         def generate(prompt):
-            return llmclient.generate(prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=temperature)
+            return voice.generate_small(prompt, model=_mud_model(), timeout=_mud_timeout(), temperature=temperature)
 
     prompt = _scenario_generation_prompt(description, org)
     try:

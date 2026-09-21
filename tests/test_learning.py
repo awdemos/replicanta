@@ -204,7 +204,7 @@ def test_extract_preserves_literal_colors():
 
 
 def test_llm_fallback_extracts_facts(monkeypatch):
-    def fake_generate(prompt, model, temperature=0.95):
+    def fake_generate(prompt, model, timeout=None, temperature=0.95):
         return '{"facts":[{"subject":"user","relation":"hobby","object":" hiking "}]}'
 
     monkeypatch.setattr("replicanta.llmclient.generate", fake_generate)

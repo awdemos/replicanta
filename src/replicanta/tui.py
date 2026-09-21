@@ -50,7 +50,6 @@ from replicanta import (
     fileutil,
     groupchat,
     listen,
-    llmclient,
     mud,
     nursery,
     rdd,
@@ -1295,8 +1294,8 @@ class OrganismApp(App):
         state_style = {"wake": "green", "sleep": "cyan", "dead": "red"}.get(lc.state, "")
         mood = self.org.store.belief_value("self", "mood", "calm")
         s = self.org.store
-        voice = llmclient.voice_status()
-        voice_style = {"online": "green", "offline": "red"}.get(voice, "dim")
+        voice_state = voice.status()
+        voice_style = {"online": "green", "offline": "red"}.get(voice_state, "dim")
         recording = self.listener.recording
         spoken = speech.enabled
         clock = self.org.probe.clock_utc()
@@ -1315,7 +1314,7 @@ class OrganismApp(App):
         )
         right = Text.assemble(
             ("voice ", "dim"),
-            (voice, voice_style),
+            (voice_state, voice_style),
         )
         if recording:
             right.append("   ")
@@ -1633,7 +1632,7 @@ class OrganismApp(App):
             self.call_from_thread(self.show_toast, "Camera not found")
             return
         try:
-            sight = llmclient.describe_image(frame)
+            sight = voice.describe_image(frame)
         except Exception as exc:  # noqa: BLE001 — vision model offline etc.
             self.call_from_thread(self._append_log, f"sight failed: {exc}", STYLE_WARN)
             return
@@ -1933,7 +1932,7 @@ class OrganismApp(App):
         if not args:
             self._append_log(
                 f"camera: /dev/video{self.camera.device} · vision model "
-                f"{llmclient.vision_model()} · /camera list · "
+                f"{voice.vision_model()} · /camera list · "
                 "/camera use <device>",
                 STYLE_DIM,
             )
@@ -2130,17 +2129,17 @@ class OrganismApp(App):
     @work(thread=True)
     def _probe_voice_worker(self):
         try:
-            llmclient.probe_voice()
+            voice.probe()
         except Exception as exc:  # noqa: BLE001
             logger.warning("voice probe failed: %s", exc)
-            llmclient._voice().online = False
+            voice.mark_offline()
         finally:
             self._probing_voice = False
         self.call_from_thread(self._announce_voice)
 
     def _announce_voice(self):
         """Tell the user once per voice-state flip how the organism speaks."""
-        state = llmclient.voice_status()
+        state = voice.status()
         if state != self._voice_announced:
             self._voice_announced = state
             if state == "offline":
@@ -2150,7 +2149,7 @@ class OrganismApp(App):
                 )
                 self.notify("inner voice offline — local fallback", severity="warning")
             elif state == "online":
-                backend = llmclient.llm_backend()
+                backend = voice.llm_backend()
                 label = "llama.cpp" if backend == "llama_cpp" else "ollama"
                 self._append_log(f"inner voice: online ({label})", STYLE_DIM)
                 self.notify(f"inner voice online ({label})")
@@ -2335,7 +2334,7 @@ class OrganismApp(App):
                 playing += " · \U0001FAB0 fly brain running"
             else:
                 playing += " · \U0001FAB0 fly brain ready"
-        counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {llmclient.voice_status()}{playing}"
+        counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {voice.status()}{playing}"
         keys = Text.assemble(
             ("ctrl+p", "reverse"),
             (" palette ", ""),
@@ -3079,12 +3078,12 @@ class OrganismApp(App):
         try:
             # Ensure the voice backend is probed before spending a generation;
             # the background mount probe may not have finished yet.
-            if llmclient.voice_online() is not True:
+            if voice.online() is not True:
                 try:
-                    llmclient.probe_voice()
+                    voice.probe()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("doom voice probe failed: %s", exc)
-                if llmclient.voice_online() is not True:
+                if voice.online() is not True:
                     self._set_doom_thought("inner voice offline — waiting for ollama before playing.")
                     self._schedule_doom_turn()
                     return

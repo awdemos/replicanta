@@ -5,7 +5,7 @@ narration.py's prompts and fallbacks. This module is the seam that keeps the
 dependency graph acyclic: arena imports narration (prompts), voice imports both,
 narration imports neither."""
 
-from replicanta import extensions, narration, telemetry
+from replicanta import extensions, llmclient, narration, telemetry
 from replicanta.arena import ThoughtArena
 from replicanta.narration import dedup_emerge, state_snapshot
 from replicanta.skills import Skill
@@ -268,3 +268,63 @@ def mud_decide(org, message, model=None, timeout=None, rng=None, on_token=None):
         timeout=timeout,
         rng=rng,
     )
+
+
+# -- transport seam -------------------------------------------------------------
+# Thin delegates to llmclient (the transport) so consumers — tui.py status
+# bars, probe workers, and camera lookups; mud.py's direct-llm fallback;
+# learning.py's LLM extraction — route through this seam instead of
+# importing the transport. llmclient keeps sole ownership of the cached
+# voice-health state; every mutation (probe, note_failure/success,
+# mark_offline) happens there, on any path.
+
+
+def status():
+    """Status-bar label for the inner voice: online / offline / ? (unknown)."""
+    return llmclient.voice_status()
+
+
+def online():
+    """Cached reachability: True/False, or None when never probed."""
+    return llmclient.voice_online()
+
+
+def probe(model=None):
+    """Probe LLM backend reachability; updates and returns the cached state."""
+    return llmclient.probe_voice(model=model)
+
+
+def mark_offline():
+    """Force the cached voice state offline (e.g. a probe worker crashed)."""
+    llmclient.mark_voice_offline()
+
+
+def llm_backend():
+    """Configured backend label: 'ollama' or 'llama_cpp'."""
+    return llmclient.llm_backend()
+
+
+def vision_model():
+    """Configured vision model name (env: REPLICANTA_VISION_MODEL, per call)."""
+    return llmclient.vision_model()
+
+
+def describe_image(image_bytes, model=None, timeout=None):
+    """Describe a camera frame with the vision model."""
+    return llmclient.describe_image(image_bytes, model=model, timeout=timeout)
+
+
+def generate_small(prompt, model=None, timeout=None, temperature=0.95):
+    """One compact generation for small decision tasks (MUD moves,
+    scenario drafts, fact extraction); defaults to the default chat model."""
+    return llmclient.generate(
+        prompt,
+        model or llmclient.DEFAULT_MODEL,
+        timeout=timeout,
+        temperature=temperature,
+    )
+
+
+def clean_candidate(text):
+    """Scrub echoed prompt scaffolding from a model reply."""
+    return llmclient.clean_candidate(text)

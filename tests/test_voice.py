@@ -194,3 +194,73 @@ def test_reflect_applies_proposal_only_when_auto_apply_enabled(org, monkeypatch)
     assert result["applied"] == result["entry"]
     assert extensions.pending() is None
     assert extensions.entries() == [result["entry"]]
+
+
+# -- transport seam -------------------------------------------------------------
+# voice.status/online/probe/mark_offline are the public path to the cached
+# voice-health state; consumers must never touch llmclient._voice() directly.
+
+
+def test_seam_status_and_online_mirror_cached_state():
+    from replicanta import voice
+
+    llmclient.reset_voice()
+    assert voice.status() == "?"
+    assert voice.online() is None
+    llmclient.mark_voice_offline()
+    assert voice.status() == "offline"
+    assert voice.online() is False
+    llmclient.reset_voice()
+
+
+def test_seam_mark_offline_matches_note_failure_streak():
+    from replicanta import voice
+
+    llmclient.reset_voice()
+    voice.mark_offline()
+    assert voice.online() is False
+    llmclient.reset_voice()
+
+
+def test_seam_probe_updates_cached_state(monkeypatch):
+    from replicanta import voice
+
+    _tags(monkeypatch, ["qwen2.5:3b"])
+    llmclient.reset_voice()
+    assert voice.probe("qwen2.5:3b") is True
+    assert voice.status() == "online"
+    llmclient.reset_voice()
+
+
+def test_seam_generate_small_defaults_to_default_model(monkeypatch):
+    from replicanta import voice
+
+    calls = []
+
+    def fake_generate(prompt, model, timeout=None, temperature=0.95):
+        calls.append((prompt, model, timeout, temperature))
+        return "go north"
+
+    monkeypatch.setattr("replicanta.llmclient.generate", fake_generate)
+    assert voice.generate_small("p", temperature=0.2) == "go north"
+    assert calls == [("p", llmclient.DEFAULT_MODEL, None, 0.2)]
+    voice.generate_small("p2", model="qwen2.5:3b", timeout=9, temperature=0.7)
+    assert calls[-1] == ("p2", "qwen2.5:3b", 9, 0.7)
+
+
+def test_seam_vision_and_backend_delegate(monkeypatch):
+    from replicanta import voice
+
+    monkeypatch.setenv("REPLICANTA_VISION_MODEL", "test-vision")
+    assert voice.vision_model() == "test-vision"
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "LLAMA_CPP")
+    assert voice.llm_backend() == "llama_cpp"
+
+
+def test_seam_describe_image_and_clean_candidate_delegate(monkeypatch):
+    from replicanta import voice
+
+    monkeypatch.setattr("replicanta.llmclient.describe_image", lambda b, **k: "a dark hall")
+    assert voice.describe_image(b"bytes") == "a dark hall"
+    monkeypatch.setattr("replicanta.llmclient.clean_candidate", lambda t: t.strip())
+    assert voice.clean_candidate("  go north  ") == "go north"

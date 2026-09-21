@@ -443,6 +443,56 @@ def test_choose_uses_injected_generate_even_when_org_given():
     assert cmd == "go east"
 
 
+def test_choose_action_without_org_routes_through_voice_seam(monkeypatch):
+    """The direct-llm fallback must go through voice.generate_small (the
+    transport seam), not import llmclient itself."""
+    game = MudGame()
+    calls = []
+
+    def fake_generate(prompt, model, timeout=None, temperature=0.95):
+        calls.append((prompt, model, timeout, temperature))
+        return "go north"
+
+    monkeypatch.setattr("replicanta.llmclient.generate", fake_generate)
+    cmd, _reason = mud.choose_action(game)
+    assert cmd == "go north"
+    assert len(calls) == 1
+    assert calls[0][1] == mud._mud_model()
+    assert calls[0][2] == mud._mud_timeout()
+
+
+def test_generate_scenario_without_generate_routes_through_voice_seam(monkeypatch):
+    """The default generator must route through the voice seam."""
+    import json as _json
+
+    payload = {
+        "title": "t",
+        "premise": "p",
+        "start_room": "r1",
+        "win_condition": {"item": "amulet"},
+        "rooms": {"r1": {"desc": "a room", "items": ["amulet"]}},
+    }
+    monkeypatch.setattr("replicanta.llmclient.generate", lambda *a, **k: _json.dumps(payload))
+    scenario = mud.generate_scenario("tower", _org())
+    assert scenario.title == "t"
+
+
+def test_actor_state_dict_tolerates_missing_fields():
+    """ActorStateDict is total=False: from_json reads every field via
+    .get() with defaults so legacy saves missing fields still load."""
+    assert mud.ActorStateDict.__optional_keys__ == {"room", "inventory", "kind"}
+    session = mud.MudSession.from_json(
+        {
+            "scenario_id": "default",
+            "actors": {"organism": {}},
+        }
+    )
+    actor = session.actors["organism"]
+    assert actor.room == ""
+    assert actor.inventory == []
+    assert actor.kind == "organism"
+
+
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
     cmd, reason = mud._choose_from_raw(rng=random.Random(0), generate=lambda p: "purple elephants", game=game)

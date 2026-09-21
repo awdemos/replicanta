@@ -308,7 +308,7 @@ def _llm_extract(text):
     Returns a list of {"subject": "user|self", "relation": ..., "object": ...}
     dicts. Network failures are swallowed."""
     try:
-        from replicanta import llmclient
+        from replicanta import voice
 
         prompt = (
             "Extract simple beliefs from the sentence. Output ONLY valid JSON in this "
@@ -316,7 +316,7 @@ def _llm_extract(text):
             '{"facts":[{"subject":"user","relation":"name","object":"sam"}]}\n'
             f"Sentence: {text}\nJSON:"
         )
-        raw = llmclient.generate(prompt, llmclient.DEFAULT_MODEL, temperature=0.2)
+        raw = voice.generate_small(prompt, temperature=0.2)
         # grab the first JSON object, in case the model adds chatter
         start = raw.find("{")
         end = raw.rfind("}")

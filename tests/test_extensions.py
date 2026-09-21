@@ -59,7 +59,8 @@ def test_voice_state_is_per_thread(monkeypatch):
 def test_reset_voice_clears_current_thread():
     from replicanta import llmclient
 
-    llmclient._voice().online = True
+    llmclient.note_voice_success()
+    assert llmclient.voice_online() is True
     llmclient.reset_voice()
     assert llmclient.voice_online() is None
 
