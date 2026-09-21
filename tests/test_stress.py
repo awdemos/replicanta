@@ -6,6 +6,7 @@ import pytest
 from replicanta.organism import (
     BeliefStore,
     DreamEngine,
+    Lifecycle,
     Mind,
     Organism,
     SelfQuestioner,
@@ -88,6 +89,52 @@ def test_calm_mood_no_pressure(store):
     store.stress = 0.3
     meter.tick(sleeping=False, dt=10.0)
     assert meter.value <= 0.3 + 10.0 * StressMeter.SLEEP_DEBT_RATE + 1e-9
+
+
+def test_bump_lingers_tens_of_minutes(store):
+    """Adversity stays emotionally readable: a 0.15 bump is still clearly
+    present after 10 minutes awake (regression: constant decay erased
+    bumps within a couple of minutes, so the gauge never visibly moved)."""
+    meter = _meter(store)
+    meter.bump(0.15)
+    for _ in range(600):
+        meter.tick(sleeping=False, dt=1.0)
+    assert meter.value > 0.15
+
+
+def test_wake_pressure_is_bounded(store):
+    """A long calm day is taxing but can never approach the fade zone on
+    wake pressure alone (regression: decay >= pressure pinned the gauge
+    at 0.05 forever; mood pressure then ratcheted it to 1.0)."""
+    meter = _meter(store)
+    for _ in range(120):  # 2h awake
+        meter.tick(sleeping=False, dt=60.0)
+    assert StressMeter.BASELINE < meter.value < 0.6
+
+
+def test_negative_mood_pressure_is_bounded(store):
+    """A sustained draining mood approaches but stays below the fade zone
+    without fresh adverse events."""
+    meter = _meter(store)
+    store.add(("self", "mood", "sad"), 0.9)
+    for _ in range(120):  # 2h awake in a draining mood
+        meter.tick(sleeping=False, dt=60.0)
+    assert meter.value < 0.8
+    assert meter.value < Lifecycle.FADE_STRESS
+
+
+def test_sleep_clears_bumps_faster_than_wake(store):
+    """Sleep bleeds an upset off in minutes; the same bump lingers (even
+    grows slightly under wake pressure) through a wake period."""
+    meter = _meter(store)
+    meter.bump(0.3)
+    for _ in range(300):
+        meter.tick(sleeping=True, dt=1.0)
+    assert meter.value < 0.25
+    store.stress = 0.35
+    for _ in range(300):
+        meter.tick(sleeping=False, dt=1.0)
+    assert meter.value > 0.30
 
 
 # -- persistence -----------------------------------------------------------

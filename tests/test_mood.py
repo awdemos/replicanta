@@ -35,7 +35,7 @@ def test_kindness_detects_warmth():
 
 
 def test_kindness_caps_at_limit():
-    assert kindness("good good good love love please thanks great nice") <= 0.02
+    assert kindness("good good good love love please thanks great nice") <= 0.06
 
 
 def test_harshness_still_scored():

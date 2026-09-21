@@ -26,7 +26,7 @@ _HARSH_TERMS = (
     "suck",
 )
 
-KINDNESS_CAP = 0.02
+KINDNESS_CAP = 0.06  # soothing is real but slower than wounding (0.15)
 _KIND_HITS = 0.01
 _KIND_TERMS = (
     "good",

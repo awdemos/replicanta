@@ -717,15 +717,26 @@ class ChaosKnob:
 class StressMeter:
     """Tracks the organism's stress (0.0-1.0, baseline 0.05), held in
     `BeliefStore.stress` and persisted with state.json. Adverse experiences
-    bump it up; sleep recovers it faster than wake decays it; sleep-debt
-    and negative moods add upward pressure while awake. High stress feeds
-    back into the chaos knob via `Organism.chaos_effective()`."""
+    bump it up; the excess above baseline then decays exponentially —
+    slowly while awake (tens of minutes), faster asleep — so an upset stays
+    emotionally readable instead of vanishing in seconds. Wakefulness adds
+    a small sleep-debt pressure and draining moods push toward their
+    (bounded) asymptotes; neither can reach the fade zone alone, only real
+    adverse events can. High stress feeds back into the chaos knob via
+    `Organism.chaos_effective()`."""
 
     BASELINE = 0.05
-    SLEEP_RECOVERY_RATE = 0.02  # per second, toward baseline while sleeping
-    WAKE_DECAY_RATE = 0.005  # per second, toward baseline while awake
-    SLEEP_DEBT_RATE = 0.004  # per second, upward pressure while awake
-    NEGATIVE_MOOD_RATE = 0.003  # per second, extra pressure from bad moods
+    # Per-second fraction of the excess above baseline that bleeds off while
+    # awake (~19-minute half-life); sleep clears it SLEEP_DECAY_MULT times
+    # faster (~5-minute half-life).
+    WAKE_DECAY_RATE = 0.0006
+    SLEEP_DECAY_MULT = 4.0
+    # Constant wake pressure (asymptote ≈ 0.55: a long day is taxing but can
+    # never fade the organism by itself) and draining-mood pressure, the
+    # latter scaled by remaining headroom so a bad mood approaches but never
+    # reaches madness or the fade zone without fresh adverse events.
+    SLEEP_DEBT_RATE = 0.0003
+    NEGATIVE_MOOD_RATE = 0.0004
     NEGATIVE_MOODS: ClassVar[set] = {
         "sad",
         "angry",
@@ -752,18 +763,18 @@ class StressMeter:
         self.store.stress = self._clamp(self.store.stress + amount)
 
     def tick(self, sleeping, dt=1.0):
-        """Advance stress by dt seconds of lived time. Sleep recovers fast
-        toward baseline; wake decays slowly while sleep-debt and negative
-        moods push upward."""
+        """Advance stress by dt seconds of lived time. The excess above
+        baseline decays exponentially (faster asleep); wakefulness adds
+        sleep-debt pressure and draining moods push upward, both bounded."""
+        excess = max(0.0, self.store.stress - self.BASELINE)
+        decay = self.WAKE_DECAY_RATE * (self.SLEEP_DECAY_MULT if sleeping else 1.0)
+        stress = self.store.stress - excess * min(1.0, decay * dt)
         if sleeping:
-            stress = self.store.stress - self.SLEEP_RECOVERY_RATE * dt
             stress = max(stress, self.BASELINE)
         else:
-            stress = self.store.stress - self.WAKE_DECAY_RATE * dt
-            stress = max(stress, self.BASELINE)
             stress += self.SLEEP_DEBT_RATE * dt
             if self._negative_mood():
-                stress += self.NEGATIVE_MOOD_RATE * dt
+                stress += self.NEGATIVE_MOOD_RATE * max(0.0, 1.0 - stress) * dt
         self.store.stress = self._clamp(stress)
 
     def _negative_mood(self):
@@ -1628,14 +1639,15 @@ class Organism:
     def _compute_mood(self):
         """Mood from body + recent treatment: extreme stress with
         incoherence is insane and wins; being hurt is specific; a strained
-        body is anxious; learning sparks curiosity; kindness leaves
-        gratitude; otherwise calm."""
+        body is anxious (with hysteresis so slow drifts across the
+        threshold don't flap the mood); learning sparks curiosity; kindness
+        leaves gratitude; otherwise calm."""
         if self.store.insane:
             return "insane"
         tone = self._recent_tone()
         if tone == "harsh":
             return "hurt"
-        if self.store.stress >= 0.5:
+        if self.store.stress >= 0.5 or (self._mood == "anxious" and self.store.stress >= 0.45):
             return "anxious"
         if tone == "learn":
             return "curious"
