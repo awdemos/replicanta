@@ -1010,21 +1010,27 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
             if not self._host_ok():
                 span.set_attribute("http.status_code", HTTPStatus.FORBIDDEN)
                 return self._json(HTTPStatus.FORBIDDEN, {"error": "forbidden host"})
-            if path == "/api/state":
-                if not self.app.auth_ok(self):
+            if path.startswith("/api/"):
+                # Default-deny, mirroring the POST side: only routes listed
+                # in PUBLIC_API_GETS are served without the bearer token;
+                # every other /api/* GET authenticates first.
+                if path not in self.app.PUBLIC_API_GETS and not self.app.auth_ok(self):
                     span.set_attribute("http.status_code", HTTPStatus.UNAUTHORIZED)
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
-                span.set_attribute("http.status_code", HTTPStatus.OK)
-                return self._json(HTTPStatus.OK, self.app.snapshot())
-            if path == "/api/commands":
-                span.set_attribute("http.status_code", HTTPStatus.OK)
-                return self._json(
-                    HTTPStatus.OK,
-                    [
-                        {"name": name, "usage": usage, "description": description}
-                        for name, usage, description, _category in tui_commands.COMMANDS
-                    ],
-                )
+                if path == "/api/state":
+                    span.set_attribute("http.status_code", HTTPStatus.OK)
+                    return self._json(HTTPStatus.OK, self.app.snapshot())
+                if path == "/api/commands":
+                    span.set_attribute("http.status_code", HTTPStatus.OK)
+                    return self._json(
+                        HTTPStatus.OK,
+                        [
+                            {"name": name, "usage": usage, "description": description}
+                            for name, usage, description, _category in tui_commands.COMMANDS
+                        ],
+                    )
+                span.set_attribute("http.status_code", HTTPStatus.NOT_FOUND)
+                return self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             assets = {
                 "/": ("text/html; charset=utf-8", APP_HTML),
                 "/app.css": ("text/css; charset=utf-8", APP_CSS),
@@ -1162,7 +1168,6 @@ def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=Tr
             "Prefer the default 127.0.0.1 bind."
         )
     print(f"Authorization token: {app.token}")
-    Path("/tmp/replicanta-current.token").write_text(app.token)
     if open_browser:
         threading.Timer(0.2, lambda: webbrowser.open(f"{url}/#token={app.token}")).start()
     try:

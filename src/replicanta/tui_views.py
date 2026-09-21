@@ -551,7 +551,7 @@ def inner_renderable(org):
 
     proposal = _pending_proposal(org)
     if proposal:
-        auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
+        auto = getattr(getattr(org, "store", None), "auto_apply_patches", False)
         action = "auto-applied" if auto else "/approve to apply · /reject to discard"
         panels.append(
             Panel(
@@ -612,7 +612,7 @@ def inner_view(org):
     if proposal:
         lines += ["", "pending proposal", ""]
         lines.append(proposal)
-        auto = getattr(getattr(org, "store", None), "auto_apply_patches", True)
+        auto = getattr(getattr(org, "store", None), "auto_apply_patches", False)
         lines.append("auto-applied" if auto else "(/approve to apply · /reject to discard)")
     return "\n".join(lines)
 

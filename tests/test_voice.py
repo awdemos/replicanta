@@ -22,6 +22,7 @@ class _FakeOrg:
     """Minimal organism stand-in: pure-Python store + lifecycle + window."""
 
     def __init__(self, tmp_path):
+        self.dir_path = tmp_path
         self.store = BeliefStore(tmp_path)
         self.store.chaos = 0.5
         self.store.add(("cat", "has_fur", "true"), 0.9)
@@ -149,3 +150,47 @@ def test_respond_records_reply_so_next_prompt_includes_context(org, monkeypatch)
     assert "first reply" in second_prompt
     assert "hello" in second_prompt
     assert "again" in second_prompt
+
+
+# -- reflection auto-apply gate ------------------------------------------------
+
+
+_PATCH_PROPOSAL = (
+    "patch-extension\n"
+    "kind: seed\n"
+    "why: regression coverage for the self-modification gate\n"
+    "entry: greet the user warmly\n"
+)
+
+
+def _reflect_patch_proposal(monkeypatch, org):
+    """Drive voice.reflect to its proposal branch with a canned patch text,
+    leaving the real extensions.propose gate under test."""
+    from replicanta import voice
+
+    monkeypatch.setattr(ThoughtArena, "emerge", lambda *a, **k: _PATCH_PROPOSAL)
+    return voice.reflect(org)
+
+
+def test_reflect_stages_proposal_when_store_lacks_auto_apply_flag(org, monkeypatch):
+    """The self-modification gate fails closed: a store without the
+    auto_apply_patches attribute must stage the proposal, never apply it."""
+    from replicanta import extensions
+
+    del org.store.auto_apply_patches
+    result = _reflect_patch_proposal(monkeypatch, org)
+    assert result["action"] == "proposal"
+    assert "applied" not in result
+    assert extensions.pending() == result["entry"]
+    assert extensions.entries() == []
+
+
+def test_reflect_applies_proposal_only_when_auto_apply_enabled(org, monkeypatch):
+    from replicanta import extensions
+
+    org.store.auto_apply_patches = True
+    result = _reflect_patch_proposal(monkeypatch, org)
+    assert result["action"] == "proposal"
+    assert result["applied"] == result["entry"]
+    assert extensions.pending() is None
+    assert extensions.entries() == [result["entry"]]

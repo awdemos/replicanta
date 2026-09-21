@@ -119,7 +119,7 @@ def reflect(org, model=None, timeout=None, rng=None):
         entry = extensions.propose(
             org.dir_path / "artifacts" / "extensions.json",
             result["entry"],
-            auto_apply=getattr(org.store, "auto_apply_patches", True),
+            auto_apply=getattr(org.store, "auto_apply_patches", False),
         )
         if entry is not None:
             result["applied"] = entry

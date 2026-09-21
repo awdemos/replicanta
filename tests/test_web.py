@@ -155,6 +155,25 @@ def test_state_requires_token(live):
     assert status == 200
 
 
+def test_non_public_api_get_requires_token(live):
+    # do_GET must consult PUBLIC_API_GETS: any other /api/* GET is
+    # default-deny, mirroring the POST side — unknown routes leak nothing
+    # about the API surface to unauthenticated clients.
+    assert Glasshouse.PUBLIC_API_GETS == ("/api/commands",)
+    status, _headers, result = request(live, "/api/nope", token=None)
+    assert status == 401
+    assert result["error"] == "unauthorized"
+    status, _headers, result = request(live, "/api/nope", token="wrong-token")
+    assert status == 401
+    # Authenticated but still unknown: the normal not-found path.
+    status, _headers, result = request(live, "/api/nope")
+    assert status == 404
+    assert result["error"] == "not found"
+    # The route named by the policy stays public.
+    status, _headers, _result = request(live, "/api/commands", token=None)
+    assert status == 200
+
+
 def test_host_header_mismatch_is_rejected(live):
     # DNS-rebinding guard: a page on attacker.example rebinds to 127.0.0.1
     # but keeps its own Host header.
