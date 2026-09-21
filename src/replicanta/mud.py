@@ -825,12 +825,18 @@ def fallback_action(game, rng, actor_name=None):
     return "go " + rng.choice(sorted(room.exits))
 
 
-def choose_action(game, hint=None, rng=None, generate=None, org=None, actor_name=None, temperature=0.7):
+def choose_action(game, hint=None, rng=None, org=None, actor_name=None, temperature=0.7):
     """The organism's next move: ask the voice, parse it, fall back to
     the wanderer when the voice is silent or speaks nonsense. Returns
     ActionChoice(command, reason) — the reason is the organism's stated
     because-line, or the honest fallback excuse when the wanderer chose.
-    ``temperature`` is forwarded to the direct LLM fallback path; the
+
+    Production entry point with two modes: the organism voice (``org``
+    given), then the direct-llm fallback. Tests and standalone callers
+    that inject a raw generator bypass this and call
+    ``_choose_from_raw(generate, ...)`` directly.
+
+    ``temperature`` is forwarded to the direct-llm fallback path; the
     organism voice path keeps its own debate jitter.
 
     ``actor_name`` selects which actor's perspective is used for the
@@ -838,23 +844,35 @@ def choose_action(game, hint=None, rng=None, generate=None, org=None, actor_name
     """
     rng = rng if rng is not None else random.Random()  # nosec B311 - scenario RNG, not cryptography
     actor_name = actor_name or game.current_actor_name()
-    command = reason = None
-    try:
-        if generate is not None:
-            # injection path used by unit tests and standalone callers.
-            raw = generate(action_prompt(game, org=org, actor_name=actor_name, hint=hint))
-        elif org is not None:
-            # Let the entity itself choose: full organism snapshot
-            # (beliefs, mood, goals, memory) plus the game situation.
-            raw = voice.mud_decide(org, situation_text(game, actor_name=actor_name, hint=hint))
-        else:
-            # Fallback small-model path when no organism is available.
-            raw = llmclient.generate(
-                action_prompt(game, actor_name=actor_name, hint=hint),
+    if org is not None:
+        # Let the entity itself choose: full organism snapshot
+        # (beliefs, mood, goals, memory) plus the game situation.
+        def generate(_prompt):
+            return voice.mud_decide(org, situation_text(game, actor_name=actor_name, hint=hint))
+    else:
+        # Fallback small-model path when no organism is available.
+        def generate(prompt):
+            return llmclient.generate(
+                prompt,
                 model=_mud_model(),
                 timeout=_mud_timeout(),
                 temperature=temperature,
             )
+
+    return _choose_from_raw(generate, game, hint=hint, rng=rng, org=org, actor_name=actor_name)
+
+
+def _choose_from_raw(generate, game, hint=None, rng=None, org=None, actor_name=None):
+    """Ask ``generate(prompt)`` for the next move and parse the reply,
+    falling back to the wanderer when the voice is silent or speaks
+    nonsense. ``org`` only flavours the prompt text here — it does NOT
+    route through the organism voice; use ``choose_action`` for that.
+    """
+    rng = rng if rng is not None else random.Random()  # nosec B311 - scenario RNG, not cryptography
+    actor_name = actor_name or game.current_actor_name()
+    command = reason = None
+    try:
+        raw = generate(action_prompt(game, org=org, actor_name=actor_name, hint=hint))
         # the voice is chatty; scrub echoed prompt scaffolding before
         # reading the move and its reason
         command, reason = parse_action_with_reason(llmclient.clean_candidate(raw or ""))
@@ -918,6 +936,8 @@ def validate_scenario(data: dict[str, Any]) -> Scenario:
 
     rooms = {}
     for room_id, room_data in rooms_data.items():
+        if not isinstance(room_data, dict) or not isinstance(room_data.get("desc"), str):
+            raise ValueError(f"room {room_id!r} needs a desc")  # noqa: TRY004 — contract is ValueError
         desc = room_data["desc"]
         exits = dict(room_data.get("exits", {}))
         items = list(room_data.get("items", []))

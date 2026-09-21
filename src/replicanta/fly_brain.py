@@ -19,7 +19,6 @@ from replicanta import lua_sandbox
 log = logging.getLogger(__name__)
 
 TASKS = ("digits", "timeseries")
-LEVELS = ("l1", "l2", "l3", "l4", "l5")
 DEFAULT_TIMEOUT = 1800.0
 QUICK_TIMEOUT = 120.0
 
@@ -29,14 +28,20 @@ class FlyBrainService:
 
     Exposed to Lua as ``services.get('flybrain')`` with methods:
       path(), available(), status(), info(sample), bank(),
-      optimize(task, budget, level, seed, sample, wait, on_done),
-      adapt(seed, sample, wait, on_done), running(), last().
+      run_task(task, sample, wait, on_done),
+      optimize(task, sample, wait, on_done),
+      adapt(on_done, seed, sample, wait), running(), last().
 
-    ``optimize``/``adapt`` run the full L1-L5 improvement loop, which takes
-    minutes on the real connectome, so they default to async: spawn a
-    daemon thread, run the CLI, then deliver a one-line summary through
-    ``on_done`` (a Lua function) invoked under ``lua_lock``. With
-    ``wait=True`` they block and return the parsed report as a DictProxy.
+    ``run_task`` runs the plain ``run`` harness and is the fallback for
+    minimal ``wetware-rs`` binaries that have no recursive-self-improvement
+    loop; ``optimize`` is a thin compatibility alias for prompts written
+    against the older loop; ``adapt`` runs the L4 drift-rehearsal demo.
+    All three share one contract: with ``wait=True`` they block and
+    return the parsed report as a DictProxy; by default they run async,
+    which requires an ``on_done`` callback (a Lua function invoked under
+    ``lua_lock`` when the subprocess finishes) and returns a status table
+    ``{ok=true, async=true, kind=...}``. A missing ``on_done`` raises
+    ValueError and an in-flight run raises RuntimeError.
     """
 
     def __init__(self, root=None, lua_lock=None, binary=None, timeout=DEFAULT_TIMEOUT):
@@ -58,13 +63,15 @@ class FlyBrainService:
             bases.append(Path(self._root).parent)
         bases.append(Path.home() / "code")
         seen = set()
+        # Prefer the richer rsi-wetware-rs binary over the minimal wetware-rs one.
         for base in bases:
             for profile in ("release", "debug"):
-                cand = base / "rsi-wetware-rs" / "target" / profile / "wetware"
-                if cand in seen:
-                    continue
-                seen.add(cand)
-                yield cand
+                for repo in ("rsi-wetware-rs", "wetware-rs"):
+                    cand = base / repo / "target" / profile / "wetware"
+                    if cand in seen:
+                        continue
+                    seen.add(cand)
+                    yield cand
 
     def path(self):
         """Resolved wetware binary path, or None when unavailable."""
@@ -109,42 +116,64 @@ class FlyBrainService:
         args.append("info")
         return lua_sandbox.DictProxy(self._parse_json(self._run_cli(args, QUICK_TIMEOUT)))
 
-    def bank(self):
-        return self._run_cli(["bank"], QUICK_TIMEOUT).strip()
+    def run_task(self, task="digits", sample=False, wait=False, on_done=None):
+        """Run the wetware CLI's plain ``run <task>`` harness (no RSI loop).
 
-    def optimize(self, task="digits", budget=None, level=None, on_done=None, seed=None, sample=False, wait=False):
+        Default (async) mode requires ``on_done``: it spawns a daemon
+        thread, runs the CLI, and delivers the one-line summary through
+        ``on_done`` invoked under ``lua_lock``; it returns a status table
+        ``{ok=true, async=true, kind="run"}`` and raises ValueError when
+        ``on_done`` is missing or RuntimeError when a run is already in
+        flight. With ``wait=True`` it blocks instead and returns the
+        parsed report as a DictProxy.
+        """
         task = str(task).lower()
         if task not in TASKS:
             raise ValueError(f"unknown task {task!r}; try {TASKS}")
-        level = str(level or "l5").lower()
-        if level not in LEVELS:
-            raise ValueError(f"unknown level {level!r}; try {LEVELS}")
         args = ["--sample"] if sample else []
-        args += ["optimize", task, "--level", level, "--quiet"]
-        if budget is not None:
-            args += ["--budget", str(int(budget))]
-        if seed is not None:
-            args += ["--seed", str(int(seed))]
+        args += ["run", task]
         if wait:
             report = self._parse_json(self._run_cli(args, self._timeout))
-            self._record(True, self._summarize("optimize", report), report)
+            self._record(True, self._summarize("run", report), report)
             return lua_sandbox.DictProxy(report)
-        self._spawn("optimize", args, on_done)
-        return True
+        self._spawn("run", args, on_done)
+        return self._started("run")
+
+    # optimize/adapt are the compatibility surface for prompts written against
+    # the older RSI loop: the current wetware CLI has no autonomy levels and no
+    # separate optimize subcommand, so optimize() forwards to run_task() and
+    # adapt() keeps its own CLI subcommand.
+    def optimize(self, task="digits", sample=False, wait=False, on_done=None):
+        """Compatibility alias for run_task (same return contract)."""
+        return self.run_task(task, sample=sample, wait=wait, on_done=on_done)
 
     def adapt(self, on_done=None, seed=None, sample=False, wait=False):
+        """Run the L4 online-adaptation demo under distribution drift.
+
+        Same contract as run_task: async mode requires ``on_done`` and
+        returns a status table; ``wait=True`` blocks and returns the
+        parsed report as a DictProxy.
+        """
         args = ["--sample"] if sample else []
-        args += ["adapt", "--quiet"]
+        args.append("adapt")
         if seed is not None:
-            args += ["--seed", str(int(seed))]
+            args.extend(["--seed", str(seed)])
         if wait:
             report = self._parse_json(self._run_cli(args, self._timeout))
             self._record(True, self._summarize("adapt", report), report)
             return lua_sandbox.DictProxy(report)
         self._spawn("adapt", args, on_done)
-        return True
+        return self._started("adapt")
+
+    def bank(self):
+        """Print the experience bank and derived policy."""
+        return lua_sandbox.DictProxy(self._parse_json(self._run_cli(["bank"], QUICK_TIMEOUT)))
 
     # -- async delivery -----------------------------------------------------------
+    @staticmethod
+    def _started(kind):
+        return lua_sandbox.DictProxy({"ok": True, "async": True, "kind": kind})
+
     def _spawn(self, kind, args, on_done):
         if on_done is None:
             raise ValueError("async runs require an on_done callback")
@@ -201,19 +230,13 @@ class FlyBrainService:
             last = self._last
         if last is not None:
             lines.append(f"last run: {last[1]}")
-        try:
-            head = self.bank().splitlines()[0]
-        except Exception as exc:  # noqa: BLE001
-            head = f"bank unavailable: {exc}"
-        lines.append(head)
         return "\n".join(lines)
 
     @staticmethod
     def _summarize(kind, report):
-        if kind == "optimize":
+        if kind == "run":
             task = report.get("task", "?")
-            level = report.get("level", "?")
-            parts = [f"fly brain: {task} {level} done"]
+            parts = [f"fly brain: {task} done"]
             test = report.get("test")
             default = report.get("default_test")
             improvement = report.get("improvement")

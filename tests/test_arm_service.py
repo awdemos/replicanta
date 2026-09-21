@@ -21,7 +21,9 @@ def _stub_request(service, payloads):
 def test_health_reports_ok_from_bridge():
     arm = ArmService()
     calls = _stub_request(arm, {"/healthz": {"ok": True}})
-    assert arm.health() == {"ok": True, "connected": True}
+    result = arm.health()
+    assert result.ok is True
+    assert result.connected is True
     assert calls == [("GET", "/healthz", None)]
 
 

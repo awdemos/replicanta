@@ -335,13 +335,13 @@ def test_fallback_wanders_elsewhere():
 
 def test_choose_uses_generated_command():
     game = MudGame()
-    cmd, _reason = mud.choose_action(game, generate=lambda p: "go north")
+    cmd, _reason = mud._choose_from_raw(generate=lambda p: "go north", game=game)
     assert cmd == "go north"
 
 
 def test_choose_falls_back_on_nonsense():
     game = MudGame()
-    cmd, _reason = mud.choose_action(game, rng=random.Random(0), generate=lambda p: "purple elephants")
+    cmd, _reason = mud._choose_from_raw(rng=random.Random(0), generate=lambda p: "purple elephants", game=game)
     assert cmd == "go north"  # wanderer in the clearing
 
 
@@ -351,7 +351,7 @@ def test_choose_falls_back_on_exception():
     def boom(prompt):
         raise RuntimeError("voice offline")
 
-    assert mud.choose_action(game, generate=boom)[0] == "go north"
+    assert mud._choose_from_raw(generate=boom, game=game)[0] == "go north"
 
 
 def test_choose_passes_hint_into_prompt():
@@ -362,7 +362,7 @@ def test_choose_passes_hint_into_prompt():
         seen["prompt"] = prompt
         return "go north"
 
-    mud.choose_action(game, hint="go east!", generate=spy)
+    mud._choose_from_raw(hint="go east!", generate=spy, game=game)
     assert "go east!" in seen["prompt"]
 
 
@@ -383,14 +383,14 @@ def test_parse_action_with_reason_none_when_only_command():
 
 def test_choose_captures_stated_reason():
     game = MudGame()
-    cmd, reason = mud.choose_action(game, generate=lambda p: "because the dark hall pulls at me\ngo north")
+    cmd, reason = mud._choose_from_raw(generate=lambda p: "because the dark hall pulls at me\ngo north", game=game)
     assert cmd == "go north"
     assert reason == "because the dark hall pulls at me"
 
 
 def test_choose_reason_none_when_voice_gives_only_command():
     game = MudGame()
-    _cmd, reason = mud.choose_action(game, generate=lambda p: "go north")
+    _cmd, reason = mud._choose_from_raw(generate=lambda p: "go north", game=game)
     assert reason is None
 
 
@@ -421,8 +421,9 @@ def test_choose_uses_org_voice_when_org_is_given():
 
 
 def test_choose_uses_injected_generate_even_when_org_given():
-    """The explicit generate= parameter still takes precedence so tests
-    and standalone callers can bypass the organism voice."""
+    """An explicit generate= still takes precedence over the organism
+    voice so tests and standalone callers can bypass it via
+    _choose_from_raw."""
     game = MudGame()
 
     class FakeArena:
@@ -436,7 +437,7 @@ def test_choose_uses_injected_generate_even_when_org_given():
     old_arena = patch.ThoughtArena
     try:
         patch.ThoughtArena = FakeArena
-        cmd, _reason = mud.choose_action(game, org=_org(), generate=lambda p: "go east")
+        cmd, _reason = mud._choose_from_raw(org=_org(), generate=lambda p: "go east", game=game)
     finally:
         patch.ThoughtArena = old_arena
     assert cmd == "go east"
@@ -444,7 +445,7 @@ def test_choose_uses_injected_generate_even_when_org_given():
 
 def test_choose_fallback_reason_is_honest():
     game = MudGame()
-    cmd, reason = mud.choose_action(game, rng=random.Random(0), generate=lambda p: "purple elephants")
+    cmd, reason = mud._choose_from_raw(rng=random.Random(0), generate=lambda p: "purple elephants", game=game)
     assert cmd == "go north"
     assert "silent" in reason
 
@@ -452,7 +453,7 @@ def test_choose_fallback_reason_is_honest():
 def test_choose_reason_scrubs_prompt_echoes():
     game = MudGame()
     raw = "Draft a candidate answer, following the task instruction above exactly.\nbecause the key glints\ngo down"
-    cmd, reason = mud.choose_action(game, generate=lambda p: raw)
+    cmd, reason = mud._choose_from_raw(generate=lambda p: raw, game=game)
     assert cmd == "go down"
     assert reason == "because the key glints"
 
@@ -511,6 +512,20 @@ def test_validate_scenario_falls_back_on_bad_exits():
         {"title": "x", "premise": "y", "start_room": "z"},
         {"title": "x", "premise": "y", "start_room": "z", "win_condition": {}},
         {"title": "x", "premise": "y", "start_room": "z", "win_condition": {"item": "a"}},
+        {
+            "title": "x",
+            "premise": "y",
+            "start_room": "z",
+            "win_condition": {"item": "a"},
+            "rooms": {"foyer": {"exits": {}}},
+        },
+        {
+            "title": "x",
+            "premise": "y",
+            "start_room": "z",
+            "win_condition": {"item": "a"},
+            "rooms": {"foyer": "not a mapping"},
+        },
     ],
 )
 def test_validate_scenario_raises_valueerror_on_bad_input(payload):

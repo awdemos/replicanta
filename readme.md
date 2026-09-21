@@ -256,7 +256,7 @@ container-use checkout <env-id>
 | `/swap default` | Switch organism |
 | `/organisms` | List organisms |
 | `/group start fern willow` | Group chat |
-| `/brain [status|optimize <task> [budget] [level]|adapt|bank]` | Evolve or inspect the fly-brain reservoir |
+| `/brain [status|run <task>|optimize <task>|adapt|bank]` | Run or inspect the fly-brain reservoir |
 | `/git on\|off` | Sense git worktree state |
 || `/visualize [kind]` | Render a live-updating RDD chart of organism state |
 || `/help` (F1, ctrl+p) | Full command list |

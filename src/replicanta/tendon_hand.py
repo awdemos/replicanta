@@ -89,6 +89,11 @@ class ArmService:
       pose(spec), emotion(spec), summary(), moves(), postures(),
       volition(enabled), set_decide(fn), dispatch(args).
 
+    Error contract per method: goal/posture/actuator/pose/emotion validate
+    their arguments and raise (Lua sees the error via pcall); get_state,
+    state, and health never raise on bridge failures — they return a
+    DictProxy carrying ``connected=false`` and an ``error`` field instead.
+
     The SSE listener and volition threads start lazily on first use.
     When volition is enabled (default), a background thread reads the
     organism's mood/stress/arousal every few seconds and sends goals to the
@@ -145,9 +150,9 @@ class ArmService:
             if not isinstance(raw, dict):
                 raise TypeError(f"/healthz returned {type(raw).__name__}")
             raw.setdefault("connected", True)
-            return raw
+            return _DictProxy(raw)
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "connected": False, "error": str(exc)}
+            return _DictProxy({"ok": False, "connected": False, "error": str(exc)})
 
     def state(self):
         """Latest hand state: the SSE-cached snapshot when available, else

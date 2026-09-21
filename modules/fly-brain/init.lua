@@ -4,12 +4,12 @@
 --
 -- Public API (registered as the "brain" service for other modules, and
 -- documented to the organism in its prompt):
---   brain.optimize("digits")            -> run the L1-L5 improvement loop (async)
---   brain.optimize("digits", 8, "l3")   -> smaller budget, lower autonomy level
---   brain.adapt()                       -> L4 drift-rehearsal demo (async)
---   brain.bank()                        -> inherited experience bank, as text
---   brain.status()                      -> bridge/binary/running summary
---   brain.running()                     -> true while a run is in flight
+--   brain.run("digits")        -> run the connectome harness (async)
+--   brain.optimize("digits")   -> alias for brain.run (older prompts)
+--   brain.adapt()              -> L4 drift-rehearsal demo (async)
+--   brain.bank()               -> inherited experience bank, as a table
+--   brain.status()             -> bridge/binary/running summary
+--   brain.running()            -> true while a run is in flight
 --
 -- How the organism calls it: the LLM cannot execute Lua, so it writes the
 -- call as text on its own line — brain.optimize("digits") — and the
@@ -90,22 +90,26 @@ function init(ctx)
     return txt
   end
 
-  function brain.optimize(task, budget, level)
+  function brain.run(task)
     if brain.running() then
       ctx.log("fly brain: already improving something; wait for the current run")
       return false
     end
     task = tostring(task or "digits")
-    local started, err = pcall(function()
-      fly:optimize(task, tonumber(budget), level and tostring(level) or nil, deliver)
-    end)
+    local started, err = pcall(function() fly:run_task(task, false, false, deliver) end)
     if not started then
       ctx.log("fly brain: could not start: " .. tostring(err))
       if events ~= nil then events:emit("flybrain_error", tostring(err)) end
       return false
     end
-    ctx.log("fly brain: evolving the " .. task .. " harness (minutes); the result arrives as a system line")
+    ctx.log("fly brain: running " .. task .. " harness (async)")
     return true
+  end
+
+  -- Alias kept for prompts written against the older RSI-loop wording; the
+  -- wetware CLI no longer has autonomy levels or a separate optimize loop.
+  function brain.optimize(task)
+    return brain.run(task)
   end
 
   function brain.adapt()
@@ -113,13 +117,13 @@ function init(ctx)
       ctx.log("fly brain: already improving something; wait for the current run")
       return false
     end
-    local started, err = pcall(function() fly:adapt(deliver) end)
+    local started, err = pcall(function() fly:adapt(deliver, nil, false, false) end)
     if not started then
-      ctx.log("fly brain: could not start: " .. tostring(err))
+      ctx.log("fly brain: could not start adapt: " .. tostring(err))
       if events ~= nil then events:emit("flybrain_error", tostring(err)) end
       return false
     end
-    ctx.log("fly brain: drift rehearsal started (minutes); the result arrives as a system line")
+    ctx.log("fly brain: drift rehearsal started (async)")
     return true
   end
 
@@ -131,19 +135,29 @@ function init(ctx)
   -- something was dispatched. One call per reply, like the hand.
   local function parse_call(line)
     local low = string.lower(line)
-    -- brain.optimize("digits", 8, "l3") — args captured, then picked apart
+    -- brain.optimize("digits") — alias for brain.run("digits")
     local args = string.match(low, "^%s*brain%.optimize%s*%((.-)%)")
     if args ~= nil then
       local task = string.match(args, "[\"'](.-)[\"']")
-      local budget = string.match(args, "(%d+)")
-      local lvl = string.match(args, "[\"']l(%d)[\"']")
-      brain.optimize(task or "digits", budget, lvl and ("l" .. lvl) or nil)
+      brain.run(task or "digits")
       return true
     end
     -- Lua-call sugar without parens: brain.optimize "digits"
     local task2 = string.match(low, "^%s*brain%.optimize%s*[\"'](.-)[\"']")
     if task2 ~= nil then
-      brain.optimize(task2)
+      brain.run(task2)
+      return true
+    end
+    -- brain.run("digits")
+    local run_args = string.match(low, "^%s*brain%.run%s*%((.-)%)")
+    if run_args ~= nil then
+      local task = string.match(run_args, "[\"'](.-)[\"']")
+      brain.run(task or "digits")
+      return true
+    end
+    local run_task2 = string.match(low, "^%s*brain%.run%s*[\"'](.-)[\"']")
+    if run_task2 ~= nil then
+      brain.run(run_task2)
       return true
     end
     if string.match(low, "^%s*brain%.adapt%s*%(%s*%)") or string.match(low, "^%s*brain%.adapt%s*$") then
@@ -169,7 +183,7 @@ function init(ctx)
     end)
   end
 
-  -- /brain | bank | optimize <task> [budget] [level] | adapt
+  -- /brain | bank | run <task> | optimize <task> | adapt
   if commands ~= nil then
     commands:register("/brain", function(args)
       local verb = normalize(args[1] or "status")
@@ -177,12 +191,16 @@ function init(ctx)
         return brain.status()
       elseif verb == "bank" then
         return brain.bank()
+      elseif verb == "run" then
+        local task = args[2] or "digits"
+        if brain.run(task) then
+          return "fly brain: running " .. tostring(task) .. " harness (async)"
+        end
+        return "fly brain: run not started"
       elseif verb == "optimize" then
         local task = args[2] or "digits"
-        local budget = tonumber(args[3])
-        local level = args[4]
-        if brain.optimize(task, budget, level) then
-          return "fly brain: evolving the " .. tostring(task) .. " harness (async)"
+        if brain.optimize(task) then
+          return "fly brain: running " .. tostring(task) .. " harness (async)"
         end
         return "fly brain: run not started"
       elseif verb == "adapt" then
@@ -191,10 +209,10 @@ function init(ctx)
         end
         return "fly brain: run not started"
       else
-        return "usage: /brain [status|bank|optimize <task> [budget] [level]|adapt]"
+        return "usage: /brain [status|bank|run <task>|optimize <task>|adapt]"
       end
     end)
   end
 
-  ctx.log("fly-brain module loaded; brain.optimize API armed")
+  ctx.log("fly-brain module loaded; brain.run API armed")
 end

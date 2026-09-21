@@ -25,22 +25,28 @@ if has("info"):
         "density": 0.0111, "mean_synapses_per_connection": 2.5,
     }))
 elif has("bank"):
-    print("bank: /tmp/fake-bank.jsonl (2 entries)")
-    print("  #1   digits     l5  val=0.9500 test=0.9400 policy_v=1")
-    print("  #2   digits     l5  val=0.9400 test=0.9300 policy_v=2")
-    print("policy v2 (from 2 top entries): center sr=0.900 leak=0.400 ridge=0.0100")
-elif has("optimize"):
     print(json.dumps({
-        "task": "digits", "level": "l5", "trials": 16, "best_config": "sr=0.9",
+        "policy": "greedy", "entries": 0,
+    }))
+elif has("run"):
+    print(json.dumps({
+        "task": "digits", "trials": 16, "best_config": "sr=0.9",
         "median_val": 0.95, "seed_spread": 0.01, "default_median_val": 0.92,
         "test": 0.975, "default_test": 0.9278, "improvement": 0.0472,
-        "curriculum_gain": 0.01, "bank": "/tmp/fake-bank.jsonl",
+        "bank": "/tmp/fake-bank.jsonl",
+        "bank_entries": 2, "events": 100,
+    }))
+elif has("optimize"):
+    print(json.dumps({
+        "task": "digits", "trials": 16, "best_config": "sr=0.9",
+        "median_val": 0.95, "seed_spread": 0.01, "default_median_val": 0.92,
+        "test": 0.975, "default_test": 0.9278, "improvement": 0.0472,
+        "bank": "/tmp/fake-bank.jsonl",
         "bank_entries": 2, "events": 100,
     }))
 elif has("adapt"):
     print(json.dumps({
-        "task": "digits", "mode": "l4_deployment_rehearsal",
-        "l4_naive_val": 0.81, "l4_gated_val": 0.85, "gate_advantage": 0.04,
+        "l4_gated_val": 0.88, "l4_naive_val": 0.82, "gate_advantage": 0.06,
         "adaptations": 3, "rollbacks": 1,
     }))
 else:
@@ -98,47 +104,46 @@ def test_info_returns_dict_proxy(fake):
     assert info.source == "synthetic sample"
 
 
-def test_optimize_sync_parses_report_and_summarizes(fake):
-    report = fake.optimize(wait=True)
+def test_run_task_sync_parses_report_and_summarizes(fake):
+    report = fake.run_task(wait=True)
     assert report.task == "digits"
     assert report.improvement == pytest.approx(0.0472)
     last = fake.last()
     assert last.ok is True
-    assert "digits l5 done" in last.text
-    assert "improvement +0.0472" in last.text
-    assert "bank 2 entries" in last.text
+    assert "digits done" in last.text
+    assert "test 0.9750" in last.text
 
 
-def test_optimize_validates_task_and_level(fake):
+def test_run_task_validates_task(fake):
     with pytest.raises(ValueError, match="unknown task"):
-        fake.optimize("chess", wait=True)
-    with pytest.raises(ValueError, match="unknown level"):
-        fake.optimize("digits", level="l9", wait=True)
+        fake.run_task("chess", wait=True)
 
 
-def test_adapt_sync_summarizes_gate(fake):
+def test_optimize_alias_delegates_to_run_task(fake):
+    report = fake.optimize(wait=True)
+    assert report.task == "digits"
+    assert report.improvement == pytest.approx(0.0472)
+
+
+def test_adapt_and_bank_work_with_rsi_wetware_cli(fake):
+    # The rsi-wetware-rs binary supports adapt and bank.
     report = fake.adapt(wait=True)
-    assert report.gate_advantage == pytest.approx(0.04)
-    assert "gated 0.8500 vs naive 0.8100" in fake.last().text
-    assert "3 adaptations" in fake.last().text
-    assert "1 rollbacks" in fake.last().text
-
-
-def test_bank_returns_text(fake):
-    assert "2 entries" in fake.bank()
+    assert report.l4_gated_val == pytest.approx(0.88)
+    bank = fake.bank()
+    assert bank.policy == "greedy"
 
 
 def test_failure_raises_with_stderr_tail(failing):
     with pytest.raises(RuntimeError, match="connectome cache corrupted"):
-        failing.optimize(wait=True)
+        failing.run_task(wait=True)
 
 
 def test_failure_summary_delivered_async(failing):
     delivered = []
     done = threading.Event()
-    failing.optimize(on_done=lambda text: (delivered.append(text), done.set()))
+    failing.run_task(on_done=lambda text: (delivered.append(text), done.set()))
     assert done.wait(5.0)
-    assert delivered[0].startswith("fly brain: optimize failed:")
+    assert delivered[0].startswith("fly brain: run failed:")
     assert "connectome cache corrupted" in delivered[0]
     assert failing.last().ok is False
 
@@ -146,19 +151,22 @@ def test_failure_summary_delivered_async(failing):
 # -- async API -------------------------------------------------------------------
 
 
-def test_optimize_async_delivers_summary(fake):
+def test_run_task_async_delivers_summary(fake):
     delivered = []
     done = threading.Event()
-    assert fake.optimize(on_done=lambda text: (delivered.append(text), done.set())) is True
+    status = fake.run_task(on_done=lambda text: (delivered.append(text), done.set()))
+    assert status["ok"] is True
+    assert status["async"] is True
+    assert status.kind == "run"
     assert done.wait(5.0)
-    assert "digits l5 done" in delivered[0]
+    assert "digits done" in delivered[0]
     assert fake.running() is False
 
 
 def test_second_async_run_rejected_while_running(fake):
     fake._running = True  # simulate an in-flight run
     with pytest.raises(RuntimeError, match="already running"):
-        fake.optimize(on_done=lambda _text: None)
+        fake.run_task(on_done=lambda _text: None)
 
 
 def test_async_callback_runs_under_lua_lock(fake):
@@ -166,7 +174,7 @@ def test_async_callback_runs_under_lua_lock(fake):
     done = threading.Event()
     lock = threading.Lock()
     svc = FlyBrainService(binary=fake._binary, lua_lock=lock)
-    svc.optimize(on_done=lambda text: (delivered.append(lock.locked()), done.set()))
+    svc.run_task(on_done=lambda text: (delivered.append(lock.locked()), done.set()))
     assert done.wait(5.0)
     assert delivered == [True]  # callback held the lock while running
 
@@ -231,7 +239,7 @@ def test_completion_event_reaches_bus(tmp_path):
     svc = loader.registry.get("flybrain")
     svc._binary = _write_bin(tmp_path, "wetware", FAKE_BIN)
     brain = loader.registry.get("brain")
-    assert brain.optimize("digits", 8, "l3") is True
+    assert brain.optimize("digits") is True
     deadline = time.time() + 10.0
     while time.time() < deadline and not got:
         time.sleep(0.05)

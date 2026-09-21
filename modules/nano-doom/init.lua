@@ -10,6 +10,9 @@
 --   doom.stop()                     -- end the current game
 --   doom.command("w")                -- send one movement/shoot command
 --   doom.command("shoot")
+--   doom.maps()                     -- sorted list of available map names
+--   doom.tactical()                 -- enemy summary, or "no game running"
+--   doom.can_shoot()                -- true if a lined-up enemy can be shot
 --   doom.status()                  -- one-line state summary
 --   doom.running()                   -- true if a game is in progress
 --
@@ -52,9 +55,9 @@ function init(ctx)
   end
 
   function api.can_shoot()
-    local ok, result = pcall(function() return game:command("__can_shoot") end)
+    local ok, result = pcall(function() return game:can_shoot() end)
     if not ok then return false end
-    return result == "yes"
+    return result and true or false
   end
 
   function api.status()
@@ -137,13 +140,11 @@ function init(ctx)
         return "nano-doom: stopped"
       end
       if sub == "maps" then
-        local ok, result = pcall(function()
-          return game:command("__maps")
-        end)
+        local ok, result = pcall(function() return game:maps() end)
         if not ok then
           return "maps error: " .. tostring(result)
         end
-        return "maps: " .. tostring(result)
+        return "maps: " .. table.concat(result, ", ")
       end
       if sub == "help" then
         return "usage: /doom [start [map]|stop|status|maps|help]  in-game: w/a/s/d to move, q/e turn, shoot"

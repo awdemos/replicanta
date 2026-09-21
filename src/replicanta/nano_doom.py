@@ -763,12 +763,6 @@ class DoomService:
         return "stopped"
 
     def command(self, cmd):
-        if cmd == "__maps":
-            return ", ".join(sorted(MAPS))
-        if cmd == "__tactical":
-            return self.tactical()
-        if cmd == "__can_shoot":
-            return "yes" if self.can_shoot() else "no"
         if cmd == "start":
             return self.start()
         if self._game is None:
