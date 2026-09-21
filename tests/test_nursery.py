@@ -155,6 +155,44 @@ def test_rename_same_name_is_a_noop(tmp_path):
     assert nursery.list_organisms(root) == ["fern"]
 
 
+def test_rename_remaps_group_memberships(tmp_path):
+    """Renaming an organism must carry its groups.json membership to the
+    new name — otherwise the member silently vanishes from its group."""
+    root = _root_with(_root(tmp_path), "fern", "willow")
+    nursery.create_group(root, "a")
+    nursery.assign(root, "fern", "a")
+    nursery.assign(root, "willow", "a")
+    nursery.rename(root, "willow", "aaa")
+    assert nursery.load_groups(root) == {"a": ["aaa", "fern"]}
+    assert nursery.group_of(root, "aaa") == "a"
+    # a second rename remaps again, other members untouched
+    nursery.rename(root, "aaa", "bracken")
+    assert nursery.load_groups(root) == {"a": ["bracken", "fern"]}
+    assert nursery.group_of(root, "fern") == "a"
+
+
+def test_rename_without_groups_writes_nothing(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    nursery.rename(root, "fern", "willow")
+    assert not (root / "groups.json").exists()
+
+
+def test_rename_case_change_removes_stale_tmp(tmp_path):
+    """A stale <old>.rename-tmp left by an interrupted rename used to
+    break (or silently poison) the case-only two-hop move."""
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    stale = root / "organisms" / "fern.rename-tmp"
+    stale.mkdir()
+    (stale / "leftover.txt").write_text("stale")
+    dest = nursery.rename(root, "fern", "FERN")
+    assert dest == root / "organisms" / "FERN"
+    assert (dest / "organism.scl").read_text() == SEED_SCL
+    assert not stale.exists()
+    assert nursery.list_organisms(root) == ["FERN"]
+
+
 # -- nursery groups -----------------------------------------------------------
 
 

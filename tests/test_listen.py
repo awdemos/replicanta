@@ -94,6 +94,49 @@ def test_stop_without_start_returns_empty():
     assert len(audio) == 0
 
 
+# -- zombie capture guard -------------------------------------------------------
+
+
+class _ZombieThread:
+    """Stand-in for a capture thread stop() could not join (still alive)."""
+
+    def __init__(self):
+        self.join_calls = 0
+
+    def is_alive(self):
+        return True
+
+    def join(self, timeout=None):
+        self.join_calls += 1
+
+
+class _DeadThread:
+    def is_alive(self):
+        return False
+
+    def join(self, timeout=None):
+        raise AssertionError("dead captures are not joined")
+
+
+def test_start_does_not_duplicate_zombie_capture():
+    """A capture that outlived stop()'s join still holds the mic: start()
+    must not spawn a second capture thread on top of it."""
+    li = Listener(mic_factory=_FakeMic)
+    zombie = _ZombieThread()
+    li._last_capture = zombie
+    li.start()
+    assert zombie.join_calls == 1
+    assert li._thread is None  # no new capture while the zombie lives
+
+
+def test_start_after_dead_capture_proceeds():
+    li = Listener(mic_factory=_FakeMic)
+    li._last_capture = _DeadThread()
+    li.start()
+    assert li.recording is True
+    li.stop()
+
+
 # -- transcription ----------------------------------------------------------
 
 

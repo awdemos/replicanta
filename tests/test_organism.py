@@ -276,6 +276,28 @@ def test_observe_replaces_existing_value(store):
     assert store.conf(("sensor", "temp", "warm")) is None
 
 
+def test_observe_drops_stale_subthreshold_coexisting_value(store):
+    # add()'s contradiction gate only archives at >= threshold, so a weak
+    # conflicting value coexists with the held one; an identical fresh
+    # reading must sweep that leftover away instead of bailing out early
+    store.add(("sky", "color", "blue"), 0.9)
+    store.add(("sky", "color", "green"), 0.3)
+    assert store.conf(("sky", "color", "green")) == 0.3
+    store.observe(("sky", "color", "blue"), 0.9)
+    assert store.conf(("sky", "color", "blue")) == 0.9
+    assert store.conf(("sky", "color", "green")) is None
+    assert store.dirty  # sweeping the stale value is a change worth persisting
+
+
+def test_observe_replaces_subthreshold_coexisting_value(store):
+    store.add(("sky", "color", "blue"), 0.9)
+    store.add(("sky", "color", "green"), 0.3)
+    store.observe(("sky", "color", "gray"), 0.9)
+    assert store.belief_value("sky", "color") == "gray"
+    assert store.conf(("sky", "color", "blue")) is None
+    assert store.conf(("sky", "color", "green")) is None
+
+
 def test_add_detects_contradiction_via_index(store):
     store.add(("sky", "color", "blue"), 0.9)
     store.add(("sky", "color", "green"), 0.6)
@@ -337,6 +359,19 @@ def test_belief_store_derived_flags(tmp_path):
     assert store.derived()["contradictions"] == []
     store.add(("user", "name", "sam"), 0.9)
     assert store.derived()["needs_user"] is False
+
+
+def test_stress_mood_tracks_actual_mood_vocabulary(store):
+    # _compute_mood only ever writes calm/curious/grateful/anxious/hurt/
+    # insane to (self, mood, X); stress_mood must fire on the stressful ones
+    store.observe(("self", "mood", "anxious"), 0.9)
+    assert store.derived()["stress_mood"] is True
+    store.observe(("self", "mood", "hurt"), 0.9)
+    assert store.derived()["stress_mood"] is True
+    store.observe(("self", "mood", "curious"), 0.9)
+    assert store.derived()["stress_mood"] is False
+    store.observe(("self", "mood", "calm"), 0.9)
+    assert store.derived()["stress_mood"] is False
 
 
 def test_belief_store_derived_contradictions(tmp_path):
@@ -477,6 +512,33 @@ def test_chaos_generalization_commits_rule_with_depth(monkeypatch, tmp_path):
     assert rule.startswith("q1(x)")
 
 
+def test_wake_threaded_rule_depth_matches_inline(monkeypatch, tmp_path):
+    # the threaded wake path feeds _rule_depth the rule's quoted tokens;
+    # token [3] is a value, token [5] is the second attribute — the same
+    # (attr_a, attr_b) pair SelfQuestioner.ask passes on the inline path
+    scl = tmp_path / "organism.scl"
+    scl.write_text(
+        'rel 0.9::bel("apple", "color", "red")\n'
+        'rel 0.9::bel("apple", "shape", "round")\n'
+        'rel 0.9::bel("ball", "color", "red")\n'
+        'rel 0.9::bel("ball", "shape", "round")\n'
+    )
+    org = Organism(tmp_path)
+    org.load()
+    org.store.rules.append(('q0(x) = bel(x, "shape", "round")', 1))
+    monkeypatch.setattr(random.Random, "random", lambda self: 0.0)  # always generalize
+    org._wake()
+    committed = org.store.rules[1:]
+    assert committed, "expected the threaded wake to commit at least one rule"
+    for rule, depth in committed:
+        tokens = rule.split('"')
+        assert depth == org.questioner._rule_depth(tokens[1], tokens[5])
+        # "shape" is already a committed first-body attribute, so the
+        # attribute pair scores depth 2; the old value-token bug passed
+        # ("color", "red") here and computed depth 1
+        assert depth == 2
+
+
 def _make_dreamer(tmp_path):
     scl = tmp_path / "organism.scl"
     scl.write_text(
@@ -598,6 +660,26 @@ def test_metrics_score_components(tmp_path):
     assert m.belief_count == 2
     assert m.rule_count == 1
     assert m.score() > 0
+
+
+def test_abstraction_count_does_not_substring_match_heads(tmp_path):
+    # head q1 must not be counted as "referenced" by a rule that merely
+    # uses head q10 (the old `h in rule` test matched the substring)
+    store = BeliefStore(tmp_path)
+    store.rules = [
+        ('q1(x) = bel(x, "color", "red")', 1),
+        ('q10(x) = bel(x, "shape", "round")', 1),
+    ]
+    assert Metrics(store).abstraction_count == 0
+
+
+def test_abstraction_count_counts_true_head_references(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.rules = [
+        ('q1(x) = bel(x, "color", "red")', 1),
+        ('q10(x) = bel(x, "shape", "round"), q1(y)', 1),
+    ]
+    assert Metrics(store).abstraction_count == 1
 
 
 def test_metrics_score_monotonic_under_prune_archive(tmp_path):
@@ -1435,6 +1517,57 @@ def test_load_tolerates_corrupt_state_json(tmp_path):
     store.state_path.write_text("{not json")
     store.load()  # must not raise; keeps fresh defaults
     assert store.cycle == 0
+
+
+def test_load_tolerates_non_object_state_json(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.state_path.parent.mkdir(parents=True, exist_ok=True)
+    store.state_path.write_text('["just", "a", "list"]')
+    store.load()  # valid JSON, wrong shape: keeps fresh defaults
+    assert store.cycle == 0
+    assert store.goals == []
+
+
+def test_load_tolerates_corrupt_collection_shapes(tmp_path):
+    """A syntactically valid state.json with wrong-shaped collections must
+    filter, not crash: bad entries drop, good entries survive."""
+    import json as json_module
+
+    store = BeliefStore(tmp_path)
+    store.state_path.parent.mkdir(parents=True, exist_ok=True)
+    store.state_path.write_text(
+        json_module.dumps(
+            {
+                "cycle": 7,
+                "memory": [
+                    {"cycle": 1, "kind": "born", "text": "woke into existence"},
+                    "a bare string episode",
+                    {"kind": "learned"},  # no text, no cycle
+                    {"cycle": "soon", "kind": "x", "text": "bad cycle stamp"},
+                ],
+                "activity": {
+                    "facts_learned": 3,
+                    "sense_errors": None,  # uncountable -> dropped
+                    "weird": "abc",  # uncountable -> dropped
+                    "surprises": [],  # list-valued -> kept
+                },
+                "chat": [["user", "hello"], ["user"], "not-a-line", {"user": "x"}],
+                "attention": [["color", "red"], ["solo"], "nope"],
+                "thread_results": "oops",
+            }
+        )
+    )
+    store.load()
+    assert store.cycle == 7
+    assert [m["text"] for m in store.memory] == ["woke into existence"]
+    assert store.activity == {"facts_learned": 3, "surprises": []}
+    assert store.chat_log == [["user", "hello"]]
+    assert store.attention == {("color", "red")}
+    assert list(store.thread_results) == []
+    store.save()  # filtered state persists cleanly
+    reloaded = BeliefStore(tmp_path)
+    reloaded.load()
+    assert reloaded.chat_log == [["user", "hello"]]
 
 
 def test_load_revalidates_beliefs_and_rules(tmp_path):

@@ -1,5 +1,6 @@
 """Integration coverage for the buildless Glasshouse web interface."""
 
+import http.client
 import json
 import logging
 import shutil
@@ -7,12 +8,14 @@ import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 from replicanta import extensions, nursery, rdd
 from replicanta.organism import Organism
 from replicanta.web import Glasshouse, make_server
+from replicanta.web_static import APP_JS
 
 SEED = Path(__file__).parent.parent / "organism.scl"
 
@@ -488,3 +491,196 @@ def test_release_mud_org_closes_throwaway_but_not_live(glasshouse, tmp_path, mon
     glasshouse._release_mud_org(glasshouse.org)
     glasshouse._release_mud_org(None)
     assert closed == [throwaway.mind]
+
+
+def test_non_object_json_body_is_rejected(live):
+    """A syntactically valid JSON body that isn't an object must be a clean
+    400; route lambdas call data.get(...) and a list/str/number/null body used
+    to raise AttributeError and reset the connection."""
+    for raw in (b"[1,2,3]", b'"hello"', b"42", b"null"):
+        req = urllib.request.Request(
+            live + "/api/chat",
+            data=raw,
+            headers={
+                "Content-Type": "application/json",
+                "X-Replicanta-Token": live.app.token,
+            },
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(req)
+        assert caught.value.code == 400
+        with caught.value:
+            assert "invalid JSON body" in json.load(caught.value)["error"]
+    # The rejections were answered, not connection resets — server is healthy.
+    status, _headers, _state = request(live, "/api/state")
+    assert status == 200
+
+
+def test_non_ascii_auth_token_is_rejected_cleanly(live):
+    """secrets.compare_digest raises TypeError on non-ASCII str tokens, which
+    escaped auth_ok and dropped the connection. A weird credential must fail
+    closed with a 401 response."""
+    port = urlsplit(live).port
+    for header, value in (
+        ("Authorization", "Bearer tökén"),
+        ("X-Replicanta-Token", "tökén"),
+    ):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request(
+            "POST",
+            "/api/chat",
+            body=b"{}",
+            headers={"Content-Type": "application/json", header: value},
+        )
+        response = conn.getresponse()
+        payload = json.loads(response.read())
+        conn.close()
+        assert response.status == 401
+        assert payload == {"error": "unauthorized"}
+    # The server is still serving after the odd headers.
+    status, _headers, _state = request(live, "/api/state")
+    assert status == 200
+
+
+def test_mud_log_is_escaped_before_rendering(live):
+    """Stored MUD commands flow into state.mud.log verbatim; the client must
+    map every line through esc() before writing innerHTML, or a command like
+    `take <b>injected</b>` injects markup into the page."""
+    request(live, "/api/command", {"command": "/mud start"})
+    status, _headers, result = request(live, "/api/mud-act", {"text": "take <b>injected</b>"})
+    assert status == 200
+    log = result["state"]["mud"]["log"]
+    assert any("<b>injected</b>" in line for line in log)
+    assert "(s.mud.log||[]).map(esc).join(" in APP_JS
+    assert "(s.mud.log||[]).join(" not in APP_JS
+
+
+def test_typing_throttle_checks_elapsed_time_before_refreshing(live):
+    """debounceTyping must compare now against the previous lastTyping before
+    assigning lastTyping=now; assigning first made the ~4s throttle dead code
+    and POSTed /api/typing on every keystroke."""
+    start = APP_JS.index("function debounceTyping")
+    end = APP_JS.index("const chatArea", start)
+    body = APP_JS[start:end]
+    assert body.index("now-lastTyping>4000") < body.index("lastTyping=now")
+
+
+def test_mud_reset_requires_host(live):
+    request(live, "/api/command", {"command": "/mud start"})
+    request(live, "/api/organisms", {"name": "fern"})
+    request(live, "/api/swap", {"name": "fern"})
+    status, _headers, result = request(live, "/api/command", {"command": "/mud join default"})
+    assert status == 200
+    game = live.app._mud_games["default"]
+
+    status, _headers, result = request(live, "/api/command", {"command": "/mud reset"})
+    assert status == 200
+    assert "only the host" in result["messages"][0]
+    # A member's reset attempt must leave the host's game untouched.
+    assert live.app._mud_games["default"] is game
+    assert live.app._mud_member_of["fern"] == "default"
+
+
+def test_mud_reset_restarts_host_game(live):
+    request(live, "/api/command", {"command": "/mud start"})
+    status, _headers, result = request(live, "/api/command", {"command": "/mud reset"})
+    assert status == 200
+    assert "entered" in result["messages"][0]
+    assert result["state"]["mud"]["active"] is True
+    assert "default" in live.app._mud_games
+
+
+def test_mud_start_refused_while_member_of_another_game(live):
+    request(live, "/api/command", {"command": "/mud start"})
+    request(live, "/api/organisms", {"name": "fern"})
+    request(live, "/api/swap", {"name": "fern"})
+    status, _headers, result = request(live, "/api/command", {"command": "/mud join default"})
+    assert status == 200
+
+    # Fern is still seated in default's game, so it cannot host a new one.
+    status, _headers, result = request(live, "/api/command", {"command": "/mud start"})
+    assert status == 200
+    assert "already in a game" in result["messages"][0]
+    assert set(live.app._mud_games) == {"default"}
+    assert live.app._mud_member_of["fern"] == "default"
+
+    # After leaving the old seat, hosting works.
+    request(live, "/api/command", {"command": "/mud leave"})
+    status, _headers, result = request(live, "/api/command", {"command": "/mud start"})
+    assert status == 200
+    assert "entered" in result["messages"][0]
+    assert "fern" in live.app._mud_games
+    assert live.app._mud_member_of["fern"] == "fern"
+
+
+def test_state_payload_has_metric_tables(live):
+    """The Inner tab tables ride the state payload: structured activity
+    counters with per-cycle rates plus a mind-metrics summary, with the
+    prose `activity` field kept for backward compatibility. Only counters
+    with nonzero totals appear — no wall of zeros."""
+    status, _headers, state = request(live, "/api/state")
+    assert status == 200
+    table = state["activity_table"]
+    assert set(table) <= {
+        "rules_tried",
+        "derivations",
+        "beliefs_new",
+        "beliefs_strengthened",
+        "beliefs_archived",
+        "rules_committed",
+        "dreams_promoted",
+        "dreams_discarded",
+        "llm_calls",
+        "prompt_tokens",
+        "gen_tokens",
+        "utterances",
+        "fallbacks",
+        "facts_learned",
+        "grounded_utterances",
+    }
+    assert all(set(row) == {"total", "per_cycle"} for row in table.values())
+    # Zero-activity counters stay out of the table.
+    assert all(
+        state["metrics"]["activity"][key] == 0
+        for key in set(state["metrics"]["activity"]) - set(table)
+        if isinstance(state["metrics"]["activity"][key], int)
+    )
+    mm = state["mind_metrics"]
+    assert set(mm) == {
+        "beliefs",
+        "rules",
+        "memories",
+        "cycle",
+        "score",
+        "goals_active",
+        "goals_done",
+    }
+    assert mm["beliefs"] == len(state["beliefs"])
+    assert mm["goals_active"] + mm["goals_done"] == len(state["goals"])
+    assert mm["cycle"] == state["organism"]["cycle"]
+    assert mm["score"] >= 0
+    assert isinstance(state["activity"], list)
+
+    # Once something happens, nonzero counters appear with totals + rates.
+    request(live, "/api/chat", {"text": "my name is sam"})
+    status, _headers, state = request(live, "/api/state")
+    assert status == 200
+    table = state["activity_table"]
+    assert table, "chat should bump at least one activity counter"
+    cycle = max(state["organism"]["cycle"], 1)
+    for counter, row in table.items():
+        assert set(row) == {"total", "per_cycle"}
+        assert row["total"] > 0
+        assert row["per_cycle"] == round(row["total"] / cycle, 2)
+        assert state["metrics"]["activity"][counter] == row["total"]
+
+
+def test_inner_tab_renders_metric_tables_from_state(live):
+    """The Inner tab builds both tables from the structured payload fields,
+    escaping every interpolation — not from the prose activity lines."""
+    assert "s.mind_metrics" in APP_JS
+    assert "s.activity_table" in APP_JS
+    assert 'class="metrics"' in APP_JS
+    assert "esc(at[k].total)" in APP_JS
+    assert "esc(r[1])" in APP_JS

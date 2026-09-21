@@ -63,25 +63,34 @@ def next_name(root: str | Path) -> str:
 
 
 def rename(root: str | Path, old: str, new: str) -> Path:
-    """Rename an organism: move its whole directory and repoint `current`
-    when the renamed one is the awake organism. Names may mix upper- and
-    lowercase; on case-insensitive filesystems a change of letter case
-    alone goes through a temporary name so the move cannot clobber the
-    source. ValueError on an invalid or taken new name, or when the old
-    organism does not exist. Returns the new directory. Callers holding
-    a live Organism must flush it before the move and reopen it from the
-    new path afterwards."""
+    """Rename an organism: move its whole directory, repoint `current`
+    when the renamed one is the awake organism, and remap groups.json
+    memberships old name → new name. Names may mix upper- and lowercase;
+    on case-insensitive filesystems a change of letter case alone goes
+    through a temporary name so the move cannot clobber the source (a
+    stale temp from an interrupted rename is removed first). ValueError
+    on an invalid or taken new name, or when the old organism does not
+    exist. Returns the new directory. Callers holding a live Organism
+    must flush it before the move and reopen it from the new path
+    afterwards."""
     _validate(new)
     src = organism_dir(root, old)
     if not src.is_dir():
         raise ValueError(f"no organism named {old!r}")
     if new == old:
         return src
+    # read memberships before the move: load_groups() prunes members
+    # whose organism directory no longer exists, and old still has one
+    groups = load_groups(root)
     dest = organism_dir(root, new)
     if new.lower() == old.lower():
         # pure case change: two hops so case-insensitive filesystems
         # (and filesystems where src == dest) survive the move
         tmp = organism_dir(root, f"{old}.rename-tmp")
+        if tmp.is_dir():
+            shutil.rmtree(tmp)
+        elif tmp.exists():
+            tmp.unlink()
         src.rename(tmp)
         tmp.rename(dest)
     else:
@@ -90,6 +99,13 @@ def rename(root: str | Path, old: str, new: str) -> Path:
         src.rename(dest)
     if current(root) == old:
         set_current(root, new)
+    remapped = False
+    for members in groups.values():
+        if old in members:
+            members[:] = sorted(new if m == old else m for m in members)
+            remapped = True
+    if remapped:
+        save_groups(root, groups)
     return dest
 
 

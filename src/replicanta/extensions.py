@@ -48,6 +48,16 @@ def validate(entry):
         parts = entry.get("template", "").split(":")
         if len(parts) != 3 or not all(parts):
             return False, "template must be obj:attr:value"
+        # The substituted belief must survive BeliefStore.add's vocabulary
+        # rule (^[a-z_]+$); otherwise approval stages a pattern that kills
+        # hear() the first time it fires. Mirror the firing path in
+        # learning._extract_facts: substitute the example's capture.
+        m = rx.search(entry.get("example", ""))
+        if m is not None:
+            raw = m.group(1) if m.groups() else m.group(0)
+            raw = raw.lower().replace(" ", "_")
+            if not all(re.fullmatch(r"[a-z_]+", p.replace("{x}", raw)) for p in parts):
+                return False, "template builds a belief outside the vocabulary"
         example = entry.get("example", "")
         if not example or not rx.search(example):
             return False, "does not fire on its own example"
@@ -74,9 +84,18 @@ def _read(path):
     if not path.exists():
         return dict(_EMPTY)
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return dict(_EMPTY)  # a corrupt registry reads as empty
+    if not isinstance(data, dict):
+        return dict(_EMPTY)  # a non-object JSON document reads as empty
+    version = data.get("version")
+    entries = data.get("entries")
+    return {
+        "version": version if isinstance(version, int) and not isinstance(version, bool) else _EMPTY["version"],
+        "entries": entries if isinstance(entries, list) else [],
+        "pending": data.get("pending"),
+    }
 
 
 def _write(path, registry):
@@ -85,30 +104,41 @@ def _write(path, registry):
     atomic_write_text(path, json.dumps(registry, indent=2))
 
 
-# -- thread-local module-level registry ---------------------------------------
+# -- process-global module-level registry -------------------------------------
 #
-# Global mutable state leaks between organisms and tests. Each thread gets its
-# own default ExtensionRegistry; module-level helpers delegate to the current
-# thread's default.
+# The registry consumers read must be visible on every thread: the web
+# server and the TUI's reflection worker run on their own threads, and a
+# thread-local registry left the pending-mutation panel empty and approved
+# extensions unfired. One process-global default registry, guarded by a
+# lock; every mutation holds the lock for the whole read-modify-write so
+# concurrent propose/approve pairs cannot lose each other's updates.
 
 
 class ExtensionRegistry:
-    """Per-thread (or per-instance) validated extension registry."""
+    """Process-global (or per-instance) validated extension registry.
+
+    The module-level default is shared by all threads; each mutation
+    (propose/approve/reject/revert/reload) holds ``_lock`` across the whole
+    read-modify-write."""
 
     def __init__(self):
         self._data = None
+        self._lock = threading.RLock()
 
     def load_global(self, path):
         """(Re)load this registry from ``path``."""
-        self._data = _read(path)
+        with self._lock:
+            self._data = _read(path)
 
     def reset(self):
         """Forget the in-memory registry state."""
-        self._data = None
+        with self._lock:
+            self._data = None
 
     def registry(self):
         """Return the loaded registry dict, or the empty default."""
-        return self._data if self._data is not None else dict(_EMPTY)
+        with self._lock:
+            return self._data if self._data is not None else dict(_EMPTY)
 
     def active_entries(self, kind):
         return [e for e in self.registry()["entries"] if e.get("kind") == kind]
@@ -127,12 +157,13 @@ class ExtensionRegistry:
         ok, reason = validate(entry)
         if not ok:
             raise ValueError(f"invalid extension: {reason}")
-        reg = _read(path)
-        reg["pending"] = entry
-        _write(path, reg)
-        self.load_global(path)
-        if auto_apply:
-            return self.approve(path)
+        with self._lock:
+            reg = _read(path)
+            reg["pending"] = entry
+            _write(path, reg)
+            self.load_global(path)
+            if auto_apply:
+                return self.approve(path)
         return None
 
     def approve(self, path):
@@ -141,54 +172,52 @@ class ExtensionRegistry:
         Returns the applied entry, or None when nothing is pending or the
         pending entry fails validation. Invalid pending entries are cleared.
         """
-        reg = _read(path)
-        entry = reg.get("pending")
-        if entry is None:
-            return None
-        ok, _reason = validate(entry)
-        if not ok:
+        with self._lock:
+            reg = _read(path)
+            entry = reg.get("pending")
+            if entry is None:
+                return None
+            ok, _reason = validate(entry)
+            if not ok:
+                reg["pending"] = None
+                _write(path, reg)
+                self.load_global(path)
+                return None
+            reg["entries"].append(entry)
             reg["pending"] = None
+            reg["version"] += 1
             _write(path, reg)
             self.load_global(path)
-            return None
-        reg["entries"].append(entry)
-        reg["pending"] = None
-        reg["version"] += 1
-        _write(path, reg)
-        self.load_global(path)
-        return entry
+            return entry
 
     def reject(self, path):
         """Discard the pending entry. Returns it, or None."""
-        reg = _read(path)
-        entry = reg.get("pending")
-        reg["pending"] = None
-        _write(path, reg)
-        self.load_global(path)
-        return entry
+        with self._lock:
+            reg = _read(path)
+            entry = reg.get("pending")
+            reg["pending"] = None
+            _write(path, reg)
+            self.load_global(path)
+            return entry
 
     def revert_last(self, path):
         """Remove the most recently applied entry. Returns it, or None."""
-        reg = _read(path)
-        if not reg["entries"]:
-            return None
-        entry = reg["entries"].pop()
-        reg["version"] += 1
-        _write(path, reg)
-        self.load_global(path)
-        return entry
+        with self._lock:
+            reg = _read(path)
+            if not reg["entries"]:
+                return None
+            entry = reg["entries"].pop()
+            reg["version"] += 1
+            _write(path, reg)
+            self.load_global(path)
+            return entry
 
 
-_REGISTRY_LOCAL = threading.local()
+_REGISTRY = ExtensionRegistry()
 
 
-def _default_registry() -> ExtensionRegistry:
-    try:
-        return _REGISTRY_LOCAL.registry
-    except AttributeError:
-        reg = ExtensionRegistry()
-        _REGISTRY_LOCAL.registry = reg
-        return reg
+def _default_registry():
+    return _REGISTRY
 
 
 def load_global(path):

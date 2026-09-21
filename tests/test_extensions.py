@@ -6,6 +6,8 @@ By default patches require approval; manual approve/reject is available,
 and /auto-apply on allows patches to apply immediately. /revert rolls
 back the last applied entry."""
 
+import json
+import threading
 from typing import ClassVar
 
 from replicanta import extensions, learning, llmclient, sentiment
@@ -25,17 +27,42 @@ def _good_pattern():
     }
 
 
-def test_global_registry_isolation(tmp_path):
-    from replicanta import extensions
-
+def test_global_registry_visible_across_threads(tmp_path):
+    """The module-level registry is process-global: the web server thread
+    and the TUI reflection worker must see what the loading thread loaded
+    (pending panel, approved extensions firing)."""
     extensions.reset()
     path_a = tmp_path / "a" / "extensions.json"
     path_b = tmp_path / "b" / "extensions.json"
     extensions.propose(path_a, {"kind": "seed", "text": "a quiet thought"}, auto_apply=True)
-    assert path_b.parent.exists() is False
-    # A second thread/registry must not see the first registry's entries.
+    assert path_b.parent.exists() is False  # proposing to A never touches B
+    seen = []
+    t = threading.Thread(target=lambda: seen.extend(e["text"] for e in extensions.active_entries("seed")))
+    t.start()
+    t.join()
+    assert seen == ["a quiet thought"]
+    # A separately-constructed instance still starts empty.
     other_reg = extensions.ExtensionRegistry()
     assert other_reg.active_entries("seed") == []
+
+
+def test_propose_approve_racing_threads_keep_both_entries(tmp_path):
+    """The registry lock covers each mutation end-to-end: hammering
+    propose+approve (auto_apply) from threads must not lose an approval."""
+    path = _path(tmp_path)
+    extensions.reset()
+
+    def worker(i):
+        entry = {"kind": "seed", "text": f"seed number {i}"}
+        return extensions.propose(path, entry, auto_apply=True)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    texts = {e["text"] for e in extensions.active_entries("seed")}
+    assert len(texts) == 8  # no approval lost to a race
 
 
 def test_voice_state_is_per_thread(monkeypatch):
@@ -83,6 +110,18 @@ def test_validate_rejects_bad_template():
     entry = _good_pattern() | {"template": "user:like"}
     ok, reason = extensions.validate(entry)
     assert not ok and "template" in reason
+
+
+def test_validate_rejects_template_outside_belief_vocabulary():
+    # a template whose substitution contains digits would crash hear() the
+    # first time the pattern fires — it must be refused at staging time
+    entry = _good_pattern() | {
+        "regex": "i live in zone (.+)",
+        "template": "user:zone:9{x}",
+        "example": "i live in zone 9lives",
+    }
+    ok, reason = extensions.validate(entry)
+    assert not ok and "vocabulary" in reason
 
 
 def test_validate_rejects_pattern_not_firing_on_example():
@@ -224,3 +263,36 @@ def test_read_tolerates_corrupt_registry(tmp_path):
     path = tmp_path / "extensions.json"
     path.write_text("{not json")
     assert extensions._read(path) == dict(extensions._EMPTY)
+
+
+def test_read_normalizes_missing_fields(tmp_path):
+    # Valid JSON but no "entries"/"version": consumers (seed_for, approve)
+    # used to die with KeyError on every utterance.
+    path = tmp_path / "extensions.json"
+    path.write_text(json.dumps({"version": 3}))
+    assert extensions._read(path) == {"version": 3, "entries": [], "pending": None}
+
+
+def test_read_defaults_invalid_version_and_entries(tmp_path):
+    path = tmp_path / "extensions.json"
+    path.write_text(json.dumps({"version": "two", "entries": "not-a-list"}))
+    assert extensions._read(path) == dict(extensions._EMPTY)
+
+
+def test_read_non_object_json_reads_empty(tmp_path):
+    path = tmp_path / "extensions.json"
+    path.write_text(json.dumps(["a", "list"]))
+    assert extensions._read(path) == dict(extensions._EMPTY)
+
+
+def test_registry_with_missing_fields_does_not_crash_consumers(tmp_path):
+    path = tmp_path / "extensions.json"
+    path.write_text(json.dumps({"version": 1}))
+    extensions.load_global(path)
+    assert extensions.active_entries("seed") == []
+    assert extensions.pending() is None
+    assert extensions.entries() == []
+    # approve/seed_for used to raise KeyError here.
+    assert extensions.approve(path) is None
+    extensions.propose(path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=True)
+    assert extensions.active_entries("seed")[0]["text"] == "a quiet thought"

@@ -196,6 +196,16 @@ def test_inner_view_without_pending_proposal(org):
     assert "pending proposal" not in view
 
 
+def test_pending_proposal_tolerates_non_object_json(org, tmp_path):
+    """A syntactically valid but non-object extensions.json must read as
+    'no proposal' instead of crashing the view (reg.get would raise)."""
+    artifacts = org.store.dir_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "extensions.json").write_text('["not", "an", "object"]')
+    assert tui_views._pending_proposal(org) is None
+    assert "pending proposal" not in tui_views.inner_view(org)
+
+
 # -- inner renderable ---------------------------------------------------------
 
 
@@ -221,7 +231,7 @@ def test_inner_renderable_uses_gauge_bars(org):
     assert "0.75" in text
 
 
-def test_inner_renderable_shows_loop_and_arena(org):
+def test_inner_renderable_shows_loop_and_activity_table(org):
     org.store.activity = {
         "rules_tried": 4,
         "derivations": 2,
@@ -238,8 +248,12 @@ def test_inner_renderable_shows_loop_and_arena(org):
     assert "perpetuation loop" in text
     assert "4 questions" in text
     assert "2 derivations" in text
-    assert "thought arena" in text
-    assert "5 llm calls" in text
+    assert "activity" in text
+    assert "/cycle" in text
+    for section in ("symbolic", "neural", "coupling"):
+        assert section in text
+    for counter in ("llm calls", "prompt tokens", "grounded utterances"):
+        assert counter in text
 
 
 def test_inner_renderable_shows_pending_proposal(org, tmp_path):
@@ -258,6 +272,64 @@ def test_inner_renderable_without_activity_still_shows_state(org):
     text = _render(tui_views.inner_renderable(org))
     assert "mental state" in text
     assert "perpetuation loop" not in text
+
+
+def test_inner_renderable_mental_state_table_header(org):
+    text = _render(tui_views.inner_renderable(org))
+    assert "Gauge" in text
+    assert "Value" in text
+
+
+def test_gauge_color_stress_bands():
+    assert tui_views._gauge_color("stress", 0.2) == "green"
+    assert tui_views._gauge_color("stress", 0.55) == "yellow"
+    assert tui_views._gauge_color("stress", 0.9) == "red"
+    assert tui_views._gauge_color("arousal", 0.9) == "magenta"
+
+
+def test_inner_renderable_mind_metrics_table(org):
+    org.store.add(("user", "name", "sam"), 0.8)
+    org.store.commit_rule('q1(x) = bel(x, "a", "b")', 2)
+    org.store.add_goal("learn the user's name", marker=1)
+    org.store.complete_active_goal()
+    org.store.remember("learned", "your name is sam")
+    text = _render(tui_views.inner_renderable(org))
+    assert "mind metrics" in text
+    for label in (
+        "beliefs",
+        "rules",
+        "mean rule depth",
+        "consciousness score",
+        "goals",
+        "memories",
+        "cycle",
+    ):
+        assert label in text
+    assert "0 active · 1 done" in text
+
+
+def test_inner_renderable_activity_rates_per_cycle(org):
+    org.store.cycle = 10
+    org.store.activity = {"llm_calls": 5, "facts_learned": 2}
+    text = _render(tui_views.inner_renderable(org))
+    assert "0.50" in text  # 5 llm calls / 10 cycles
+    assert "0.20" in text  # 2 facts learned / 10 cycles
+
+
+def test_inner_renderable_host_sense_strip(org):
+    org.store.observe(("cpu", "load", "high"), 0.9)
+    org.store.observe(("mem", "usage", "mid"), 0.9)
+    org.store.observe(("temp", "cpu", "cool"), 0.9)
+    text = _render(tui_views.inner_renderable(org))
+    assert "host sense" in text
+    assert "cpu load=high" in text
+    assert "mem usage=mid" in text
+    assert "temp cpu=cool" in text
+
+
+def test_inner_renderable_omits_host_sense_strip_without_senses(org):
+    text = _render(tui_views.inner_renderable(org))
+    assert "host sense" not in text
 
 
 # -- cells grid (F8) ----------------------------------------------------------
@@ -287,6 +359,14 @@ def test_mind_renderable_shows_confidence_bars(org):
     text = _render(tui_views.mind_renderable(org))
     assert "▮" in text or "█" in text, "expected a confidence bar"
     assert "0.80" in text
+
+
+def test_mind_renderable_beliefs_table_has_header_row(org):
+    org.store.add(("user", "name", "sam"), 0.8)
+    text = _render(tui_views.mind_renderable(org))
+    assert "Conf" in text
+    assert "Bar" in text
+    assert "Belief" in text
 
 
 def test_mind_renderable_shows_rules_and_attention(org):

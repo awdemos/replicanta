@@ -401,6 +401,12 @@ def _felt_experience(snapshot):
             f"irrationality {irrationality:.2f}: strange ideas feel "
             "as true as real ones; logic slips"
         )
+    elif arousal <= 0.25:
+        mental_line = (
+            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
+            f"irrationality {irrationality:.2f}: quiet and heavy, "
+            "energy low — you want stillness"
+        )
     elif arousal >= 0.7:
         mental_line = (
             f"arousal {arousal:.2f}, rationality {rationality:.2f}, "

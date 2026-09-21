@@ -207,6 +207,22 @@ def test_run_without_main_still_executes(scripts, tmp_path):
     assert engine.run("bare.lua", _org(tmp_path)) == "lua: ran bare.lua"
 
 
+def test_run_without_main_does_not_reuse_stale_main(scripts, tmp_path):
+    """Running a /lua script with no main must not re-invoke the previous
+    script's main global under the new name."""
+    (scripts / "a.lua").write_text("function main(ctx) ctx.log('A-main') end\n")
+    (scripts / "b.lua").write_text("x = 1 + 1\n")
+    emitted = []
+    engine = HookEngine(scripts, emit=emitted.append)
+    org = _org(tmp_path)
+    assert engine.run("a.lua", org) == "lua: ran a.lua"
+    assert emitted == ["A-main"]
+    assert engine.run("b.lua", org) == "lua: ran b.lua"
+    assert emitted == ["A-main"]  # b must not execute a's main
+    # the main global is cleared after a run, not left for the next script
+    assert engine._lua.globals()["main"] is None
+
+
 def test_run_rejects_traversal_and_non_lua(scripts, tmp_path):
     engine = HookEngine(scripts)
     org = _org(tmp_path)

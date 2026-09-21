@@ -106,22 +106,34 @@ Override the model or endpoint with `OLLAMA_MODEL` and `OLLAMA_URL`.
 #### llama.cpp / llama-server
 
 Set `REPLICANTA_LLM_BACKEND=llama_cpp` and point `LLAMACPP_URL` at a running
-server. The bundled GGUF is already in `models/`:
+server. The bundled GGUF is prism-ml's **Ternary-Bonsai-2-27B** (a ~6 GB
+2-bit-ternary Qwen3.8-27B) already in `models/`:
 
 ```bash
 llama-server \
-  -m models/Qwen3.8-27B-AEON-ULTIMATE-UNCENSORED-Q3_K_M.gguf \
-  --jinja --reasoning-format deepseek \
+  -m models/Ternary-Bonsai-2-27B-PTQ1_0.gguf \
+  --mmproj models/Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf \
+  --jinja \
   --host 127.0.0.1 --port 8085 \
   -ngl 99 -fa on -c 32768
 
 REPLICANTA_LLM_BACKEND=llama_cpp LLAMACPP_URL=http://localhost:8085 .venv/bin/replicanta
 ```
 
-> The GGUF in `models/` is a third-party fine-tune and is **not** tracked in
-> git — a fresh clone must obtain it separately. Verify its checksum against
-> the publisher's page before use; multi-GB model blobs of unknown provenance
-> are a supply-chain risk (llama.cpp parsers have had CVEs).
+Ternary weights need the PrismML llama.cpp build (stock llama.cpp cannot
+load them): grab the latest `llama-prism-*-bin-linux-cuda-*-x64.tar.gz`
+from [PrismML-Eng/llama.cpp releases](https://github.com/PrismML-Eng/llama.cpp/releases).
+
+> The GGUFs in `models/` are **not** tracked in git — a fresh clone must
+> obtain them separately. Verify checksums against
+> [prism-ml/Ternary-Bonsai-2-27B-gguf](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf)
+> before use; multi-GB model blobs of unknown provenance are a supply-chain
+> risk (llama.cpp parsers have had CVEs).
+>
+> ```text
+> Ternary-Bonsai-2-27B-PTQ1_0.gguf       sha256 53107f530aa52eb00912263ab1ee29bd199261c87cd7b4ad4ca1318c1fe33ee3
+> Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf  sha256 6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903
+> ```
 
 Vision (`/look`) is only supported on the Ollama backend.
 

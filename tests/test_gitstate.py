@@ -131,3 +131,57 @@ def test_summary_not_a_repo():
         spawn=_spawn({"rev-parse --is-inside-work-tree": (1, "", "nope")}),
     )
     assert probe.summary(probe.snapshot()) == "not a git repository"
+
+
+# -- regression: subprocess timeouts and spawn costs -----------------------------
+
+
+def test_snapshot_contains_git_timeout():
+    """TimeoutExpired is a SubprocessError, not an OSError: a hung git must
+    read as 'not a repo', not escape into Organism.sense() and kill ticks."""
+
+    def spawn(_worktree, args):
+        raise subprocess.TimeoutExpired(["git", *args], timeout=10)
+
+    probe = GitProbe("/tmp", spawn=spawn)
+    snap = probe.snapshot()
+    assert snap == {"is_repo": False}
+    assert probe.beliefs(snap) == {}
+    assert probe.distress(snap) == 0.0
+
+
+def test_snapshot_contains_timeout_mid_probe():
+    """A git that hangs halfway through the probe yields the dirty/upstream
+    fallbacks instead of raising."""
+
+    def spawn(_worktree, args):
+        cmd = " ".join(args)
+        if cmd == "status --porcelain":
+            raise subprocess.TimeoutExpired(["git", *args], timeout=10)
+        rc, out, err = _repo_responses(ahead=2, behind=3).get(cmd, (1, "", f"unexpected: {cmd}"))
+        return subprocess.CompletedProcess(args, rc, out, err)
+
+    probe = GitProbe("/tmp", spawn=spawn)
+    snap = probe.snapshot()
+    assert snap["is_repo"] is True
+    assert snap["dirty_count"] == 0  # timed-out status reads as clean
+    assert snap["unpushed_count"] == 2
+    assert snap["behind_count"] == 3
+
+
+def test_snapshot_calls_ahead_behind_once(monkeypatch):
+    """The ahead/behind pair is one consistent probe, not two: snapshot()
+    must not spawn the rev-list pair twice."""
+    probe = GitProbe("/tmp", spawn=_spawn(_repo_responses(ahead=2, behind=3)))
+    calls = []
+    real_ahead_behind = probe._ahead_behind
+
+    def counted():
+        calls.append(1)
+        return real_ahead_behind()
+
+    monkeypatch.setattr(probe, "_ahead_behind", counted)
+    snap = probe.snapshot()
+    assert calls == [1]
+    assert snap["unpushed_count"] == 2
+    assert snap["behind_count"] == 3

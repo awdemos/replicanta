@@ -73,13 +73,14 @@ class GitProbe:
         """Return a git snapshot dict, or {\"is_repo\": False}."""
         if not self._is_repo():
             return {"is_repo": False}
+        ahead, behind = self._ahead_behind()
         return {
             "is_repo": True,
             "branch": self._branch(),
             "upstream": self._upstream(),
             "dirty_count": self._dirty_count(),
-            "unpushed_count": self._ahead_behind()[0],
-            "behind_count": self._ahead_behind()[1],
+            "unpushed_count": ahead,
+            "behind_count": behind,
         }
 
     def _run(self, args):
@@ -96,26 +97,29 @@ class GitProbe:
                 logger.warning("git binary unavailable: %s", exc)
                 self._warning_emitted = True
             return False
-        except RuntimeError:
+        except (RuntimeError, subprocess.SubprocessError):
+            # RuntimeError: git ran but failed (not a repo).
+            # SubprocessError: spawn-level failure incl. TimeoutExpired —
+            # must be contained like OSError or it kills Organism.sense().
             return False
         return out.strip() == "true"
 
     def _branch(self):
         try:
             return self._run(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             return None
 
     def _upstream(self):
         try:
             return self._run(["rev-parse", "--abbrev-ref", "HEAD@{upstream}"]).strip()
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             return None
 
     def _dirty_count(self):
         try:
             out = self._run(["status", "--porcelain"])
-        except (OSError, RuntimeError):
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             return 0
         return sum(1 for line in out.splitlines() if line.strip())
 
@@ -125,7 +129,7 @@ class GitProbe:
         try:
             ahead = int(self._run(["rev-list", "--count", "HEAD@{upstream}..HEAD"]).strip())
             behind = int(self._run(["rev-list", "--count", "HEAD..HEAD@{upstream}"]).strip())
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
             return (None, None)
         return (ahead, behind)
 

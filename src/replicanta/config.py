@@ -49,7 +49,9 @@ def load_config(root):
 
 def save_config(root, config):
     """Write config back to replicanta.toml. Preserves top-level sections
-    and handles bool, int, float, str, and flat-dict values."""
+    and handles bool, int, float, str, and flat-dict values. None and
+    unsupported values are written as comments (never invalid TOML) and
+    a warning is logged."""
     atomic_write_text(config_path(root), _render_config(config))
 
 
@@ -85,20 +87,31 @@ def _render_config(config):
 def _render_key_value(key, val):
     if isinstance(val, bool):
         return f"{key} = {'true' if val else 'false'}"
-    elif isinstance(val, str):
+    if isinstance(val, (int, float)):
+        return f"{key} = {val}"
+    if isinstance(val, str):
         return f"{key} = {_toml_string(val)}"
-    elif isinstance(val, dict):
-        pairs = ", ".join(f"{k} = {_render_literal(v)}" for k, v in val.items())
-        return f"{key} = {{ {pairs} }}"
-    return f"{key} = {val}"
+    if isinstance(val, dict):
+        pairs = ", ".join(f"{k} = {lit}" for k, v in val.items() if (lit := _render_literal(v)) is not None)
+        if pairs:
+            return f"{key} = {{ {pairs} }}"
+        return f"{key} = {{}}" if not val else f"# {key}  # skipped: no renderable values"
+    if val is None:
+        return f"# {key}  # unset (TOML has no null; omitted on save)"
+    logger.warning("config: skipping key %r: unsupported value type %s", key, type(val).__name__)
+    return f"# {key}  # skipped: unsupported value type {type(val).__name__}"
 
 
 def _render_literal(val):
+    """Render one inline-table value, or None when it has no TOML form."""
     if isinstance(val, bool):
         return "true" if val else "false"
-    elif isinstance(val, str):
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, str):
         return _toml_string(val)
-    return str(val)
+    logger.warning("config: skipping inline value %r: unsupported type %s", val, type(val).__name__)
+    return None
 
 
 def _toml_string(val):

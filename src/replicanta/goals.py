@@ -2,8 +2,6 @@
 
 import re
 
-from replicanta import learning
-
 LEARN_GOAL_PREFIXES = ("learn", "know", "understand")
 
 # cycles without progress before a goal is considered stalled
@@ -18,20 +16,6 @@ def default_strategy(goal_text):
 def _target_count(text):
     nums = [int(n) for n in re.findall(r"\d+", text)]
     return nums[-1] if nums else 5
-
-
-def _relevant_facts(store, text):
-    """Count user facts whose description overlaps words with the goal text."""
-    words = set(re.findall(r"[a-z]{3,}", text.lower()))
-    count = 0
-    for belief in store.beliefs():
-        obj, _attr, _val = belief
-        if obj != "user":
-            continue
-        fact = learning.describe(belief).lower()
-        if words & set(re.findall(r"[a-z]{3,}", fact)):
-            count += 1
-    return count
 
 
 def _is_learn_goal(text):
@@ -61,7 +45,11 @@ def is_stalled(goal, cycle, current):
 
 def goal_progress(store):
     """Return a human-readable progress line for the active goal, or
-    None when no goal is active."""
+    None when no goal is active.
+
+    The progress figure is the user-fact count — the same single series
+    _goals_tick records via update_progress — so stall detection compares
+    like with like and ``(stalled)`` can actually appear."""
     goal = store.active_goal()
     if not goal:
         return None
@@ -69,6 +57,6 @@ def goal_progress(store):
     start = goal.get("created_cycle", store.cycle)
     elapsed = max(store.cycle - start, 0)
     target = _target_count(text)
-    current = _relevant_facts(store, text)
+    current = store.count_beliefs("user")
     stalled = " (stalled)" if is_stalled(goal, store.cycle, current) else ""
     return f"goal: {text}  (started cycle {start}, {elapsed} cycles ago, progress {current}/{target}){stalled}"

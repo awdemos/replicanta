@@ -111,6 +111,7 @@ _SPEECH_POSTROLL_SECONDS = 0.1
 enabled = False
 _queue = queue.Queue()
 _worker = None
+_worker_lock = threading.Lock()
 _voice = None
 _voice_lock = threading.Lock()
 
@@ -270,9 +271,12 @@ def say(text):
     if not enabled or not text or not available():
         return
     global _worker
-    if _worker is None or not _worker.is_alive():
-        _worker = threading.Thread(target=_drain, daemon=True, name="speech")
-        _worker.start()
+    with _worker_lock:
+        # Check-and-start under the lock: two racing say() calls must not
+        # each spawn a drain worker for the same queue.
+        if _worker is None or not _worker.is_alive():
+            _worker = threading.Thread(target=_drain, daemon=True, name="speech")
+            _worker.start()
     _queue.put(text)
 
 

@@ -99,9 +99,8 @@ def test_llama_cpp_generate_with_stats_maps_token_counts(monkeypatch):
     _patch_urlopen(
         monkeypatch,
         {
-            "content": "hello",
-            "tokens_evaluated": 42,
-            "tokens_predicted": 7,
+            "choices": [{"message": {"content": "hello"}}],
+            "usage": {"prompt_tokens": 42, "completion_tokens": 7},
         },
     )
     monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
@@ -117,19 +116,74 @@ def test_llama_cpp_generate_sends_expected_payload(monkeypatch):
         captured["url"] = req.full_url
         captured["body"] = json.loads(req.data.decode())
         captured["timeout"] = timeout
-        return _fake_resp({"content": "ok"})
+        return _fake_resp(
+            {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+            }
+        )
 
     monkeypatch.setattr("urllib.request.urlopen", spy)
     monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
     monkeypatch.setenv("LLAMACPP_URL", "http://localhost:9999")
     llmclient.generate_with_stats("p", "any-model", 9, temperature=0.3)
-    assert captured["url"] == "http://localhost:9999/completion"
+    assert captured["url"] == "http://localhost:9999/v1/chat/completions"
     assert "model" not in captured["body"]
-    assert captured["body"]["prompt"] == "p"
+    # the server-side chat template wraps the prompt; thinking is disabled
+    # so reasoning models answer instead of burning the token budget
+    assert captured["body"]["messages"] == [{"role": "user", "content": "p"}]
+    assert captured["body"]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "prompt" not in captured["body"]
     assert captured["body"]["stream"] is False
     assert captured["body"]["n_predict"] == llmclient.MAX_TOKENS
     assert captured["body"]["temperature"] == 0.3
     assert captured["timeout"] == 9
+
+
+def test_llama_cpp_retry_when_reply_empty_at_token_cap(monkeypatch):
+    bodies = []
+
+    def spy(req, timeout=None):
+        bodies.append(json.loads(req.data.decode()))
+        # first call: empty answer that hit the cap; second: a real answer
+        payload = {
+            "choices": [{"message": {"content": ""}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": llmclient.MAX_TOKENS},
+        }
+        if len(bodies) == 2:
+            payload = {
+                "choices": [{"message": {"content": "hi ada"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 40},
+            }
+        return _fake_resp(payload)
+
+    monkeypatch.setattr("urllib.request.urlopen", spy)
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    monkeypatch.setenv("LLAMACPP_URL", "http://localhost:9999")
+    text, stats = llmclient.generate_with_stats("p", "any-model", 9)
+    assert text == "hi ada"
+    assert len(bodies) == 2
+    assert stats["gen_tokens"] == 40
+
+
+def test_llama_cpp_no_retry_when_model_stopped_early(monkeypatch):
+    calls = []
+
+    def spy(req, timeout=None):
+        calls.append(1)
+        return _fake_resp(
+            {
+                "choices": [{"message": {"content": ""}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 50},
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", spy)
+    monkeypatch.setenv("REPLICANTA_LLM_BACKEND", "llama_cpp")
+    monkeypatch.setenv("LLAMACPP_URL", "http://localhost:9999")
+    text, _ = llmclient.generate_with_stats("p", "any-model", 9)
+    assert text == ""
+    assert len(calls) == 1
 
 
 def test_llama_cpp_probe_voice_checks_health(monkeypatch):

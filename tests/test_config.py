@@ -53,3 +53,32 @@ def test_save_config_escapes_strings(tmp_path):
     assert loaded["persona"]["name"] == 'evil"\ninjected = true\nx = "'
     assert "injected" not in loaded
     assert "x" not in loaded
+
+
+def test_save_config_renders_scalars_as_before(tmp_path):
+    cfg = config.load_config(tmp_path)
+    cfg["voice"] = {"enabled": True, "volume": 3, "gain": 0.5, "model": "alan"}
+    config.save_config(tmp_path, cfg)
+    loaded = config.load_config(tmp_path)
+    assert loaded["voice"] == {"enabled": True, "volume": 3, "gain": 0.5, "model": "alan"}
+
+
+def test_save_config_none_and_nested_values_never_corrupt_file(tmp_path, caplog):
+    """None used to render as `key = None` and deeply nested dicts as a
+    Python repr — both invalid TOML that broke the next load. They must be
+    commented/skipped instead, and the file must stay parseable."""
+    cfg = config.load_config(tmp_path)
+    cfg["git"]["enabled"] = None
+    cfg["persona"] = {"name": "fern", "meta": {"deep": {"x": 1}}}
+    cfg["voice"] = ["a", "list"]
+    with caplog.at_level("WARNING"):
+        config.save_config(tmp_path, cfg)
+    text = (tmp_path / "replicanta.toml").read_text()
+    assert "enabled = None" not in text
+    assert "'deep'" not in text  # no Python repr leaked into the file
+    loaded = config.load_config(tmp_path)  # must parse
+    assert loaded["git"]["enabled"] is False  # omitted key falls back to default
+    assert loaded["persona"]["name"] == "fern"
+    assert "meta" not in loaded["persona"]  # unrenderable inline value skipped
+    assert "voice" not in loaded  # unsupported top-level value skipped
+    assert "unsupported" in caplog.text

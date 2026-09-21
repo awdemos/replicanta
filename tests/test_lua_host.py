@@ -60,6 +60,21 @@ def test_host_run_executes_script_main(tmp_path):
     assert any("ran:lua" in line for line in logs)
 
 
+def test_host_run_without_main_does_not_reuse_stale_main(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "a.lua").write_text('function main(ctx) ctx.log("A-main") end\n')
+    (scripts / "b.lua").write_text("x = 1 + 1\n")
+    logs = []
+    host = LuaHost(scripts_dir=scripts, modules_dir=tmp_path / "mods", emit=logs.append)
+    host.reload_scripts()
+    assert host.run("a.lua", org=None) == "lua: ran a.lua"
+    assert logs == ["A-main"]
+    assert host.run("b.lua", org=None) == "lua: ran b.lua"
+    assert logs == ["A-main"]  # b must not execute a's main
+    assert host.lua.globals()["main"] is None
+
+
 def test_host_passes_its_lock_to_the_arm_service(tmp_path):
     """The volition thread must serialize with host dispatch through the same lock."""
     host = LuaHost(scripts_dir=tmp_path / "scripts", modules_dir=tmp_path / "mods", emit=lambda _m: None)

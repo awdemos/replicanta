@@ -7,7 +7,11 @@ without a terminal."""
 import hashlib
 import json
 
+from rich import box
+from rich.bar import Bar
+from rich.console import Group
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from replicanta import activity
@@ -229,6 +233,8 @@ def _pending_proposal(org):
         reg = json.loads(path.read_text())
     except (OSError, ValueError):
         return None
+    if not isinstance(reg, dict):
+        return None
     entry = reg.get("pending")
     if not entry:
         return None
@@ -264,25 +270,163 @@ def _belief_style(obj):
     return "blue"
 
 
+def _gauge_color(label, value):
+    """Bar color per gauge; stress is banded green/amber/red."""
+    if label == "stress":
+        if value > 0.7:
+            return "red"
+        if value > 0.4:
+            return "yellow"
+        return "green"
+    return {
+        "arousal": "magenta",
+        "rationality": "green",
+        "irrationality": "yellow",
+    }.get(label, "blue")
+
+
+def _mental_state_panel(org):
+    """MENTAL STATE: one ruled table row per scalar — bar gauge plus a
+    right-aligned two-decimal value; mood rides along as a text row."""
+    state = _mental_state(org)
+    if not state:
+        return None
+    table = Table(box=box.MINIMAL, padding=(0, 2), header_style="bold")
+    table.add_column("", style="bold")
+    table.add_column("Gauge")
+    table.add_column("Value", justify="right", style="dim")
+    for label, value in state:
+        if label == "mood":
+            table.add_row("mood", "", str(value))
+        else:
+            table.add_row(
+                label,
+                Bar(size=1.0, begin=0.0, end=value, width=24, color=_gauge_color(label, value)),
+                f"{value:.2f}",
+            )
+    caption = Text(
+        "scalars in [0,1] · stress bands: green < 0.40 · amber < 0.70 · red above",
+        style="dim",
+    )
+    return Panel(Group(table, Text(""), caption), title="mental state", border_style="cyan")
+
+
+def _mind_metrics_panel(org):
+    """MIND METRICS: structural counters and scores as a Metric/Value table."""
+    m = org.metrics()
+    store = org.store
+    goals_active = 1 if store.active_goal() else 0
+    goals_done = sum(1 for g in store.goals if g["done_cycle"] is not None)
+    depth = m.total_depth / m.rule_count if m.rule_count else 0.0
+    rows = (
+        ("beliefs", str(m.belief_count)),
+        ("rules", str(m.rule_count)),
+        ("mean rule depth", f"{depth:.2f}"),
+        ("consciousness score", f"{m.score():.1f}"),
+        ("goals", f"{goals_active} active · {goals_done} done"),
+        ("memories", str(len(store.memory))),
+        ("cycle", str(store.cycle)),
+    )
+    table = Table(box=box.MINIMAL, padding=(0, 2), header_style="bold")
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right", style="dim")
+    for name, value in rows:
+        table.add_row(name, value)
+    return Panel(table, title="mind metrics", border_style="blue")
+
+
+_ACTIVITY_GROUPS = (
+    (
+        "symbolic",
+        (
+            ("rules tried", "rules_tried"),
+            ("derivations", "derivations"),
+            ("beliefs new", "beliefs_new"),
+            ("beliefs strengthened", "beliefs_strengthened"),
+            ("rules committed", "rules_committed"),
+            ("dreams promoted", "dreams_promoted"),
+            ("dreams discarded", "dreams_discarded"),
+        ),
+    ),
+    (
+        "neural",
+        (
+            ("llm calls", "llm_calls"),
+            ("prompt tokens", "prompt_tokens"),
+            ("gen tokens", "gen_tokens"),
+            ("utterances", "utterances"),
+            ("fallbacks", "fallbacks"),
+        ),
+    ),
+    (
+        "coupling",
+        (
+            ("facts learned", "facts_learned"),
+            ("grounded utterances", "grounded_utterances"),
+        ),
+    ),
+)
+
+
+def _activity_panel(store):
+    """ACTIVITY: exact counters as Total + per-cycle rates, grouped into
+    the symbolic / neural / coupling families. None when nothing has run."""
+    a = store.activity
+    if not a:
+        return None
+    cycle = max(store.cycle, 1)
+    table = Table(box=box.MINIMAL, padding=(0, 2), header_style="bold")
+    table.add_column("Counter", style="bold")
+    table.add_column("Total", justify="right")
+    table.add_column("/cycle", justify="right", style="dim")
+    for group, counters in _ACTIVITY_GROUPS:
+        table.add_row(Text(group, style="bold dim"), "", "")
+        for label, key in counters:
+            total = a.get(key, 0)
+            table.add_row(f"  {label}", str(total), f"{total / cycle:.2f}")
+    caption = Text("exact event counters · rates per lifecycle cycle", style="dim")
+    return Panel(Group(table, Text(""), caption), title="activity", border_style="yellow")
+
+
+_HOST_SENSE_KEYS = (
+    (("cpu", "load"), "cpu load"),
+    (("mem", "usage"), "mem usage"),
+    (("disk", "space"), "disk space"),
+    (("temp", "cpu"), "temp cpu"),
+)
+
+
+def _host_sense_strip(store):
+    """One-line dim strip of the latest host readings, or None when the
+    organism has not sensed the host (or nothing is held above threshold)."""
+    beliefs = store.beliefs()
+    senses = []
+    for (obj, attr), label in _HOST_SENSE_KEYS:
+        best = None
+        for (o, a, v), conf in beliefs.items():
+            if o == obj and a == attr and conf >= 0.5 and (best is None or conf > best[1]):
+                best = (v, conf)
+        if best is not None:
+            senses.append(f"{label}={best[0]}")
+    if not senses:
+        return None
+    return Text.assemble(("host sense  ", "bold dim"), (" · ".join(senses), "dim"))
+
+
 def mind_renderable(org):
     """The Mind tab as rich renderables: top beliefs with confidence bars,
     goals, skills, rules, attention, and genome/activity footer. Rebuilt
     every tick."""
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
-
     panels = []
     store = org.store
 
     top = sorted(org.store.beliefs().items(), key=lambda kv: -kv[1])
     if top:
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(style="dim", justify="right")
-        grid.add_column(justify="left")
-        grid.add_column(justify="left")
-        grid.add_column(justify="right", style="dim")
+        grid = Table(box=box.MINIMAL, padding=(0, 1), header_style="bold")
+        grid.add_column("Conf", justify="right", style="dim")
+        grid.add_column("Bar", justify="left")
+        grid.add_column("Belief", justify="left")
+        grid.add_column("", justify="right", style="dim")
         for (obj, attr, val), conf in top[:_BELIEF_LIMIT]:
             style = _belief_style(obj)
             grid.add_row(
@@ -474,40 +618,18 @@ def memory_renderable(org):
 
 
 def inner_renderable(org):
-    """The Inner tab as rich renderables: mental-state gauges, the
-    perpetuation loop with progress bars, the thought arena and any
-    pending proposal. Rebuilt every tick."""
-    from rich.bar import Bar
-    from rich.console import Group
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
-
+    """The Inner tab as a live dashboard: mental-state gauges, mind
+    metrics, the perpetuation loop with progress bars, activity counters
+    as totals + per-cycle rates, a host-sense strip, and any pending
+    proposal. Rebuilt every tick."""
     store = org.store
     panels = []
 
-    state = _mental_state(org)
-    if state:
-        grid = Table.grid(padding=(0, 2))
-        grid.add_column(style="bold")
-        grid.add_column(justify="left")
-        grid.add_column(justify="right", style="dim")
-        for label, value in state:
-            if label == "mood":
-                grid.add_row(label, "", value)
-            else:
-                color = {
-                    "arousal": "magenta",
-                    "stress": "red",
-                    "rationality": "green",
-                    "irrationality": "yellow",
-                }.get(label, "blue")
-                grid.add_row(
-                    label,
-                    Bar(size=1.0, begin=0.0, end=value, width=24, color=color),
-                    f"{value:.2f}",
-                )
-        panels.append(Panel(grid, title="mental state", border_style="cyan"))
+    state_panel = _mental_state_panel(org)
+    if state_panel is not None:
+        panels.append(state_panel)
+
+    panels.append(_mind_metrics_panel(org))
 
     stats = _perpetuation_stats(store)
     if stats:
@@ -545,9 +667,13 @@ def inner_renderable(org):
         )
         panels.append(Panel(grid, title="perpetuation loop", border_style="magenta"))
 
-    arena = activity.summary_lines(store)
-    if arena:
-        panels.append(Panel(Text("\n".join(arena)), title="thought arena", border_style="yellow"))
+    activity_panel = _activity_panel(store)
+    if activity_panel is not None:
+        panels.append(activity_panel)
+
+    sense = _host_sense_strip(store)
+    if sense is not None:
+        panels.append(sense)
 
     proposal = _pending_proposal(org)
     if proposal:

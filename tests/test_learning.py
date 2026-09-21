@@ -2,7 +2,9 @@
 vocabulary sanitization, hear() assimilation into the belief store,
 and narration exposure of user facts."""
 
-from replicanta import learning
+import json
+
+from replicanta import extensions, learning
 from replicanta.learning import analyze, describe
 from replicanta.narration import build_prompt, state_snapshot
 from replicanta.organism import Organism
@@ -211,3 +213,76 @@ def test_llm_fallback_extracts_facts(monkeypatch):
     result = analyze("i spend weekends hiking in the mountains", use_llm=True)
     assert result["facts"][0]["belief"] == ("user", "hobby", "hiking")
     assert result["facts"][0]["confidence"] == learning.LLM_CONF
+
+
+# -- tier B extension patterns ---------------------------------------------------
+
+
+def _load_pattern_registry(tmp_path, template):
+    """Write a registry with one approved pattern directly (bypassing
+    validate) to simulate a bad template that slipped into the registry."""
+    path = tmp_path / "artifacts" / "extensions.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "entries": [
+                    {
+                        "kind": "pattern",
+                        "regex": "my zone is ([a-z]+)",
+                        "template": template,
+                        "example": "my zone is kitchen",
+                    }
+                ],
+                "pending": None,
+            }
+        )
+    )
+    extensions.load_global(path)
+
+
+def test_valid_extension_template_still_fires(tmp_path):
+    org = _organism(tmp_path)
+    _load_pattern_registry(tmp_path, "user:zone:{x}")
+    events = org.hear("my zone is kitchen")
+    assert org.store.conf(("user", "zone", "kitchen")) == 0.8
+    assert any(e["kind"] == "learned" for e in events)
+
+
+def test_bad_extension_template_never_breaks_hear(tmp_path, caplog):
+    # "user:zone:9{x}" substitutes to "9kitchen" — outside the [a-z_]+
+    # belief vocabulary — which used to raise ValueError out of store.add
+    # and kill the chat handler
+    org = _organism(tmp_path)
+    _load_pattern_registry(tmp_path, "user:zone:9{x}")
+    events = org.hear("my zone is kitchen")  # must not raise
+    assert ("user", "zone", "9kitchen") not in org.store.beliefs()
+    # the learning-side guard skips the bad template before it can raise
+    assert "invalid template" in caplog.text
+    # the built-in "my X is Y" pattern still learns the sanitized fact
+    learned = [e for e in events if e["kind"] == "learned"]
+    assert learned and all(e["belief"] != ("user", "zone", "9kitchen") for e in learned)
+    assert org.store.conf(("user", "zone", "kitchen")) == 0.8
+    # the rest of hear() still works: chat recorded, events flow
+    assert org.store.chat_log[-1] == ["user", "my zone is kitchen"]
+
+
+def test_hear_survives_unlearnable_fact(tmp_path, monkeypatch):
+    # last line of defense: a fact outside the belief vocabulary is
+    # dropped with a log line instead of raising out of hear()
+    org = _organism(tmp_path)
+
+    def fake_analyze(text):
+        return {
+            "speech_act": "statement",
+            "facts": [{"belief": ("user", "zone", "9bad"), "replace": False, "confidence": learning.LEARN_CONF}],
+            "goals": [],
+            "commands": [],
+            "question": False,
+        }
+
+    monkeypatch.setattr("replicanta.learning.analyze", fake_analyze)
+    events = org.hear("my zone is 9bad")
+    assert org.store.conf(("user", "zone", "9bad")) is None
+    assert not any(e["kind"] == "learned" for e in events)

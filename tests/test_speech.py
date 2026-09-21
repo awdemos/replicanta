@@ -93,6 +93,40 @@ def test_speech_ignores_empty_text(monkeypatch):
     assert speech._queue.empty()
 
 
+def test_say_concurrent_calls_start_one_worker(monkeypatch):
+    """say() checks and starts the drain worker under a lock: racing callers
+    must not each spawn a worker for the same queue. The patched start()
+    stalls so the second caller hits the check while the first worker is
+    still mid-start (is_alive() False) — without the lock it would double."""
+    monkeypatch.setattr(speech, "_speak", lambda _text: None)
+    monkeypatch.setattr(speech, "available", lambda: True)
+    speech.set_enabled(True)
+    speech._worker = None  # a previous test's drain thread can still be in its 30s exit wait
+    real_thread = threading.Thread
+    created = []
+    gate = threading.Event()
+
+    class SlowStartThread(real_thread):
+        def start(self):
+            gate.wait(2.0)  # widen the check-and-start race window
+            return real_thread.start(self)
+
+    def factory(*args, **kwargs):
+        t = SlowStartThread(*args, **kwargs)
+        created.append(t)
+        return t
+
+    monkeypatch.setattr(speech.threading, "Thread", factory)
+    racers = [real_thread(target=lambda i=i: speech.say(f"utterance {i}")) for i in range(4)]
+    for t in racers:
+        t.start()
+    gate.set()
+    for t in racers:
+        t.join(5)
+    workers = [t for t in created if t.name == "speech"]
+    assert len(workers) == 1
+
+
 def test_trim_for_speech_keeps_short_text_intact():
     text = "Hello, this is short."
     assert speech._trim_for_speech(text) == text
