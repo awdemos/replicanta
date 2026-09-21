@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Self
 
 # Block type nibbles (matching the original doom-nano legend)
 E_FLOOR = 0x0
@@ -726,53 +727,52 @@ class DoomService:
         self._lua_lock = lua_lock
         self._game: _DoomGame | None = None
 
-    def available(self):
+    def available(self) -> bool:
         return True
 
-    def running(self):
+    def running(self) -> bool:
         return self._game is not None and not self._game.finished
 
-    def status(self):
+    def status(self) -> str:
         if self._game is None:
             return "no game running — press F10 in the DOOM pane"
         return self._game.render()
 
-    def tactical(self):
+    def tactical(self) -> str:
         if self._game is None:
             return "no game running"
         return self._game.tactical_summary()
 
-    def can_shoot(self):
+    def can_shoot(self) -> bool:
         if self._game is None:
             return False
         return self._game.can_shoot()
 
     @staticmethod
-    def maps():
+    def maps() -> list[str]:
         return sorted(MAPS)
 
-    def start(self, name="default"):
+    def start(self, name: str = "default") -> str:
         name = str(name or "default")
         if name not in MAPS:
             raise ValueError(f"unknown map {name!r}")
         self._game = _DoomGame(name=name, world_map=MAPS[name])
         return self._game.render()
 
-    def stop(self):
+    def stop(self) -> str:
         self._game = None
         return "stopped"
 
-    def command(self, cmd):
+    def command(self, cmd: str) -> str:
         if cmd == "start":
             return self.start()
         if self._game is None:
             raise RuntimeError("no game running")
         return self._game.tick(cmd)
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type, exc, tb) -> bool | None:
         self.stop()
         return False
-

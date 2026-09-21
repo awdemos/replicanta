@@ -102,7 +102,7 @@ class MemoryScorer:
         return ranked[:top_k]
 
     @staticmethod
-    def mark_recalled(memory: dict):
+    def mark_recalled(memory: dict) -> None:
         """Increment the recall counter on a memory dict."""
         memory["recall"] = memory.get("recall", 0) + 1
 

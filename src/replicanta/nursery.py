@@ -20,16 +20,16 @@ AUTO_NAME_PREFIX = "replicanta"
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
-def _nursery(root):
+def _nursery(root: str | Path) -> Path:
     return Path(root) / NURSERY_DIR
 
 
-def _validate(name):
+def _validate(name: str) -> None:
     if not NAME_RE.match(name):
         raise ValueError(f"invalid organism name {name!r} — use letters, digits, - and _")
 
 
-def list_organisms(root):
+def list_organisms(root: str | Path) -> list[str]:
     """Sorted names of every organism in the nursery."""
     nursery = _nursery(root)
     if not nursery.is_dir():
@@ -37,11 +37,11 @@ def list_organisms(root):
     return sorted(p.name for p in nursery.iterdir() if p.is_dir())
 
 
-def organism_dir(root, name):
+def organism_dir(root: str | Path, name: str) -> Path:
     return _nursery(root) / name
 
 
-def create(root, name, template_scl):
+def create(root: str | Path, name: str, template_scl: str | Path) -> Path:
     """Birth a new organism: its own directory seeded with a copy of the
     template genome. ValueError on an invalid or taken name."""
     _validate(name)
@@ -53,7 +53,7 @@ def create(root, name, template_scl):
     return dest
 
 
-def next_name(root):
+def next_name(root: str | Path) -> str:
     """First free auto-name (replicanta-2, replicanta-3, …) for bare /new."""
     taken = set(list_organisms(root))
     n = 2
@@ -62,7 +62,7 @@ def next_name(root):
     return f"{AUTO_NAME_PREFIX}-{n}"
 
 
-def rename(root, old, new):
+def rename(root: str | Path, old: str, new: str) -> Path:
     """Rename an organism: move its whole directory and repoint `current`
     when the renamed one is the awake organism. Names may mix upper- and
     lowercase; on case-insensitive filesystems a change of letter case
@@ -93,7 +93,7 @@ def rename(root, old, new):
     return dest
 
 
-def current(root):
+def current(root: str | Path) -> str:
     """The active organism's name ('default' when never set)."""
     pointer = Path(root) / CURRENT_FILE
     try:
@@ -103,11 +103,11 @@ def current(root):
     return name or DEFAULT_NAME
 
 
-def set_current(root, name):
+def set_current(root: str | Path, name: str) -> None:
     atomic_write_text(Path(root) / CURRENT_FILE, name + "\n")
 
 
-def migrate(root):
+def migrate(root: str | Path) -> bool:
     """Move a legacy root-level organism (state.json + artifacts/ living
     next to the seed genome) into organisms/default/. Its evolved
     organism.scl is copied along; the root copy stays as the template.
@@ -135,12 +135,12 @@ GROUPS_FILE = "groups.json"
 GROUP_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,31}$")
 
 
-def _validate_group(name):
+def _validate_group(name: str) -> None:
     if not GROUP_NAME_RE.match(name):
         raise ValueError(f"invalid group name {name!r} — use letters, digits, spaces, -, _ and .")
 
 
-def load_groups(root):
+def load_groups(root: str | Path) -> dict[str, list[str]]:
     """Group name -> sorted member organism names, read from groups.json.
     Missing or corrupt files read as no groups; members whose organism
     directory no longer exists are pruned. Empty groups survive — a group
@@ -161,16 +161,16 @@ def load_groups(root):
     return groups
 
 
-def save_groups(root, groups):
+def save_groups(root: str | Path, groups: dict[str, list[str]]) -> None:
     atomic_write_text(Path(root) / GROUPS_FILE, json.dumps(groups, indent=2, sort_keys=True) + "\n")
 
 
-def list_groups(root):
+def list_groups(root: str | Path) -> list[str]:
     """Sorted names of every group in the nursery."""
     return sorted(load_groups(root))
 
 
-def create_group(root, name):
+def create_group(root: str | Path, name: str) -> None:
     """Create an empty group. ValueError on an invalid or taken name."""
     _validate_group(name)
     groups = load_groups(root)
@@ -180,7 +180,7 @@ def create_group(root, name):
     save_groups(root, groups)
 
 
-def rename_group(root, old, new):
+def rename_group(root: str | Path, old: str, new: str) -> None:
     """Rename a group, keeping its members. ValueError on an invalid new
     name, a missing old group, or a taken new name."""
     _validate_group(new)
@@ -195,7 +195,7 @@ def rename_group(root, old, new):
     save_groups(root, groups)
 
 
-def remove_group(root, name):
+def remove_group(root: str | Path, name: str) -> None:
     """Dissolve a group; its members become ungrouped."""
     groups = load_groups(root)
     if name not in groups:
@@ -204,7 +204,7 @@ def remove_group(root, name):
     save_groups(root, groups)
 
 
-def group_of(root, org_name):
+def group_of(root: str | Path, org_name: str) -> str | None:
     """The group an organism belongs to, or None when ungrouped."""
     for name, members in load_groups(root).items():
         if org_name in members:
@@ -212,7 +212,7 @@ def group_of(root, org_name):
     return None
 
 
-def assign(root, org_name, group_name):
+def assign(root: str | Path, org_name: str, group_name: str | None) -> None:
     """Move an organism into a group (None = ungrouped), removing it from
     whatever group it was in. ValueError on an unknown organism or group."""
     if org_name not in list_organisms(root):

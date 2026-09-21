@@ -44,7 +44,7 @@ class CognitiveThread:
     result: Any = None
     error: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not _valid_thread_id(self.id):
             raise ValueError(f"invalid thread id {self.id!r}")
 
@@ -87,11 +87,11 @@ class ThreadPool:
                 done.append((thread_id, None, str(exc)))
         return done
 
-    def shutdown(self, wait: bool = False):
+    def shutdown(self, wait: bool = False) -> None:
         self.executor.shutdown(wait=wait, cancel_futures=True)
 
 
-def derive_in_thread(genome_text: str, rule: str, head_relation: str):
+def derive_in_thread(genome_text: str, rule: str, head_relation: str) -> list[tuple[float, tuple]]:
     """Run one Scallop rule in a worker context built from ``genome_text``.
 
     Returns ``(tag, tuple)`` list. The worker creates its own context so the
