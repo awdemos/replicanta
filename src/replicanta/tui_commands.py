@@ -15,6 +15,7 @@ COMMANDS = [
     ("/focus", "/focus attr", "lock attention on attr (bare /focus clears)", "State"),
     ("/sleep", "/sleep", "force wake->sleep", "State"),
     ("/wake", "/wake", "force sleep->wake", "State"),
+    ("/soothe", "/soothe", "comfort the organism: relieve its stress", "State"),
     ("/revive", "/revive", "bring a faded organism back", "State"),
     ("/stats", "/stats", "show growth metrics", "State"),
     ("/think", "/think", "narrate thoughts now", "State"),
@@ -189,6 +190,15 @@ def _cmd_sleep(app, parts):
 def _cmd_wake(app, parts):
     for event in app.org.force_state("wake"):
         app._render_event(event)
+
+
+def _cmd_soothe(app, parts):
+    relief = app.org.soothe()
+    if relief > 0.0:
+        app._append_log(f"you soothe it — stress eases by {relief:.2f}", STYLE_DIM)
+    else:
+        app._append_log("the organism is already at ease.", STYLE_DIM)
+    app.refresh_status()
 
 
 def _cmd_revive(app, parts):
@@ -461,6 +471,7 @@ COMMAND_HANDLERS = {
     "/focus": _cmd_focus,
     "/sleep": _cmd_sleep,
     "/wake": _cmd_wake,
+    "/soothe": _cmd_soothe,
     "/revive": _cmd_revive,
     "/stats": _cmd_stats,
     "/think": _cmd_think,
@@ -588,11 +599,11 @@ def help_text():
         "ctrl+c   press twice to quit",
         "ctrl+s   save now",
         "ctrl+t   think now",
-        "ctrl+m   toggle terminal mouse capture (off by default = text selectable)",
+        "ctrl+m   toggle terminal mouse capture (on by default; off = text selectable)",
         "ctrl+shift+c copy the chat log",
         "tab      complete a slash command",
         "up/down  recall previous chat lines",
-        "mouse    disabled for selection by default; ctrl+m to enable clicks",
+        "mouse    clicks on by default; ctrl+m toggles native text selection",
         "",
         "modules: /modules opens the manager. enable fly-brain, save, then use",
         "/brain status | run <task> | optimize <task> | adapt | bank.",

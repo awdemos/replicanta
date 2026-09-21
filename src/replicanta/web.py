@@ -470,6 +470,12 @@ class Glasshouse:
             elif name == "/wake":
                 self.lifecycle("wake")
                 messages.append("waking")
+            elif name == "/soothe":
+                relief = self.org.soothe()
+                if relief > 0.0:
+                    messages.append(f"you soothe it — stress eases by {relief:.2f}")
+                else:
+                    messages.append("the organism is already at ease")
             elif name == "/revive":
                 if self.org.revive():
                     messages.append("revived: the organism stirs back into existence.")

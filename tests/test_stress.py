@@ -137,6 +137,48 @@ def test_sleep_clears_bumps_faster_than_wake(store):
     assert meter.value > 0.30
 
 
+# -- soothe ------------------------------------------------------------------
+
+
+def _org(tmp_path):
+    scl = tmp_path / "organism.scl"
+    scl.write_text('rel 0.9::bel("apple", "color", "red")\n')
+    org = Organism(tmp_path)
+    org.load()
+    return org
+
+
+def test_soothe_relieves_half_the_excess(tmp_path):
+    org = _org(tmp_path)
+    org.store.stress = 0.8
+    relief = org.soothe()
+    assert relief == pytest.approx(0.375)
+    assert org.store.stress == pytest.approx(0.425)
+
+
+def test_soothe_floors_at_baseline(tmp_path):
+    org = _org(tmp_path)
+    org.store.stress = 0.12
+    relief = org.soothe()
+    assert org.store.stress == pytest.approx(StressMeter.BASELINE)
+    assert relief == pytest.approx(0.12 - StressMeter.BASELINE)
+
+
+def test_soothe_at_ease_is_noop(tmp_path):
+    org = _org(tmp_path)
+    org.store.stress = StressMeter.BASELINE
+    assert org.soothe() == 0.0
+    assert org.store.stress == pytest.approx(StressMeter.BASELINE)
+
+
+def test_soothe_reads_as_kindness(tmp_path):
+    org = _org(tmp_path)
+    org.store.stress = 0.8
+    org.soothe()
+    assert org._sentiment is not None and org._sentiment[0] == "kind"
+    assert any("soothed" in m.get("text", "") for m in org.store.memory)
+
+
 # -- persistence -----------------------------------------------------------
 
 

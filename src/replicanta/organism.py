@@ -1700,6 +1700,22 @@ class Organism:
         self.flush(force=True)
         return True
 
+    def soothe(self):
+        """Comfort the organism: relieve half its excess stress (at least
+        0.10), down to baseline, and let the relief read as kindness so the
+        mood turns grateful on the next tick. Returns the amount relieved
+        (0.0 when already at ease)."""
+        before = self.store.stress
+        if before <= StressMeter.BASELINE:
+            return 0.0
+        relief = max(0.10, (before - StressMeter.BASELINE) * 0.5)
+        after = max(StressMeter.BASELINE, before - relief)
+        self.store.stress = after
+        self.store.remember("comforted", f"the user soothed it (stress {before:.2f} -> {after:.2f})")
+        self._sentiment = ("kind", time.time())
+        self.store.dirty = True
+        return before - after
+
     def metrics(self):
         """Return a fresh ``Metrics`` wrapper for the organism's store."""
         return Metrics(self.store)
