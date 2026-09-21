@@ -1,6 +1,7 @@
 """The Textual app shell: OrganismApp wires the organism core (organism.py),
-the thought arena (arena.py) and the MUD engine (mud.py) to the terminal,
-delegating pure rendering/parsing to tui_views.py and tui_commands.py."""
+the thought arena (arena.py) and the per-subsystem controllers
+(tui_controllers.py) to the terminal, delegating pure rendering/parsing to
+tui_views.py and tui_commands.py."""
 
 import contextlib
 import logging
@@ -49,7 +50,6 @@ from replicanta import (
     fileutil,
     groupchat,
     listen,
-    mud,
     nursery,
     rdd,
     speech,
@@ -59,6 +59,12 @@ from replicanta import (
     voice,
 )
 from replicanta.organism import Organism
+from replicanta.tui_controllers import (
+    DoomController,
+    MudController,
+    VoiceController,
+    extract_doom_command,
+)
 from replicanta.tui_views import (
     STYLE_DIM,
     STYLE_DREAM,
@@ -645,46 +651,6 @@ class ModulesScreen(ModalScreen):
 NARRATE_INTERVAL = 45.0  # seconds between self-narrations (each = 5 LLM calls)
 VOICE_PROBE_INTERVAL = 60.0  # seconds between ollama reachability probes
 ASK_USER_ODDS = 0.35  # chance an idle wake utterance asks the user instead
-MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
-
-
-def _doom_player_command(text):
-    """User chat input -> normalized nano-doom command, or None if not a move."""
-    if not text:
-        return None
-    words = [w for w in text.strip().lower().split()]
-    if not words:
-        return None
-    # Obsolete: prefer arrow keys when the DOOM pane is active so chat typing
-    # is not confused with movement commands.
-    if len(words) == 1 and words[0] in ("shoot", "look", "start", "stop", "status"):
-        return words[0]
-    return None
-
-
-def _extract_doom_command(reply):
-    """Look for a line that looks like doom.command(...) and return the inner arg.
-    Also tolerate a bare move word as a fallback for sloppy model output."""
-    if not reply:
-        return None
-    valid = {"w", "a", "s", "d", "q", "e", "shoot", "use"}
-    for line in reply.strip().splitlines():
-        line = line.strip()
-        if line.startswith("doom.command("):
-            if line.endswith(")"):
-                inner = line[len("doom.command(") : -1].strip()
-                inner = inner.strip('"').strip("'")
-                if inner in valid:
-                    return inner
-            continue
-        # Fallback: a line that is just one of the valid moves.
-        lowered = line.lower()
-        if lowered in valid:
-            return lowered
-        # 'shoot' may appear as a single word anywhere.
-        if lowered == "shoot":
-            return "shoot"
-    return None
 
 
 class OrganismApp(App):
@@ -833,8 +799,6 @@ class OrganismApp(App):
         self._history_index = -1
         self._history_draft = ""
         self._suppress_changed = False
-        self._probing_voice = False
-        self._voice_announced = None
         self._self_talk_on = False
         self._self_talking = False
         self._rng = random.Random()  # nosec B311 - UI variety RNG, not cryptography
@@ -846,17 +810,16 @@ class OrganismApp(App):
         self._typing_last = 0.0
         self.listener = listen.Listener()
         self.camera = camera.Camera()
-        self._mud_game = None
-        self._mud_hint = None  # one-shot user nudge for the next move
-        self._mud_paused = True  # start paused; the human plays the MUD
-        self._mud_thinking = False  # a move-choice worker is in flight
-        self._mud_turn_gen = 0  # bumped by user moves/hints: stales in-flight
+        # per-subsystem behavior owners (tui_controllers.py): the app keeps
+        # composition, binding wiring, rendering, and the @work boundaries
+        self._mud = MudController(self)
+        self._doom = DoomController(self)
+        self._voice = VoiceController(self)
         self._brain_running = False  # cached fly-brain state for activity label
         self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
         self._visual_text = ""
-        self._doom_text = ""
         self._topbar_text = ""
         self._bottombar_text = ""
         self._rendered_topbar_text = None
@@ -932,10 +895,9 @@ class OrganismApp(App):
         self._mouse_enabled = False
         driver = getattr(self, "_driver", None)
         if driver is not None:
-            try:
+            # a headless driver may not implement mouse protocols at all
+            with contextlib.suppress(Exception):
                 driver._disable_mouse_support()
-            except Exception:
-                pass
         self._show_org()
         tab_bar = self._safe_query("#tab-bar", TabBar)
         if tab_bar is not None:
@@ -1019,72 +981,25 @@ class OrganismApp(App):
             self.chat_input.focus()
 
     def action_doom_toggle(self):
-        loader = getattr(self.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None:
-            return
-        active = self.query_one(TabbedContent).active
-        if active != "doom-pane":
-            self.action_show_tab("doom-pane")
-            # If no game is running, start one immediately when opening the pane.
-            if not svc.running():
-                self._doom_command(["start"])
-            # Once the game is started, kick the entity into auto-play.
-            if svc.running():
-                self.set_timer(0.3, self._doom_take_turn)
-            return
-        # Already on the DOOM pane: toggling again stops the game and leaves the pane.
-        if svc.running():
-            self._doom_command(["stop"])
+        self._doom.toggle()
 
     def action_doom_up(self):
-        self._doom_key_command("w")
+        self._doom.key_command("w")
 
     def action_doom_down(self):
-        self._doom_key_command("s")
+        self._doom.key_command("s")
 
     def action_doom_left(self):
-        self._doom_key_command("q")
+        self._doom.key_command("q")
 
     def action_doom_right(self):
-        self._doom_key_command("e")
+        self._doom.key_command("e")
 
     def action_doom_shoot(self):
-        self._doom_key_command("shoot")
+        self._doom.key_command("shoot")
 
     def action_doom_stop(self):
-        self._doom_key_command("stop")
-
-    def _doom_key_command(self, cmd):
-        loader = getattr(self.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None:
-            return
-        # When on the DOOM pane, arrow/space keys drive the game; otherwise ignore.
-        active = self.query_one(TabbedContent).active
-        if active != "doom-pane":
-            return
-        # If no game is running, start one automatically on the first keypress.
-        if not svc.running():
-            if cmd == "stop":
-                return
-            self._doom_command(["start"])
-        if not svc.running():
-            return
-        # Human took manual control: cancel any queued auto-turn and run the
-        # command immediately so the player feels in charge.
-        self._doom_cancel_auto()
-        if cmd != "start":
-            self._doom_command([cmd])
-        # After the human moves, let the entity respond and take its turn.
-        if svc.running():
-            self.set_timer(0.3, self._doom_take_turn)
-
-    def _doom_cancel_auto(self):
-        """Cancel pending auto-play timers so manual control wins."""
-        for timer in list(getattr(self, "_timers", [])):
-            if getattr(timer, "_callback", None) is self._doom_take_turn:
-                timer.stop()
+        self._doom.key_command("stop")
 
     def on_button_pressed(self, event):
         """Route tab-bar, mutation, and quick-action button presses."""
@@ -1165,12 +1080,13 @@ class OrganismApp(App):
 
     def action_confirm_quit(self):
         """F10 asks before quitting, unlike ctrl+q which is the fast path."""
+
         def check(answer):
             if answer:
                 self.action_quit()
 
         class QuitDialog(ModalScreen[bool]):
-            BINDINGS = [Binding("escape", "dismiss", "close")]
+            BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
             CSS = """
             QuitDialog { align: center middle; }
             #quit-box { width: 50; height: auto; border: round $primary; padding: 1 2; background: $surface; }
@@ -1252,13 +1168,13 @@ class OrganismApp(App):
         self._mouse_enabled = not self._mouse_enabled
         driver = getattr(self, "_driver", None)
         if driver is not None:
-            try:
+            # mouse protocol support varies by driver/terminal; the toggle
+            # state is tracked in _mouse_enabled either way
+            with contextlib.suppress(Exception):
                 if self._mouse_enabled:
                     driver._enable_mouse_support()
                 else:
                     driver._disable_mouse_support()
-            except Exception:
-                pass
         status = "enabled" if self._mouse_enabled else "disabled"
         self._append_log(f"— mouse capture {status} (ctrl+m to toggle) —", STYLE_DIM, stamp=True)
 
@@ -1609,7 +1525,7 @@ class OrganismApp(App):
 
     def action_mud(self):
         """Toggle the MUD mini-game."""
-        self._mud_command([])
+        self._mud.command([])
 
     # -- sight (camera) ------------------------------------------------------
     def _look_now(self):
@@ -1637,280 +1553,14 @@ class OrganismApp(App):
             return
         self.call_from_thread(self._set_sight, sight)
 
-    # -- mud mode ------------------------------------------------------------
-    def _mud_command(self, args):
-        """Dispatch /mud subcommands: bare toggles, the rest control or
-        inspect the running game."""
-        if not args:
-            self._toggle_mud()
-            return
-        sub = args[0]
-        if sub in ("map", "story", "quest"):
-            game = self._mud_game
-            if game is None:
-                self._append_log(f"/mud {sub}: no game running (start with /mud)", STYLE_DIM)
-                return
-            render = {
-                "map": mud.render_map,
-                "story": mud.render_story,
-                "quest": mud.render_quest,
-            }[sub]
-            self._append_log(render(game), STYLE_DREAM)
-        elif sub == "pause":
-            if self._mud_game is None:
-                self._append_log("/mud pause: no game running.", STYLE_DIM)
-            elif self._mud_paused:
-                self._append_log("mud: already paused (/mud resume)", STYLE_DIM)
-            else:
-                self._mud_paused = True
-                self._append_log(
-                    "— the dungeon holds its breath (paused; /mud resume, /mud step, or type a command) —",
-                    STYLE_DIM,
-                    stamp=True,
-                )
-                self.refresh_status()
-        elif sub == "resume":
-            if self._mud_game is None:
-                self._append_log("/mud resume: no game running.", STYLE_DIM)
-            elif not self._mud_paused:
-                self._append_log("mud: not paused.", STYLE_DIM)
-            else:
-                self._mud_paused = False
-                self._append_log("— the dungeon stirs again —", STYLE_DIM, stamp=True)
-                self.refresh_status()
-                self._mud_next()
-        elif sub == "step":
-            self._mud_step()
-        elif sub == "reset":
-            self._mud_reset()
-        elif sub == "scenario":
-            description = " ".join(args[1:]).strip()
-            if not description:
-                self._append_log(
-                    "/mud scenario needs a description, e.g. /mud scenario a haunted space station",
-                    STYLE_DIM,
-                )
-                return
-            self._mud_scenario(description)
-        else:
-            self._append_log(
-                "/mud [map|story|quest|pause|resume|step|reset|scenario <description>]",
-                STYLE_DIM,
-            )
-
-    def _toggle_mud(self):
-        """/mud: start or stop the organism's dungeon crawl. The world is
-        deterministic; the voice picks the moves (wanderer fallback)."""
-        if self._mud_game is not None:
-            self._mud_stop()
-            return
-        self._mud_start()
-
-    def _mud_start(self, scenario=None, fresh=False):
-        """Begin a game: with the given scenario, else resuming the saved
-        session when one exists, else the default dungeon."""
-        session = None
-        if scenario is None and not fresh:
-            scenario, session = self._mud_restore()
-        game = mud.MudGame(scenario)
-        if session is not None:
-            # the session tracks map/story but not room/inventory: replay
-            # the logged commands to bring back the exact game state
-            for actor, command, _turn in session.command_log:
-                game.act_event(command, actor_name=actor)
-            game.session = session
-        self._mud_game = game
-        self._mud_paused = True
-        if session is not None:
-            self._append_log(
-                f"— the organism returns to {game.scenario.title} (turn {game.turns}) —",
-                STYLE_DREAM,
-                stamp=True,
-            )
-        else:
-            self._append_log(
-                "— the dungeon opens for you; the organism stands beside you as a companion —",
-                STYLE_DREAM,
-                stamp=True,
-            )
-            self._append_log(mud.build_premise(self.org, game.scenario), STYLE_DREAM)
-        self._append_log(game.look(), STYLE_DREAM)
-        self.org.store.remember("mud", f"started {game.scenario.title}")
-        self._mud_save_session(game)
-        self.refresh_status()
-
-    def _mud_stop(self):
-        """End the current game, persisting its session for a later resume."""
-        game, self._mud_game = self._mud_game, None
-        self._mud_paused = False
-        self._mud_save_session(game)
-        self._append_log(
-            f"— the dungeon fades (stopped after {game.turns} turns) —",
-            STYLE_DIM,
-            stamp=True,
-        )
-        self.org.store.remember("mud", f"left {game.scenario.title} after {game.turns} turns")
-        self.refresh_status()
-
-    def _mud_reset(self):
-        """Restart the current scenario fresh, discarding the session."""
-        game = self._mud_game
-        if game is None:
-            self._append_log("/mud reset: no game running.", STYLE_DIM)
-            return
-        scenario = game.scenario
-        self._mud_game = None
-        self._mud_paused = False
-        self._append_log("— the dungeon resets —", STYLE_DIM, stamp=True)
-        self._mud_start(scenario=scenario, fresh=True)
-
-    def _mud_step(self):
-        """/mud step: exactly one organism turn while paused."""
-        if self._mud_game is None:
-            self._append_log("/mud step: no game running.", STYLE_DIM)
-            return
-        if not self._mud_paused:
-            self._append_log("auto-turns are running — /mud pause first", STYLE_DIM)
-            return
-        if self._mud_thinking:
-            return  # a move is already being chosen
-        self._mud_thinking = True
-        self._mud_turn()
-
-    def _mud_scenario(self, description):
-        """/mud scenario <description>: stop the current game and dream up
-        a new scenario with the voice (off the UI thread)."""
-        if self._mud_game is not None:
-            self._mud_stop()
-        self._append_log(f"dreaming up a scenario: {description}…", STYLE_DIM)
-        self._mud_scenario_worker(description)
+    # -- mud (worker boundaries; behavior in MudController) ------------------
+    @work(thread=True)
+    def _mud_turn(self):
+        self._mud.turn()
 
     @work(thread=True)
     def _mud_scenario_worker(self, description):
-        self.call_from_thread(self.set_activity, "MUD dreaming")
-        try:
-            scenario = mud.generate_scenario(description, self.org)
-        except Exception as exc:  # noqa: BLE001 — voice offline etc.
-            self.call_from_thread(self._append_log, f"/mud scenario failed: {exc}", STYLE_WARN)
-            return
-        finally:
-            self.call_from_thread(self.clear_activity)
-        self.call_from_thread(self._mud_start_scenario, scenario)
-
-    def _mud_start_scenario(self, scenario):
-        self._mud_save_scenario(scenario)
-        self._append_log(f"new scenario: {scenario.title}", STYLE_LEARNED, stamp=True)
-        self._mud_start(scenario=scenario, fresh=True)
-
-    # -- mud persistence ------------------------------------------------------
-    def _mud_artifacts_dir(self):
-        return self.org.dir_path / "artifacts"
-
-    def _mud_save_session(self, game=None):
-        """Persist the session after every turn and on stop via the
-        organism-side BeliefStore."""
-        game = game or self._mud_game
-        if game is None:
-            return
-        self.org.store.save_mud_session(game.session)
-
-    def _mud_load_session(self):
-        return self.org.store.load_mud_session()
-
-    def _mud_restore(self):
-        """(scenario, session) from disk for resume, or (None, None) to
-        start fresh: a finished or scenario-less session is not resumed."""
-        session = self._mud_load_session()
-        if session is None or session.outcome is not None:
-            return None, None
-        scenario = self._mud_load_scenario(session.scenario_id)
-        if scenario is None:
-            return None, None
-        return scenario, session
-
-    def _mud_load_scenario(self, slug):
-        """A saved generated scenario by slug, or the built-in default —
-        thin wrapper over ``mud.load_scenario`` that only translates errors
-        into the TUI log. The slug comes from a resumed session on disk, so
-        the domain layer re-validates it before touching the filesystem."""
-        try:
-            return mud.load_scenario(slug, self._mud_artifacts_dir())
-        except (OSError, ValueError) as exc:
-            self._append_log(f"mud: couldn't load scenario {slug} ({exc})", STYLE_WARN)
-            return mud.default_scenario_for_slug(slug)
-
-    def _mud_save_scenario(self, scenario):
-        """Save a generated scenario via the domain layer, rendering the
-        result message (or the OSError) into the TUI log."""
-        try:
-            self._append_log(mud.save_scenario(scenario, self._mud_artifacts_dir()), STYLE_DIM)
-        except OSError as exc:
-            self._append_log(f"mud: couldn't save scenario ({exc})", STYLE_WARN)
-
-    # -- mud turns -------------------------------------------------------------
-    @work(thread=True)
-    def _mud_turn(self):
-        game = self._mud_game
-        if game is None:
-            self._mud_thinking = False
-            return
-        self.call_from_thread(self.set_activity, "MUD thinking")
-        hint, self._mud_hint = self._mud_hint, None
-        gen = self._mud_turn_gen
-        try:
-            command, reason = mud.choose_action(game, hint=hint, rng=self._rng, org=self.org)
-            self.call_from_thread(self._mud_apply, game, command, "organism", gen, reason)
-        except Exception as exc:  # noqa: BLE001
-            self.call_from_thread(self._worker_error, "MUD turn", exc)
-        finally:
-            self.call_from_thread(self.clear_activity)
-
-    def _mud_apply(self, game, command, actor="organism", gen=None, reason=None):
-        if actor == "organism":
-            self._mud_thinking = False
-        if self._mud_game is not game:
-            return  # stopped (or restarted) meanwhile
-        if actor == "organism" and gen is not None and gen != self._mud_turn_gen:
-            # a user move (or hint) landed while this move was being
-            # chosen — it was picked from a world that no longer
-            # exists; dropping it keeps the heartbeat honest
-            self._append_log("> (the organism hesitates — the moment passed)", STYLE_DIM)
-            self._mud_schedule()
-            return
-        if actor == "organism" and reason:
-            self._append_log(reason, STYLE_DIM)
-        self._append_log(f"> {command}", STYLE_SELF)
-        result = game.act_event(command, actor_name=actor)
-        self._append_log(result.text, STYLE_DREAM)
-        if result.plot:
-            self._append_log(result.plot, STYLE_LEARNED)
-        if game.finished:
-            outcome = "won" if game.won else "lost"
-            self._append_log(
-                f"— {game.scenario.title} is {outcome} in {game.turns} turns —",
-                STYLE_LEARNED,
-                stamp=True,
-            )
-            self.org.store.remember("mud", f"{outcome} {game.scenario.title} in {game.turns} turns")
-            self._mud_save_session(game)
-            self._mud_game = None
-            self._mud_paused = False
-            self.refresh_status()
-            return
-        self._mud_save_session(game)
-        if actor == "organism":
-            # the organism's heartbeat: user commands execute instantly and
-            # never schedule (a timer is pending, or the game is paused)
-            self._mud_schedule()
-
-    def _mud_schedule(self):
-        if not self._mud_paused:
-            self.set_timer(MUD_TURN_DELAY, self._mud_next)
-
-    def _mud_next(self):
-        if self._mud_game is not None and not self._mud_paused and not self._mud_thinking:
-            self._mud_thinking = True
-            self._mud_turn()
+        self._mud.scenario_worker(description)
 
     def _set_sight(self, sight):
         self.org.see(sight)
@@ -2108,68 +1758,18 @@ class OrganismApp(App):
             activity_label.clear()
         self._typing_timer = None
 
-    # -- voice health ------------------------------------------------------
+    # -- voice health (worker boundary; behavior in VoiceController) --------
     def _probe_voice(self):
-        """Probe LLM backend reachability off the UI thread (noop while one
-        is already in flight); the arena reads the cached result."""
-        if not self._probing_voice:
-            self._probing_voice = True
-            self._probe_voice_worker()
+        self._voice.probe_due()
 
     @work(thread=True)
     def _probe_voice_worker(self):
-        try:
-            voice.probe()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("voice probe failed: %s", exc)
-            voice.mark_offline()
-        finally:
-            self._probing_voice = False
-        self.call_from_thread(self._announce_voice)
+        self._voice.probe()
 
-    def _announce_voice(self):
-        """Tell the user once per voice-state flip how the organism speaks."""
-        state = voice.status()
-        if state != self._voice_announced:
-            self._voice_announced = state
-            if state == "offline":
-                self._append_log(
-                    "inner voice: offline — speaking from my bones (local fallback)",
-                    STYLE_DIM,
-                )
-                self.notify("inner voice offline — local fallback", severity="warning")
-            elif state == "online":
-                backend = voice.llm_backend()
-                label = "llama.cpp" if backend == "llama_cpp" else "ollama"
-                self._append_log(f"inner voice: online ({label})", STYLE_DIM)
-                self.notify(f"inner voice online ({label})")
-        self.refresh_status()
-
-    # -- spoken voice (piper tts) ------------------------------------------
+    # -- spoken voice (piper tts; behavior in VoiceController) --------------
     @work(thread=True)
     def _voice_download(self, name):
-        """Download a piper voice from huggingface in the background, then
-        adopt it. Failure just logs — the current voice is kept."""
-        self.call_from_thread(
-            self._append_log,
-            f"downloading voice {name} (this can take a minute)…",
-            STYLE_DIM,
-        )
-        model = speech.download_voice(name)
-        if model is None:
-            self.call_from_thread(
-                self._append_log,
-                f"/voice get: couldn't fetch {name!r} — names look like "
-                "en_US-lessac-medium, see "
-                "huggingface.co/rhasspy/piper-voices",
-                STYLE_WARN,
-            )
-            self.call_from_thread(self.show_toast, f"Voice download failed: {name}")
-            return
-        speech.set_voice(name)
-        self.call_from_thread(self._append_log, f"voice ready: {name}", STYLE_LEARNED, True)
-        if speech.enabled:
-            speech.say("This is my new voice.")
+        self._voice.download(name)
 
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
@@ -2192,7 +1792,7 @@ class OrganismApp(App):
             return
         self._brain_running = running
         if running:
-            self.set_activity("\U0001FAB0 fly brain processing data…")
+            self.set_activity("\U0001fab0 fly brain processing data…")
         else:
             self.clear_activity()
 
@@ -2219,7 +1819,7 @@ class OrganismApp(App):
             sig = self._visual_signature()
             if sig != getattr(self, "_visual_sig", None):
                 self._render_visual(self._visual_kind, log=False)
-        self._refresh_doom()
+        self._doom.refresh()
         self._update_mutation_banner()
 
     def _update_mutation_banner(self):
@@ -2307,8 +1907,8 @@ class OrganismApp(App):
         """Render the custom bottom bar: activity counters on the left,
         keyboard shortcuts as styled key caps on the right."""
         m = self.org.metrics()
-        if self._mud_game is not None:
-            playing = " · 🗡 mud (paused)" if self._mud_paused else " · 🗡 mud"
+        if self._mud.game is not None:
+            playing = " · 🗡 mud (paused)" if self._mud.paused else " · 🗡 mud"
         else:
             playing = ""
         if self._group is not None:
@@ -2321,9 +1921,9 @@ class OrganismApp(App):
         brain_loaded = brain_svc is not None
         if brain_loaded:
             if brain_svc.running():
-                playing += " · \U0001FAB0 fly brain running"
+                playing += " · \U0001fab0 fly brain running"
             else:
-                playing += " · \U0001FAB0 fly brain ready"
+                playing += " · \U0001fab0 fly brain ready"
         counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {voice.status()}{playing}"
         keys = Text.assemble(
             ("ctrl+p", "reverse"),
@@ -2356,7 +1956,7 @@ class OrganismApp(App):
         voice_btn = qa.query_one("#qa-voice", Button)
         voice_btn.label = f"Voice: {'on' if speech.enabled else 'off'}"
         mud_btn = qa.query_one("#qa-mud", Button)
-        mud_btn.label = "MUD: on" if self._mud_game is not None else "MUD: off"
+        mud_btn.label = "MUD: on" if self._mud.game is not None else "MUD: off"
 
     def set_activity(self, text):
         """Show a transient activity message in the status bar."""
@@ -2785,68 +2385,6 @@ class OrganismApp(App):
             self.refresh_status()
             self.set_activity("🪰 fly brain is running…")
 
-    def _doom_command(self, args):
-        """Dispatch /doom subcommands: bare = status, start/stop, or direct
-        movement/shoot while a game is running."""
-        loader = getattr(self.org, "module_loader", None)
-        if loader is None:
-            self._append_log("module loader unavailable", STYLE_WARN)
-            return
-        svc = loader.registry.get("doom")
-        if svc is None:
-            self._append_log("nano-doom module not loaded (enable it via /modules)", STYLE_WARN)
-            return
-        commands = loader.registry.get("commands")
-        if commands is None:
-            self._append_log("command service unavailable", STYLE_WARN)
-            return
-        try:
-            result = commands.dispatch("/doom", args if args else [])
-        except Exception as exc:  # noqa: BLE001
-            self._append_log(f"doom command failed: {exc}", STYLE_WARN)
-            return
-        # Render into the dedicated DOOM pane instead of the chat log.
-        lines = str(result or "").splitlines()
-        if lines:
-            self._doom_text = "\n".join(lines)
-            doom = self._safe_query("#doom", Static)
-            if doom is not None:
-                doom.update(self._doom_text)
-        # Switch to the DOOM pane when a game starts or renders.
-        if args and args[0] in ("start", "status"):
-            self.action_show_tab("doom-pane")
-        # Nudge the organism to observe any game frame it produced.
-        try:
-            status = svc.status()
-            self.org.store.add(("doom", "frame", "running" if svc.running() else "idle"), 0.9)
-            self.org.store.remember("doom", status[:200])
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("doom observe failed: %s", exc)
-        # After starting, wake the entity so it immediately plays and the user
-        # can watch its streaming thought process. Multiple staggered timers
-        # bootstrap auto-play even if the first generation is slow or fails.
-        if args and args[0] == "start" and svc.running():
-            self.set_timer(0.2, self._doom_take_turn)
-            self.set_timer(0.7, self._doom_take_turn)
-            self.set_timer(1.5, self._doom_take_turn)
-
-    def _refresh_doom(self):
-        """Refresh the DOOM pane when a game is running."""
-        loader = getattr(self.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
-            return
-        try:
-            text = svc.status()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("doom refresh failed: %s", exc)
-            return
-        if text != self._doom_text:
-            self._doom_text = text
-            doom = self._safe_query("#doom", Static)
-            if doom is not None:
-                doom.update(self._doom_text)
-
     def _render_visual(self, kind, log=False):
         """Render or re-render the active visual chart."""
         visual = getattr(self.org, "module_loader", None)
@@ -2932,33 +2470,10 @@ class OrganismApp(App):
     def route_chat_message(self, text):
         """Route ordinary user chat to DOOM, MUD, group chat, or the organism."""
         self._log_chat("user", text)
-        loader = getattr(self.org, "module_loader", None)
-        doom_svc = loader.registry.get("doom") if loader is not None else None
-        doom_running = False
-        if doom_svc is not None:
-            try:
-                doom_running = bool(doom_svc.running())
-            except Exception:  # noqa: BLE001
-                doom_running = False
-        if doom_running:
-            # Human chat during a game counts as direction; cancel auto-play
-            # so the entity responds to the user rather than stacking turns.
-            self._doom_cancel_auto()
-            command = _doom_player_command(text)
-            if command is not None:
-                self._doom_command([command])
-                return
-        if self._mud_game is not None:
-            command = mud.parse_player_command(text)
-            if command is not None:
-                # a direct move: execute now, not a hint, not chat. Bump
-                # the turn generation so an organism move chosen before
-                # this command cannot land after it.
-                self._mud_turn_gen += 1
-                self._mud_apply(self._mud_game, command, actor="user")
-                return
-            self._mud_turn_gen += 1  # hints invalidate in-flight moves too
-            self._mud_hint = text  # shout a nudge into the next move
+        if self._doom.chat_command(text):
+            return
+        if self._mud.route_text(text):
+            return
         if self._group is not None:
             # Group chat lines go into the shared transcript and member
             # memory (GroupChat.broadcast records them as "group" episodes).
@@ -2999,7 +2514,7 @@ class OrganismApp(App):
             # If the entity is in the middle of a doom game, show its thinking
             # in the chat log, execute any doom.command line, and refresh the
             # DOOM pane so the user sees the result.
-            doom_cmd = _extract_doom_command(reply)
+            doom_cmd = extract_doom_command(reply)
             if doom_cmd is not None:
                 # Render the command itself in chat as a system line so the
                 # user can analyze the entity's decision.
@@ -3009,125 +2524,16 @@ class OrganismApp(App):
                     STYLE_SELF,
                     stamp=True,
                 )
-                self.call_from_thread(self._doom_command, [doom_cmd])
+                self.call_from_thread(self._doom.command, [doom_cmd])
                 with contextlib.suppress(Exception):
                     self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
             # Mirror the entity's prose reasoning into the DOOM pane when a game is running.
-            loader = getattr(self.org, "module_loader", None)
-            doom_svc = loader.registry.get("doom") if loader is not None else None
-            try:
-                if doom_svc is not None and doom_svc.running():
-                    self.call_from_thread(self._set_doom_thought, reply)
-            except Exception:
-                logger.warning("doom thought mirror failed", exc_info=True)
+            self._doom.mirror_thought(reply)
             self.call_from_thread(self._set_reply, reply)
             # If a doom game is still running after the entity's move, queue
             # another turn so it keeps playing autonomously. The human can
             # interrupt by chatting or taking manual control.
-            self.call_from_thread(self._schedule_doom_turn)
-
-    def _set_doom_thought(self, text):
-        """Append entity reasoning to the DOOM pane's thought stream."""
-        thoughts = self._safe_query("#doom-thoughts", Static)
-        if thoughts is None:
-            return
-        # Normalize: strip a stale live-typing "> " prefix before re-stamping.
-        current = str(getattr(thoughts, "_Static__content", "") or "")
-        if current.startswith("> "):
-            current = ""
-        # Render the final reply as one or more timestamped "> " lines.
-        stamped = "\n".join(
-            f"[{datetime.now(UTC).strftime('%H:%M:%S')}] > {line}" for line in text.splitlines() if line.strip()
-        )
-        lines = (current.splitlines() if current else []) + stamped.splitlines()
-        # Keep the last ~8 entries so the pane stays readable.
-        trimmed = "\n".join(lines[-8:])
-        thoughts.update(trimmed)
-        # Also update the pending token area so the streaming reasoning is visible.
-        pending = self._safe_query("#pending", Static)
-        if pending is not None:
-            pending.update(trimmed)
-
-    def _schedule_doom_turn(self):
-        loader = getattr(self.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
-            return
-        if self._responding or self._self_talking:
-            return
-        # short delay so the UI is readable and human input can interleave
-        self.set_timer(0.3, self._doom_take_turn)
-
-    def _doom_take_turn(self):
-        loader = getattr(self.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
-            return
-        # Mark this turn as in-flight so later ticks don't stack another one.
-        self._responding = True
-        try:
-            # Ensure the voice backend is probed before spending a generation;
-            # the background mount probe may not have finished yet.
-            if voice.online() is not True:
-                try:
-                    voice.probe()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("doom voice probe failed: %s", exc)
-                if voice.online() is not True:
-                    self._set_doom_thought("inner voice offline — waiting for ollama before playing.")
-                    self._schedule_doom_turn()
-                    return
-
-            def on_token(tok):
-                # voice.doom_move may run in the main UI thread (auto-play
-                # timer) or in a background worker (_maybe_respond). When we are
-                # already in the app's thread, call_from_thread is not allowed,
-                # so fall back to a direct update.
-                try:
-                    self.call_from_thread(self._doom_token, tok)
-                except RuntimeError:
-                    self._doom_token(tok)
-
-            reply = voice.doom_move(self.org, on_token=on_token)
-            if reply is None:
-                self._schedule_doom_turn()
-                return
-            doom_cmd = _extract_doom_command(reply)
-            if doom_cmd is not None:
-                self._append_log(
-                    f'doom.command("{doom_cmd}")',
-                    STYLE_SELF,
-                    stamp=True,
-                )
-                self._doom_command([doom_cmd])
-                with contextlib.suppress(Exception):
-                    self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
-            self._set_doom_thought(reply)
-            self._schedule_doom_turn()
-        except Exception:
-            logger.exception("DOOM turn failed")
-        finally:
-            self._responding = False
-
-    def _doom_token(self, tok):
-        """Stream a single token into the DOOM thought pane during generation."""
-        thoughts = self._safe_query("#doom-thoughts", Static)
-        if thoughts is None:
-            return
-        current = str(getattr(thoughts, "_Static__content", "") or "")
-        # Keep only the latest streaming line; final reply will replace it with stamped lines.
-        if current.startswith("> "):
-            base = current[2:]
-        else:
-            base = ""
-        updated = (base + tok).replace("\n", " ")
-        # Allow a longer reasoning window now that the pane is taller.
-        if len(updated) > 400:
-            updated = "..." + updated[-397:]
-        thoughts.update("> " + updated)
-        pending = self._safe_query("#pending", Static)
-        if pending is not None:
-            pending.update("> " + updated)
+            self.call_from_thread(self._doom.schedule_turn)
 
     # -- group chat -------------------------------------------------------
     GROUP_STYLES: ClassVar[list[str]] = [

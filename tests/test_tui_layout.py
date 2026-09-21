@@ -9,7 +9,6 @@ from textual.widgets import Button, ListView, Static
 from conftest import renderable_text, wait_until
 
 
-
 def test_top_bar_shows_organism_name(nursery_app):
     app = nursery_app
 
@@ -667,13 +666,13 @@ def test_mud_stale_organism_move_dropped_after_user_move(nursery_app):
     async def check():
         async with app.run_test():
             game = mud_mod.MudGame()
-            app._mud_game = game
-            stale_gen = app._mud_turn_gen  # in-flight move started here
+            app._mud.game = game
+            stale_gen = app._mud.turn_gen  # in-flight move started here
             app.route_chat_message("go north")
             assert game.turns == 1  # user move applied instantly
-            assert app._mud_turn_gen == stale_gen + 1
+            assert app._mud.turn_gen == stale_gen + 1
             # the late organism move arrives — the world has moved on
-            app._mud_apply(game, "go south", gen=stale_gen)
+            app._mud.apply(game, "go south", gen=stale_gen)
             assert game.turns == 1  # dropped, not applied
 
     asyncio.run(check())
@@ -690,12 +689,12 @@ def test_mud_stale_organism_move_dropped_after_hint(nursery_app, monkeypatch):
     async def check():
         async with app.run_test():
             game = mud_mod.MudGame()
-            app._mud_game = game
-            stale_gen = app._mud_turn_gen
+            app._mud.game = game
+            stale_gen = app._mud.turn_gen
             app.route_chat_message("maybe try the door")
-            assert app._mud_turn_gen == stale_gen + 1
-            assert app._mud_hint == "maybe try the door"
-            app._mud_apply(game, "go south", gen=stale_gen)
+            assert app._mud.turn_gen == stale_gen + 1
+            assert app._mud.hint == "maybe try the door"
+            app._mud.apply(game, "go south", gen=stale_gen)
             assert game.turns == 0
 
     asyncio.run(check())
@@ -710,8 +709,8 @@ def test_mud_fresh_organism_move_still_applies(nursery_app):
     async def check():
         async with app.run_test():
             game = mud_mod.MudGame()
-            app._mud_game = game
-            app._mud_apply(game, "look", gen=app._mud_turn_gen)
+            app._mud.game = game
+            app._mud.apply(game, "look", gen=app._mud.turn_gen)
             assert game.turns == 1
 
     asyncio.run(check())
@@ -729,11 +728,11 @@ def test_mud_organism_move_shows_its_reason(nursery_app):
     async def check():
         async with app.run_test():
             game = mud_mod.MudGame()
-            app._mud_game = game
-            app._mud_apply(
+            app._mud.game = game
+            app._mud.apply(
                 game,
                 "go north",
-                gen=app._mud_turn_gen,
+                gen=app._mud.turn_gen,
                 reason="because the cave mouth calls",
             )
             lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]

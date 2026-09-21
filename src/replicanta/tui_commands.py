@@ -152,7 +152,8 @@ def filter_commands(query):
 # is the split command line, and keep the exact behavior of the former
 # if/elif branches — validation, store mutation, and log styling included.
 # Module-owned verbs (/visualize /hand /brain /doom) delegate to the app's
-# thin dispatch wrappers, which route through the module CommandService.
+# thin dispatch wrappers (or its doom controller), which route through the
+# module CommandService.
 
 
 def _cmd_chaos(app, parts):
@@ -179,13 +180,16 @@ def _cmd_focus(app, parts):
         app.org.window.focus(None)
         app._append_log("attention floating free", STYLE_DIM)
 
+
 def _cmd_sleep(app, parts):
     for event in app.org.force_state("sleep"):
         app._render_event(event)
 
+
 def _cmd_wake(app, parts):
     for event in app.org.force_state("wake"):
         app._render_event(event)
+
 
 def _cmd_revive(app, parts):
     if app.org.revive():
@@ -196,6 +200,7 @@ def _cmd_revive(app, parts):
             f"/revive: it is not faded (state {app.org.lifecycle.state}).",
             STYLE_DIM,
         )
+
 
 def _cmd_stats(app, parts):
     m = app.org.metrics()
@@ -214,8 +219,10 @@ def _cmd_stats(app, parts):
     for line in activity.summary_lines(app.org.store):
         app._append_log(line, STYLE_DIM)
 
+
 def _cmd_save(app, parts):
     app.action_save_now()
+
 
 def _cmd_export(app, parts):
     try:
@@ -230,23 +237,30 @@ def _cmd_export(app, parts):
     except OSError as exc:
         app._append_log(f"— export failed: {exc} —", STYLE_WARN, stamp=True)
 
+
 def _cmd_think(app, parts):
     app.action_think_now()
+
 
 def _cmd_listen(app, parts):
     app._toggle_listen()
 
+
 def _cmd_microphone(app, parts):
     app._microphone(parts[1:])
+
 
 def _cmd_look(app, parts):
     app._look_now()
 
+
 def _cmd_camera(app, parts):
     app._camera(parts[1:])
 
+
 def _cmd_mud(app, parts):
-    app._mud_command(parts[1:])
+    app._mud.command(parts[1:])
+
 
 def _cmd_reload(app, parts):
     app.org.hooks.reload()
@@ -256,6 +270,7 @@ def _cmd_reload(app, parts):
         STYLE_DIM,
     )
 
+
 def _cmd_lua(app, parts):
     if len(parts) != 2:
         names = ", ".join(s.name for s in app.org.hooks.scripts)
@@ -263,14 +278,17 @@ def _cmd_lua(app, parts):
         return
     app._append_log(app.org.hooks.run(parts[1], app.org), STYLE_DIM)
 
+
 def _cmd_organisms(app, parts):
     names = nursery.list_organisms(app.root)
     current = app.org.dir_path.name
     listing = ", ".join(f"*{n}" if n == current else n for n in names) or "(none)"
     app._append_log(f"organisms: {listing}  (* = current)", STYLE_DIM)
 
+
 def _cmd_group(app, parts):
     app._group_command(parts[1:])
+
 
 def _cmd_new(app, parts):
     new_name = parts[1] if len(parts) == 2 else nursery.next_name(app.root)
@@ -281,6 +299,7 @@ def _cmd_new(app, parts):
     else:
         app._swap_to(new_name)
 
+
 def _cmd_swap(app, parts):
     if len(parts) != 2:
         app._append_log("/swap needs a name — /organisms to list.", STYLE_DIM)
@@ -290,6 +309,7 @@ def _cmd_swap(app, parts):
         app._append_log(f"/swap: no organism {parts[1]!r} — have: {names}", STYLE_WARN)
         return
     app._swap_to(parts[1])
+
 
 def voice_command(args):
     """Shared /voice behavior for the TUI and web frontends: performs the
@@ -354,6 +374,7 @@ def _cmd_voice(app, parts):
     if not args or args[0] in ("on", "off"):
         app.refresh_status()
 
+
 def _cmd_self_talk(app, parts):
     app._self_talk_on = not app._self_talk_on
     if app._self_talk_on:
@@ -362,6 +383,7 @@ def _cmd_self_talk(app, parts):
             app._maybe_self_talk()
     else:
         app._append_log("self-talk off", STYLE_DIM)
+
 
 def _cmd_approve(app, parts):
     entry = extensions.approve(app.org.dir_path / "artifacts" / "extensions.json")
@@ -375,6 +397,7 @@ def _cmd_approve(app, parts):
     else:
         app._append_log("/approve: no pending patch.", STYLE_DIM)
 
+
 def _cmd_reject(app, parts):
     entry = extensions.reject(app.org.dir_path / "artifacts" / "extensions.json")
     if entry:
@@ -383,8 +406,10 @@ def _cmd_reject(app, parts):
     else:
         app._append_log("/reject: no pending patch.", STYLE_DIM)
 
+
 def _cmd_auto_apply(app, parts):
     app._append_log(auto_apply_command(app.org.store, parts[1:]), STYLE_DIM)
+
 
 def _cmd_revert(app, parts):
     entry = extensions.revert_last(app.org.dir_path / "artifacts" / "extensions.json")
@@ -394,32 +419,42 @@ def _cmd_revert(app, parts):
     else:
         app._append_log("/revert: no applied patches yet.", STYLE_DIM)
 
+
 def _cmd_quit(app, parts):
     app.action_quit()
+
 
 def _cmd_help(app, parts):
     app.action_help()
 
+
 def _cmd_git(app, parts):
     app._git_command(parts[1:])
+
 
 def _cmd_persona(app, parts):
     app._persona_command(parts[1:])
 
+
 def _cmd_modules(app, parts):
     app._modules_command(parts[1:])
+
 
 def _cmd_visualize(app, parts):
     app._visualize_command(parts[1:])
 
+
 def _cmd_hand(app, parts):
     app._hand_command(parts[1:])
+
 
 def _cmd_brain(app, parts):
     app._brain_command(parts[1:])
 
+
 def _cmd_doom(app, parts):
-    app._doom_command(parts[1:])
+    app._doom.command(parts[1:])
+
 
 COMMAND_HANDLERS = {
     "/chaos": _cmd_chaos,
