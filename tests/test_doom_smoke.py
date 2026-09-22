@@ -214,6 +214,55 @@ def test_repaint_interval_runs_only_during_a_game(doom_app):
     asyncio.run(check())
 
 
+def test_overlay_arrows_reach_the_game_even_when_the_frame_overflows(doom_app):
+    """Regression: when the frame is taller than the terminal (scaling 2),
+    the ScrollableContainer shows a scrollbar and a FOCUSED one consumes
+    up/down for scrolling — the player couldn't walk. The container must
+    not take focus, so every game key reaches the bindings."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(90, 16)) as pilot:  # force overflow
+            doom = await _start_doom(app, pilot)
+
+            def painted():
+                content = doom._Static__content
+                plain = getattr(content, "plain", str(content))
+                return len(plain.splitlines()) > 5
+
+            await wait_until(painted, message="doom frame to render")
+            scroll = app.screen.query_one("#doom-scroll")
+            assert scroll.show_vertical_scrollbar
+            got = []
+            real = app._doom.key_command
+            app._doom.key_command = lambda cmd: (got.append(cmd), real(cmd))[1]
+            try:
+                for key in ("up", "down", "left", "right", "space"):
+                    await pilot.press(key)
+                    await pilot.pause()
+            finally:
+                app._doom.key_command = real
+            assert sorted(got) == ["a", "d", "s", "shoot", "w"], got
+    asyncio.run(check())
+
+
+def test_typed_movement_words_reach_the_game(doom_app):
+    """Typing 'w' in chat during a game must move the player (the module
+    contract promises movement lines); single-letter moves were rejected
+    and fell through to the entity as conversation."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await _start_doom(app, pilot)
+            svc = app.org.module_loader.registry.get("doom")
+            await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            assert app._doom.chat_command("w") is True
+            await wait_until(lambda: "key=up" in svc.frame(), message="typed 'w' to move the player")
+
+    asyncio.run(check())
+
+
 def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
     """Regression: /doom stop must kill the game process and silence the
     auto-play loop — no pending turn timers, no new game re-armed."""

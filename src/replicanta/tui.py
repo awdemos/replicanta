@@ -471,7 +471,14 @@ class DoomScreen(Screen):
                 "esc closes — arrows/space play — /doom stop ends the game",
                 id="doom-hint",
             )
-            with ScrollableContainer(id="doom-scroll"):
+            # The container must never take focus: when the frame is taller
+            # than the terminal (scaling 2) a focused ScrollableContainer
+            # eats up/down for scrolling and the player can't walk — the
+            # game keys go straight to the app bindings. The wheel still
+            # scrolls an unfocused container.
+            scroll = ScrollableContainer(id="doom-scroll")
+            scroll.can_focus = False
+            with scroll:
                 yield Static("", id="doom-thoughts", markup=False)
                 yield Static(
                     "Run /doom start to play DOOM (doom-ascii).",

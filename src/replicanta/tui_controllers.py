@@ -41,9 +41,22 @@ def doom_player_command(text):
     words = [w for w in text.strip().lower().split()]
     if not words:
         return None
-    # Obsolete: prefer arrow keys when the DOOM overlay is up so chat typing
-    # is not confused with movement commands.
-    if len(words) == 1 and words[0] in ("shoot", "look", "start", "stop", "status"):
+    # Single words said to the player while a game runs are moves, not
+    # conversation: the direction keys (arrows play the same commands on the
+    # overlay) plus the utility commands.
+    if len(words) == 1 and words[0] in (
+        "w",
+        "a",
+        "s",
+        "d",
+        "q",
+        "e",
+        "shoot",
+        "look",
+        "start",
+        "stop",
+        "status",
+    ):
         return words[0]
     return None
 
