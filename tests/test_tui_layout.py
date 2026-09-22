@@ -861,3 +861,24 @@ def test_swap_without_group_is_quiet(nursery_app):
             assert not any("group chat ended" in line for line in lines), lines
 
     asyncio.run(check())
+
+
+def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
+    """The 80-column game frame must never wrap: on narrow terminals the
+    pane scrolls horizontally instead of shredding the ASCII art."""
+    from textual.containers import ScrollableContainer
+    from textual.widgets import TabbedContent
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test(size=(60, 24)) as pilot:
+            app.query_one(TabbedContent).active = "doom-pane"
+            await pilot.pause()
+            doom = app.query_one("#doom", Static)
+            await pilot.pause()
+            assert doom.styles.width is not None and doom.styles.width.value == 80
+            assert doom.region.width == 80
+            assert isinstance(doom.parent, ScrollableContainer)
+
+    asyncio.run(check())

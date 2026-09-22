@@ -22,7 +22,7 @@ from textual.actions import SkipAction
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
-from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
@@ -715,7 +715,7 @@ class OrganismApp(App):
     #mind, #memory, #inner { padding: 1 2; }
     #inner { overflow-y: auto; }
     #visual { padding: 1 2; }
-    #doom { padding: 1 2; height: auto; }
+    #doom { padding: 0 1; width: 80; min-width: 80; }
     #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
     #command-hints { height: auto; max-height: 4; padding: 0 1;
                       color: $text-muted; }
@@ -867,10 +867,10 @@ class OrganismApp(App):
                             id="mud",
                             markup=False,
                         )
-                    with TabPane("doom", id="doom-pane"), VerticalScroll():
+                    with TabPane("doom", id="doom-pane"), ScrollableContainer():
                         yield Static("", id="doom-thoughts", markup=False)
                         yield Static(
-                            "Run /doom start to play the nano-Doom mini-game.",
+                            "Run /doom start to play DOOM (doom-ascii).",
                             id="doom",
                             markup=False,
                         )

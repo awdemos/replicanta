@@ -307,3 +307,12 @@ def test_doom_module_constructs_service_on_load(tmp_path, monkeypatch):
     assert "doom-ascii" in loader.modules
     assert loader.registry.get("doom") is not None
     assert not any("unknown python service" in w for w in loader.warnings)
+
+
+def test_start_failure_surfaces_game_error_and_reaps(stub_env, monkeypatch):
+    """A game that cannot start must fail loudly with the game's own error
+    and be reaped — never a zombie 'running · frame 0' game."""
+    monkeypatch.setenv("DOOM_ASCII_ARGS", "--die")
+    with pytest.raises(RuntimeError, match="IWAD or PWAD"):
+        stub_env.start(timeout=1.0)
+    assert stub_env.running() is False

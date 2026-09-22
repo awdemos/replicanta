@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-erase", action="store_true")
     parser.add_argument("-kpsmooth")
     parser.add_argument("-fixgamma", action="store_true")
+    parser.add_argument("--die", action="store_true")
     return parser.parse_known_args()[0]
 
 
@@ -67,6 +68,12 @@ def main() -> int:
     exiting = False
     out = sys.stdout
     out.write(CLEAR_FIRST)
+    if args.die:
+        # Mimic a real game that cannot start: error to stderr (fd 2, the
+        # pty slave), then linger without frames until killed.
+        os.write(2, b"Wad file fake.wad doesn't have IWAD or PWAD id\r\n")
+        while True:
+            time.sleep(3600)
     try:
         while True:
             try:

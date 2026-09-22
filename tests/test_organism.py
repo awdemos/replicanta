@@ -667,6 +667,17 @@ def _at_local_hour(hour, minute=0):
     return candidate.timestamp()
 
 
+def _prev_local_hour(hour, minute=0):
+    """Epoch seconds for the most recent occurrence of a local wall time."""
+    import datetime
+
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate > now:
+        candidate -= datetime.timedelta(days=1)
+    return candidate.timestamp()
+
+
 def _circadian(tmp_path, state="wake", fatigue=0.0):
     store = BeliefStore(tmp_path)
     store.fatigue = fatigue
@@ -685,6 +696,11 @@ def test_circadian_bedtime_falls_due(tmp_path):
 
 def test_circadian_night_sleep_holds_until_rise(tmp_path):
     lc, _ = _circadian(tmp_path, state="sleep", fatigue=1.0)
+    # Fell asleep last night, not a few minutes ago: after rise the wake
+    # decision must come from the night window, not from how long ago the
+    # test happened to run (a fresh state_started of 1000s is shorter than
+    # the daytime nap cap and would leak NAP_MAX_SECONDS into the result).
+    lc.state_started = _prev_local_hour(23, 30)
     assert not lc.due(now=_at_local_hour(23, 30))
     assert not lc.due(now=_at_local_hour(6, 59))
     assert lc.due(now=_at_local_hour(7))

@@ -173,7 +173,7 @@ class DoomAsciiService:
     def available(self) -> bool:
         return _find_binary() is not None and _find_wad() is not None
 
-    def start(self, skill: int | str = DEFAULT_SKILL) -> str:
+    def start(self, skill: int | str = DEFAULT_SKILL, timeout: float = FIRST_FRAME_TIMEOUT) -> str:
         try:
             self._skill = max(1, min(5, int(skill)))
         except (TypeError, ValueError):
@@ -214,17 +214,23 @@ class DoomAsciiService:
         self._watcher = threading.Thread(target=self._watch_loop, daemon=True, name="doom-ascii-watcher")
         self._watcher.start()
         _register_active(self)
-        deadline = time.monotonic() + FIRST_FRAME_TIMEOUT
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._plain_frame:
                 return self._plain_frame
             if self._proc.poll() is not None:
-                tail = self._slave_tail()
-                raise RuntimeError(
-                    f"doom-ascii exited immediately (code {self._proc.returncode})" + (f": {tail}" if tail else "")
-                )
+                break
             time.sleep(0.02)
-        raise RuntimeError("doom-ascii produced no frame in time")
+        # The game died or never painted (bad WAD, missing files, hung):
+        # reap it and surface whatever it said on stderr so the caller sees
+        # the real cause instead of a zombie "running · frame 0" game.
+        tail = self._slave_tail()
+        if self._proc.poll() is not None:
+            detail = f"doom-ascii exited immediately (code {self._proc.returncode})"
+        else:
+            detail = "doom-ascii produced no frame in time"
+        self.stop()
+        raise RuntimeError(detail + (f": {tail}" if tail else ""))
 
     def stop(self) -> str:
         self._stopped.set()
