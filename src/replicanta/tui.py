@@ -18,6 +18,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 from textual import work
+from textual.actions import SkipAction
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
@@ -1153,6 +1154,19 @@ class OrganismApp(App):
         dest.parent.mkdir(parents=True, exist_ok=True)
         fileutil.atomic_write_text(dest, fileutil.render_chat_export(org_name, self.org.store), root=export_dir)
         return dest
+
+    def on_text_selected(self, event) -> None:
+        """Terminal habit, made real: releasing a drag copies the selection.
+
+        Textual highlights a selection but never copies it by itself — the
+        copy_text action must be invoked (Screen binds it to ctrl+c, which
+        this app reserves for quitting, and ctrl+shift+c is copy_chat). With
+        terminal mouse reporting on — required for clicks, submenu boxes,
+        and sidebar drags — the terminal's own selection is unreachable, so
+        auto-copy here. Delivery is OSC52, which works on most terminals
+        (kitty, wezterm, alacritty, foot, tmux with set-clipboard)."""
+        with contextlib.suppress(SkipAction):
+            self.screen.action_copy_text()
 
     def action_toggle_mouse(self):
         """Toggle Textual's terminal mouse reporting. When enabled, mouse clicks

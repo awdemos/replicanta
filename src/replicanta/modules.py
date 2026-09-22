@@ -1,5 +1,6 @@
 """Lua module loader and service registry for Replicanta plugins."""
 
+import importlib
 import logging
 import tomllib
 from pathlib import Path
@@ -7,10 +8,19 @@ from pathlib import Path
 from lupa import lua_type
 
 from replicanta import config as project_config
-from replicanta import doom_ascii, fly_brain, lua_sandbox, rdd, tendon_hand
+from replicanta import fly_brain, lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
+
+# Python services a Lua module may request from its manifest via
+# ``services = ["name"]``. They are constructed lazily, only when a module
+# that needs them is actually enabled — doom support is a plugin, not a
+# built-in: no game-process machinery exists unless the doom-ascii module
+# loads. Values are (module, class) pairs, imported on first use.
+_PLUGIN_SERVICE_FACTORIES = {
+    "doom": ("replicanta.doom_ascii", "DoomAsciiService"),
+}
 
 
 class ServiceRegistry:
@@ -304,9 +314,24 @@ class ModuleLoader:
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
         )
+
+    def _ensure_plugin_service(self, svc_name, module_name):
+        """Construct a manifest-requested Python service on first use.
+
+        Called for each name in a manifest's ``services = [...]`` before the
+        module's init runs, so init.lua's services.get(name) finds it.
+        """
+        if self.registry.get(svc_name) is not None:
+            return
+        factory = _PLUGIN_SERVICE_FACTORIES.get(svc_name)
+        if factory is None:
+            self.warnings.append(f"{module_name}: unknown python service '{svc_name}'")
+            return
+        module_path, class_name = factory
+        cls = getattr(importlib.import_module(module_path), class_name)
         self.registry.register(
-            "doom",
-            doom_ascii.DoomAsciiService(
+            svc_name,
+            cls(
                 organism=self.organism,
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
@@ -318,6 +343,8 @@ class ModuleLoader:
         if not init_path.is_file():
             self.warnings.append(f"{name}: init.lua missing; skipping")
             return
+        for svc_name in manifest.get("services", []):
+            self._ensure_plugin_service(svc_name, name)
         try:
             lua = self._runtime()
             # Track the runtime that will own this module's Lua callbacks
@@ -365,6 +392,9 @@ class _StoreService:
 
     def observe(self, belief, conf):
         self.store.observe(belief, conf)
+
+    def remember(self, kind, text):
+        self.store.remember(str(kind), str(text))
 
 
 class VisualService:

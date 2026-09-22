@@ -246,3 +246,66 @@ def test_completion_event_reaches_bus(tmp_path):
     assert got, f"no flybrain_done event; logs={logs}"
     assert "digits" in got[0]
     assert "done" in got[0]
+
+
+# -- module integration: results reach the organism --------------------------------
+
+
+def _module_loader(tmp_path, enabled, organism=None):
+    import shutil
+
+    target = tmp_path / "modules"
+    shutil.copytree(REPO_MODULES, target)
+    loader = ModuleLoader(target, organism=organism, modules_config={"enabled": enabled})
+    loader.load_all()
+    return loader
+
+
+def _organism(tmp_path):
+    from replicanta.organism import Organism
+
+    org_dir = tmp_path / "org"
+    org_dir.mkdir(parents=True)
+    (org_dir / "organism.scl").write_text("type bel(x: String, a: String, v: String)\n")
+    org = Organism(org_dir)
+    org.load()
+    return org
+
+
+def test_module_run_result_is_remembered(tmp_path, monkeypatch):
+    """A finished run must land in the organism's memory, not just the log."""
+
+    def fake_run(self, task="digits", sample=False, wait=False, on_done=None):
+        if on_done is not None:
+            on_done("fly brain: digits improved: test 97.5% (fake)")
+        return True
+
+    monkeypatch.setattr(FlyBrainService, "run_task", fake_run)
+    org = _organism(tmp_path / "o")
+    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"], organism=org)
+    hooks = loader.registry.get("hooks")
+    hooks.emit("utterance", 'brain.run("digits")')
+    assert any(m["kind"] == "flybrain" for m in org.store.memory)
+    assert any("97.5%" in m["text"] for m in org.store.memory)
+
+
+def test_module_brain_last_command(tmp_path):
+    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"])
+    commands = loader.registry.get("commands")
+    assert "no finished runs" in commands.dispatch("/brain", ["last"])
+    loader.registry.get("flybrain")._last = (True, "digits improved: test 97.5%", None)
+    assert "97.5%" in commands.dispatch("/brain", ["last"])
+
+
+def test_snapshot_includes_last_run_summary(tmp_path, monkeypatch):
+    from replicanta import narration
+
+    org = _organism(tmp_path / "o")
+    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"], organism=org)
+    org.module_loader = loader
+    monkeypatch.setattr(FlyBrainService, "available", lambda self: True)
+    loader.registry.get("flybrain")._last = (True, "digits improved: test 97.5%", None)
+
+    snap = narration.state_snapshot(org)
+    assert snap["brain_last"] == "digits improved: test 97.5%"
+    assert any("Last run: digits improved" in line for line in narration._brain_lines(snap))

@@ -292,3 +292,18 @@ def test_module_utterance_command_variants(tmp_path, monkeypatch):
         hooks.emit("utterance", variant)
         assert _wait_for(lambda: "HIT!" in doom.frame()), f"dropped: {variant!r}"
     doom.stop()
+
+
+# -- plugin loading: the service is built only when the module loads ----------------
+
+
+def test_doom_service_absent_without_module(tmp_path, monkeypatch):
+    loader, _ = _load_module(tmp_path, monkeypatch, ["base"])
+    assert loader.registry.get("doom") is None
+
+
+def test_doom_module_constructs_service_on_load(tmp_path, monkeypatch):
+    loader, _ = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    assert "doom-ascii" in loader.modules
+    assert loader.registry.get("doom") is not None
+    assert not any("unknown python service" in w for w in loader.warnings)

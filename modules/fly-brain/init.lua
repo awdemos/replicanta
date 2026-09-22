@@ -8,6 +8,7 @@
 --   brain.optimize("digits")   -> alias for brain.run (older prompts)
 --   brain.adapt()              -> L4 drift-rehearsal demo (async)
 --   brain.bank()               -> inherited experience bank, as a table
+--   brain.last()               -> summary of the last finished run, or ""
 --   brain.status()             -> bridge/binary/running summary
 --   brain.running()            -> true while a run is in flight
 --
@@ -35,6 +36,8 @@ function init(ctx)
     return
   end
 
+  local store = services.get("store")
+
   local ok_avail, available = pcall(function() return fly:available() end)
   if not ok_avail or not available then
     ctx.log("fly-brain: wetware binary not found; set WETWARE_BIN or build rsi-wetware-rs")
@@ -52,9 +55,14 @@ function init(ctx)
     return p
   end
 
-  -- Deliver one finished run: log it for the entity and emit the bus event
-  -- the completion text already says "failed" on error, so route on that.
+  -- Deliver one finished run: remember it in the organism's memory (so the
+  -- entity can recall and speak about outcomes, not just log lines), log it,
+  -- and emit the bus event. The completion text already says "failed" on
+  -- error, so route on that.
   local function deliver(text)
+    if store ~= nil then
+      pcall(function() store:remember("flybrain", text) end)
+    end
     ctx.log(text)
     if events ~= nil then
       if string.match(text, "failed") then
@@ -88,6 +96,14 @@ function init(ctx)
     local ok, txt = pcall(function() return fly:bank() end)
     if not ok then return "fly brain error: " .. tostring(txt) end
     return txt
+  end
+
+  function brain.last()
+    local ok, v = pcall(function() return fly:last() end)
+    if not ok or v == nil then return "" end
+    local ok_text, txt = pcall(function() return v.text end)
+    if not ok_text or txt == nil then return "" end
+    return tostring(txt)
   end
 
   function brain.run(task)
@@ -183,7 +199,7 @@ function init(ctx)
     end)
   end
 
-  -- /brain | bank | run <task> | optimize <task> | adapt
+  -- /brain | bank | last | run <task> | optimize <task> | adapt
   if commands ~= nil then
     commands:register("/brain", function(args)
       local verb = normalize(args[1] or "status")
@@ -191,6 +207,12 @@ function init(ctx)
         return brain.status()
       elseif verb == "bank" then
         return brain.bank()
+      elseif verb == "last" then
+        local last = brain.last()
+        if last == "" then
+          return "fly brain: no finished runs yet"
+        end
+        return "fly brain last run: " .. last
       elseif verb == "run" then
         local task = args[2] or "digits"
         if brain.run(task) then

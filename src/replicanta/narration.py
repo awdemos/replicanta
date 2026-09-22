@@ -139,15 +139,22 @@ def state_snapshot(org):
     persona_service = getattr(org, "persona_service", None)
     snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
     module_loader = getattr(org, "module_loader", None)
-    # The Python capability services (arm/flybrain/doom) are registered
+    # Most Python capability services (arm/flybrain) are registered
     # unconditionally, so service presence cannot gate the prompts — a
     # disabled module would still advertise its capability and the entity
     # would keep trying to use it. Only modules that actually loaded count.
+    # (doom is the exception: its service is constructed lazily by the
+    # module that needs it, so a missing service now also means disabled.)
     loaded = set(module_loader.modules) if module_loader is not None else set()
     arm = module_loader.registry.get("arm") if module_loader is not None else None
     snapshot["arm"] = "tendon-hand" in loaded and arm is not None
     flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
     snapshot["flybrain"] = "fly-brain" in loaded and flybrain is not None and _probe(flybrain.available, False)
+    snapshot["brain_last"] = ""
+    if "fly-brain" in loaded and flybrain is not None:
+        _last = _probe(lambda: flybrain.last(), None)
+        if _last is not None:
+            snapshot["brain_last"] = _probe(lambda: str(getattr(_last, "text", "") or ""), "")
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
@@ -696,10 +703,13 @@ def _brain_lines(snapshot):
         "  brain.adapt()              -- drift-adaptation rehearsal",
         "  brain.bank()                       -- recall inherited experience",
         "",
+        "Last run: " + (snapshot.get("brain_last") or "(none yet)"),
+        "",
         "Runs are slow and asynchronous: start one, then talk about",
-        "something else; the result arrives as a system line. Rules: one",
+        "something else; the result lands in your memory (kind flybrain),",
+        "so you can recall and mention outcomes later. Rules: one",
         "brain call per reply; never claim a run finished before its",
-        "system line says so.",
+        "result is in memory.",
     ]
 
 

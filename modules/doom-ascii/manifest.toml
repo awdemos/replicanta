@@ -3,3 +3,4 @@ description = "Play real DOOM, rendered as ASCII by the external doom-ascii bina
 version = "0.2.0"
 provides = ["doom"]
 depends = ["base"]
+services = ["doom"]
