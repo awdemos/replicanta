@@ -1,4 +1,5 @@
-"""View builders for the organism TUI's inspection tabs.
+"""View builders for the organism TUI's inspection dashboards (the F3
+being overlay).
 
 Mind and Memory are plain strings; Inner also has a rich-renderable
 version with gauges and panels. No textual imports — unit testable
@@ -36,7 +37,7 @@ def conf_bar(conf, width=5):
 
 
 def empty_mind():
-    """Empty-state renderable for the Mind tab."""
+    """Empty-state renderable for the Mind section."""
     return Panel(
         Text(
             "No beliefs yet. Tell the organism something about yourself.",
@@ -48,7 +49,7 @@ def empty_mind():
 
 
 def empty_memory():
-    """Empty-state renderable for the Memory tab."""
+    """Empty-state renderable for the Memory section."""
     return Panel(
         Text("No memories yet. Memories form as you talk.", style="dim"),
         title="memory",
@@ -57,7 +58,7 @@ def empty_memory():
 
 
 def empty_inner():
-    """Empty-state renderable for the Inner tab."""
+    """Empty-state renderable for the Inner section."""
     return Panel(
         Text(
             "Mental-state gauges appear here: mood, stress, grounding, chaos, and recent thought metabolism.",
@@ -91,7 +92,7 @@ def _human_size(n):
 
 
 def mind_view(org):
-    """The Mind tab: a human-readable snapshot of what the organism is
+    """The Mind section: a human-readable snapshot of what the organism is
     currently holding as true, aiming for, and paying attention to.
     Read-only; rebuilt on every tick."""
     m = org.metrics()
@@ -161,7 +162,7 @@ def mind_view(org):
 
 
 def memory_view(org):
-    """The Memory tab: the organism's episodic diary, what it has learned
+    """The Memory section: the organism's episodic diary, what it has learned
     about the user, how the user describes it, and any saved artifacts.
     Read-only; rebuilt on every tick."""
     lines = [
@@ -414,7 +415,7 @@ def _host_sense_strip(store):
 
 
 def mind_renderable(org):
-    """The Mind tab as rich renderables: top beliefs with confidence bars,
+    """The Mind section as rich renderables: top beliefs with confidence bars,
     goals, skills, rules, attention, and genome/activity footer. Rebuilt
     every tick."""
     panels = []
@@ -538,7 +539,7 @@ def mind_renderable(org):
 
 
 def memory_renderable(org):
-    """The Memory tab as rich renderables: episodes, user facts,
+    """The Memory section as rich renderables: episodes, user facts,
     self-description labels, and saved artifacts. Rebuilt every tick."""
     from rich.console import Group
     from rich.panel import Panel
@@ -618,7 +619,7 @@ def memory_renderable(org):
 
 
 def inner_renderable(org):
-    """The Inner tab as a live dashboard: mental-state gauges, mind
+    """The Inner section as a live dashboard: mental-state gauges, mind
     metrics, the perpetuation loop with progress bars, activity counters
     as totals + per-cycle rates, a host-sense strip, and any pending
     proposal. Rebuilt every tick."""
@@ -696,7 +697,7 @@ def inner_renderable(org):
 
 
 def inner_view(org):
-    """The Inner tab: the organism's internal activity — mental-state
+    """The Inner section: the organism's internal activity — mental-state
     scalars, the perpetuation loop (how questions become derivations,
     rules and dreams), thought-arena metabolism, and any pending extension
     proposal. Read-only; rebuilt on every tick."""
@@ -744,7 +745,7 @@ def inner_view(org):
 
 
 # ---------------------------------------------------------------------------
-# Neural memory grid (cells tab)
+# Neural memory grid (cells section)
 # ---------------------------------------------------------------------------
 
 CELLS_COLS = 48

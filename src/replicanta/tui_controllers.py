@@ -12,7 +12,8 @@ import logging
 import re
 from datetime import UTC, datetime
 
-from textual.widgets import Static, TabbedContent
+from textual.css.query import NoMatches
+from textual.widgets import Static
 
 from replicanta import mud, speech, voice
 from replicanta.tui_views import (
@@ -35,7 +36,7 @@ def doom_player_command(text):
     words = [w for w in text.strip().lower().split()]
     if not words:
         return None
-    # Obsolete: prefer arrow keys when the DOOM pane is active so chat typing
+    # Obsolete: prefer arrow keys when the DOOM overlay is up so chat typing
     # is not confused with movement commands.
     if len(words) == 1 and words[0] in ("shoot", "look", "start", "stop", "status"):
         return words[0]
@@ -102,6 +103,40 @@ class MudController:
         self.paused = True  # start paused; the human plays the MUD
         self.thinking = False  # a move-choice worker is in flight
         self.turn_gen = 0  # bumped by user moves/hints: stales in-flight
+        self._text = ""  # latest render, mirrored into the overlay
+
+    # -- overlay ----------------------------------------------------------------
+    def _pane(self):
+        """The active MudScreen's Static, or None when the overlay is not
+        the current screen (view-only; input stays in the chat bar)."""
+        from replicanta.tui import MudScreen
+
+        screen = self._app.screen
+        if type(screen) is MudScreen:
+            with contextlib.suppress(NoMatches):
+                return screen.query_one("#mud", Static)
+        return None
+
+    def _show_overlay(self):
+        """Open the view overlay, unless it is already up."""
+        from replicanta.tui import MudScreen
+
+        if not isinstance(self._app.screen, MudScreen):
+            self._app.push_screen(MudScreen())
+
+    def _render_pane(self, text):
+        """Mirror a render into the overlay, remembering it for the next
+        open (the screen mounts asynchronously after the render)."""
+        self._text = text
+        pane = self._pane()
+        if pane is not None:
+            pane.update(text)
+
+    def refresh_pane(self):
+        """Repaint the last render (called by MudScreen.on_mount)."""
+        pane = self._pane()
+        if pane is not None and self._text:
+            pane.update(self._text)
 
     # -- /mud dispatch --------------------------------------------------------
     def command(self, args):
@@ -121,7 +156,10 @@ class MudController:
                 "story": mud.render_story,
                 "quest": mud.render_quest,
             }[sub]
-            self._app._append_log(render(game), STYLE_DREAM)
+            text = render(game)
+            self._app._append_log(text, STYLE_DREAM)
+            self._show_overlay()
+            self._render_pane(text)
         elif sub == "pause":
             if self.game is None:
                 self._app._append_log("/mud pause: no game running.", STYLE_DIM)
@@ -200,10 +238,13 @@ class MudController:
                 stamp=True,
             )
             self._app._append_log(mud.build_premise(self._app.org, game.scenario), STYLE_DREAM)
-        self._app._append_log(game.look(), STYLE_DREAM)
+        look = game.look()
+        self._app._append_log(look, STYLE_DREAM)
         self._app.org.store.remember("mud", f"started {game.scenario.title}")
         self.save_session(game)
         self._app.refresh_status()
+        self._show_overlay()
+        self._render_pane(look)
 
     def stop(self):
         """End the current game, persisting its session for a later resume."""
@@ -367,6 +408,7 @@ class MudController:
         self._app._append_log(f"> {command}", STYLE_SELF)
         result = game.act_event(command, actor_name=actor)
         self._app._append_log(result.text, STYLE_DREAM)
+        self._render_pane(result.text)
         if result.plot:
             self._app._append_log(result.plot, STYLE_LEARNED)
         if game.finished:
@@ -399,7 +441,7 @@ class MudController:
 
 
 class DoomController:
-    """Owns doom-ascii play: /doom dispatch, the DOOM pane rendering, the
+    """Owns doom-ascii play: /doom dispatch, the DOOM overlay rendering, the
     entity's auto-play turn loop, and the arrow/space key commands. The
     app's action_doom_* bindings are thin delegates so Textual dispatch and
     test monkeypatching stay on the app."""
@@ -408,14 +450,38 @@ class DoomController:
         self._app = app
         self._text = ""
 
+    def _pane(self):
+        """The active DoomScreen's art Static, or None when the overlay is
+        not the current screen (the game still runs; it just has no
+        surface to render onto)."""
+        from replicanta.tui import DoomScreen
+
+        screen = self._app.screen
+        if type(screen) is DoomScreen:
+            with contextlib.suppress(NoMatches):
+                return screen.query_one("#doom", Static)
+        return None
+
+    def _thoughts(self):
+        """The active DoomScreen's thought-stream Static, or None."""
+        from replicanta.tui import DoomScreen
+
+        screen = self._app.screen
+        if type(screen) is DoomScreen:
+            with contextlib.suppress(NoMatches):
+                return screen.query_one("#doom-thoughts", Static)
+        return None
+
     def key_command(self, cmd):
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
         if svc is None:
             return
-        # When on the DOOM pane, arrow/space keys drive the game; otherwise ignore.
-        active = self._app.query_one(TabbedContent).active
-        if active != "doom-pane":
+        # When the DOOM overlay is up, arrow/space keys drive the game;
+        # everywhere else they keep their normal meanings (chat history).
+        from replicanta.tui import DoomScreen
+
+        if not isinstance(self._app.screen, DoomScreen):
             return
         # If no game is running, start one automatically on the first keypress.
         if not svc.running():
@@ -460,7 +526,7 @@ class DoomController:
         return False
 
     def mirror_thought(self, reply):
-        """Append entity reasoning to the DOOM pane's thought stream when a
+        """Append entity reasoning to the overlay's thought stream when a
         game is running (called from the response worker thread)."""
         loader = getattr(self._app.org, "module_loader", None)
         doom_svc = loader.registry.get("doom") if loader is not None else None
@@ -494,9 +560,11 @@ class DoomController:
         # next timer tick: cancel any queued turn.
         if args and args[0] == "stop":
             self.cancel_auto()
-        # Render into the dedicated DOOM pane instead of the chat log.
+        # Render into the DOOM overlay instead of the chat log.
         # Prefer the live screen capture; the dispatch result is the
-        # one-line status when no frame is available.
+        # one-line status when no frame is available. When the overlay is
+        # not up yet (it mounts asynchronously), DoomScreen.on_mount
+        # repaints via refresh(force=True).
         text = ""
         frame_fn = getattr(svc, "frame", None)
         if callable(frame_fn):
@@ -507,12 +575,15 @@ class DoomController:
         lines = text.splitlines()
         if lines:
             self._text = "\n".join(lines)
-            doom = self._app._safe_query("#doom", Static)
+            doom = self._pane()
             if doom is not None:
                 doom.update(self._text)
-        # Switch to the DOOM pane when a game starts or renders.
+        # Raise the DOOM overlay when a game starts or renders (idempotent).
         if args and args[0] in ("start", "status"):
-            self._app.action_show_tab("doom-pane")
+            from replicanta.tui import DoomScreen
+
+            if not isinstance(self._app.screen, DoomScreen):
+                self._app.push_screen(DoomScreen())
         # Nudge the organism to observe any game frame it produced.
         try:
             status = svc.status()
@@ -528,15 +599,24 @@ class DoomController:
             self._app.set_timer(0.7, self.take_turn)
             self._app.set_timer(1.5, self.take_turn)
 
-    def refresh(self):
-        """Refresh the DOOM pane when a game is running."""
+    def refresh(self, force=False):
+        """Refresh the DOOM overlay's frame when a game is running. With
+        force=True (the overlay just mounted) also paint the one-line status
+        when no game is running, so /doom status has something to show."""
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
+        if svc is None:
+            return
+        running = False
+        try:
+            running = bool(svc.running())
+        except Exception:  # noqa: BLE001
+            running = False
+        if not running and not force:
             return
         text = ""
         frame_fn = getattr(svc, "frame", None)
-        if callable(frame_fn):
+        if running and callable(frame_fn):
             try:
                 text = str(frame_fn() or "")
             except Exception as exc:  # noqa: BLE001
@@ -547,15 +627,15 @@ class DoomController:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("doom refresh failed: %s", exc)
                 return
-        if text != self._text:
+        if text != self._text or force:
             self._text = text
-            doom = self._app._safe_query("#doom", Static)
+            doom = self._pane()
             if doom is not None:
                 doom.update(self._text)
 
     def set_thought(self, text):
-        """Append entity reasoning to the DOOM pane's thought stream."""
-        thoughts = self._app._safe_query("#doom-thoughts", Static)
+        """Append entity reasoning to the overlay's thought stream."""
+        thoughts = self._thoughts()
         if thoughts is None:
             return
         # Normalize: strip a stale live-typing "> " prefix before re-stamping.
@@ -567,7 +647,7 @@ class DoomController:
             f"[{datetime.now(UTC).strftime('%H:%M:%S')}] > {line}" for line in text.splitlines() if line.strip()
         )
         lines = (current.splitlines() if current else []) + stamped.splitlines()
-        # Keep the last ~8 entries so the pane stays readable.
+        # Keep the last ~8 entries so the stream stays readable.
         trimmed = "\n".join(lines[-8:])
         thoughts.update(trimmed)
         # Also update the pending token area so the streaming reasoning is visible.
@@ -641,8 +721,8 @@ class DoomController:
             self._app._responding = False
 
     def token(self, tok):
-        """Stream a single token into the DOOM thought pane during generation."""
-        thoughts = self._app._safe_query("#doom-thoughts", Static)
+        """Stream a single token into the overlay's thought stream during generation."""
+        thoughts = self._thoughts()
         if thoughts is None:
             return
         current = str(getattr(thoughts, "_Static__content", "") or "")

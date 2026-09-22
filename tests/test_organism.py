@@ -982,7 +982,7 @@ def _headless_app(monkeypatch, tmp_path):
     return app
 
 
-def test_tui_has_four_tabs(monkeypatch, tmp_path):
+def test_tui_has_transcript_first_main_screen(monkeypatch, tmp_path):
     import asyncio
 
     from textual.widgets import TabbedContent, TabPane
@@ -991,17 +991,11 @@ def test_tui_has_four_tabs(monkeypatch, tmp_path):
 
     async def check():
         async with app.run_test():
-            tabs = app.query_one(TabbedContent)
-            assert {p.id for p in tabs.query(TabPane)} == {
-                "chat-pane",
-                "mind-pane",
-                "memory-pane",
-                "inner-pane",
-                "cells-pane",
-                "visual-pane",
-                "mud-pane",
-                "doom-pane",
-            }
+            assert len(app.query(TabbedContent)) == 0
+            assert len(app.query(TabPane)) == 0
+            # the main screen is the transcript: sidebar + log + input
+            for widget in ("#topbar", "#sidebar", "#dreams", "#pending", "#chat"):
+                assert app.query_one(widget), f"{widget} missing from the main screen"
 
     asyncio.run(check())
 
@@ -1024,17 +1018,21 @@ def test_tui_pending_widget_streams_and_hides(monkeypatch, tmp_path):
     asyncio.run(check())
 
 
-def test_tui_status_bar_uses_words(monkeypatch, tmp_path):
+def test_tui_status_line_uses_words(monkeypatch, tmp_path):
     import asyncio
 
     app = _headless_app(monkeypatch, tmp_path)
 
     async def check():
         async with app.run_test():
-            app.refresh_status()
-            assert "beliefs" in app._bottombar_text
-            assert "rules" in app._bottombar_text
-            assert "inner voice" in app._bottombar_text
+            app.refresh_top_bar()
+            text = app._topbar_text
+            assert "REPLICANTA" in text
+            assert app.org.dir_path.name in text
+            assert "awake" in text
+            assert "a/c/i" in text
+            assert "voice" in text
+            app.refresh_status()  # no-op seam: must not raise
 
     asyncio.run(check())
 

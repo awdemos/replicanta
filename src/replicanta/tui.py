@@ -22,7 +22,7 @@ from textual.actions import SkipAction
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.command import Hit, Matcher, Provider
-from textual.containers import Grid, Horizontal, ScrollableContainer, Vertical, VerticalScroll
+from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
@@ -35,8 +35,6 @@ from textual.widgets import (
     OptionList,
     RichLog,
     Static,
-    TabbedContent,
-    TabPane,
 )
 
 try:
@@ -119,83 +117,6 @@ class SlashCommands(Provider):
                 yield self._hit(name, usage, description, score=match.score, display=match.highlight)
 
 
-class CommandHints(Static):
-    """Renders filtered slash-command hints above the chat input."""
-
-    def update_for(self, value):
-        if not value.startswith("/"):
-            self.update("")
-            self.styles.display = "none"
-            return
-        parts = value.split(None, 1)
-        query = parts[0]
-        prefix = parts[1] if len(parts) > 1 else ""
-        items = tui_commands.filter_commands(query)
-        if prefix:
-            items = [c for c in items if c[0] == query]
-            if items:
-                self.update(f"Usage: {items[0][1]}")
-                self.styles.display = "block"
-                return
-        lines = [f"{usage:<16} {desc}" for _name, usage, desc, _category in items[:8]]
-        self.update("\n".join(lines))
-        self.styles.display = "block" if lines else "none"
-
-
-class TabBar(Horizontal):
-    """Clickable tab bar that mirrors the TabbedContent panes."""
-
-    TABS: ClassVar[list[tuple[str, str]]] = [
-        ("Chat", "chat-pane"),
-        ("Mind", "mind-pane"),
-        ("Memory", "memory-pane"),
-        ("Inner", "inner-pane"),
-        ("Cells", "cells-pane"),
-        ("Visual", "visual-pane"),
-        ("MUD", "mud-pane"),
-        ("DOOM", "doom-pane"),
-    ]
-
-    def compose(self) -> ComposeResult:
-        for label, pane in self.TABS:
-            yield Button(label, id=f"tab-{pane}")
-
-    def set_active(self, pane):
-        """Highlight the matching tab button and remove focus so keyboard
-        input returns to the chat line after a tab switch."""
-        for button in self.query(Button):
-            button.variant = "primary" if button.id == f"tab-{pane}" else "default"
-        app = self.app
-        chat_input = getattr(app, "chat_input", None)
-        if chat_input is not None:
-            app.set_focus(chat_input)
-
-
-class ActivityLabel(Static):
-    """Compact, transient activity indicator in the status bar."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._last_text = None
-        self._visible = True
-
-    def show(self, text):
-        self.styles.display = "block"
-        self._visible = True
-        if text == self._last_text:
-            return
-        self._last_text = text
-        self.update(text)
-
-    def clear(self):
-        if not self._visible and self._last_text == "":
-            return
-        self._last_text = ""
-        self._visible = False
-        self.update("")
-        self.styles.display = "none"
-
-
 class MutationBanner(Horizontal):
     """Sticky banner for pending extension patches with approve/reject/why."""
 
@@ -204,17 +125,6 @@ class MutationBanner(Horizontal):
         yield Button("Approve", id="mutation-approve", variant="success")
         yield Button("Reject", id="mutation-reject", variant="error")
         yield Button("Why?", id="mutation-why")
-
-
-class QuickActions(Grid):
-    """One-click sidebar buttons for common state changes."""
-
-    def compose(self) -> ComposeResult:
-        yield Button("Sleep", id="qa-sleep")
-        yield Button("Voice off", id="qa-voice")
-        yield Button("Listen", id="qa-listen")
-        yield Button("Look", id="qa-look")
-        yield Button("MUD off", id="qa-mud")
 
 
 # Sidebar badge glyphs for loaded capability modules (persona modules stay
@@ -489,6 +399,127 @@ class CellDetailScreen(ModalScreen):
         self.dismiss()
 
 
+class BeingScreen(Screen):
+    """Full-screen dashboard: mind, memory, inner state, and the neural
+    memory grid — the former tab panes as one scrollable overlay (F3)."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+
+    CSS = """
+    BeingScreen { background: $surface; }
+    #being-scroll { height: 1fr; padding: 1 2; }
+    .being-header { height: 1; padding: 1 0 0 0; text-style: bold; color: $text; }
+    #mind, #memory, #inner, #cells { height: auto; padding: 0 1 1 1; }
+    """
+
+    def __init__(self, org):
+        """Create the dashboard for the given organism (live-refreshed
+        every tick while the screen is on top)."""
+        super().__init__()
+        self._org = org
+
+    def compose(self) -> ComposeResult:
+        """Build the four labeled sections; content is plain renderables."""
+        with VerticalScroll(id="being-scroll"):
+            yield Label("MIND", classes="being-header")
+            yield Static(tui_views.mind_renderable(self._org), id="mind", markup=False)
+            yield Label("MEMORY", classes="being-header")
+            yield Static(tui_views.memory_renderable(self._org), id="memory", markup=False)
+            yield Label("INNER", classes="being-header")
+            yield Static(tui_views.inner_renderable(self._org), id="inner", markup=False)
+            yield Label("CELLS", classes="being-header")
+            yield Static(tui_views.cells_view(self._org), id="cells", markup=False)
+
+    def on_mount(self):
+        """The app recomputes the click grid from the live organism."""
+        self.app._cells_grid = tui_views.cells_layout(self._org)[1]
+
+    def refresh_sections(self, org):
+        """Re-render every section from the given (possibly swapped) organism."""
+        self._org = org
+        self.query_one("#mind", Static).update(tui_views.mind_renderable(org))
+        self.query_one("#memory", Static).update(tui_views.memory_renderable(org))
+        self.query_one("#inner", Static).update(tui_views.inner_renderable(org))
+        self.query_one("#cells", Static).update(tui_views.cells_view(org))
+
+    def action_dismiss(self):
+        self.app.pop_screen()
+
+
+class DoomScreen(Screen):
+    """Full-screen DOOM overlay: the entity's thought stream above the
+    80-column ASCII frame. Escape closes the overlay; the game keeps
+    running (arrows/space play, /doom stop ends it)."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+
+    CSS = """
+    DoomScreen { background: $surface; }
+    #doom-hint { height: 1; padding: 0 1; color: $text-muted; }
+    #doom-scroll { height: 1fr; }
+    #doom { padding: 0 1; width: 80; min-width: 80; }
+    #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
+    """
+
+    def compose(self) -> ComposeResult:
+        """Build the hint line and the scrollable frame container."""
+        with Vertical(id="doom-box"):
+            yield Label(
+                "esc closes — arrows/space play — /doom stop ends the game",
+                id="doom-hint",
+            )
+            with ScrollableContainer(id="doom-scroll"):
+                yield Static("", id="doom-thoughts", markup=False)
+                yield Static(
+                    "Run /doom start to play DOOM (doom-ascii).",
+                    id="doom",
+                    markup=False,
+                )
+
+    def on_mount(self):
+        """Paint the current frame immediately: the controller pushed this
+        screen asynchronously, after it had already computed the frame."""
+        self.app._doom.refresh(force=True)
+
+    def action_dismiss(self):
+        self.app.pop_screen()
+
+
+class MudScreen(Screen):
+    """Full-screen MUD overlay: a view of the dungeon. Input stays in the
+    chat bar; escape closes the overlay."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+
+    CSS = """
+    MudScreen { background: $surface; }
+    #mud-hint { height: 1; padding: 0 1; color: $text-muted; }
+    #mud-scroll { height: 1fr; }
+    #mud { padding: 1 2; }
+    """
+
+    def compose(self) -> ComposeResult:
+        """Build the hint line and the scrollable view."""
+        with Vertical(id="mud-box"):
+            yield Label(
+                "esc closes — type commands in the chat bar",
+                id="mud-hint",
+            )
+            with VerticalScroll(id="mud-scroll"):
+                yield Static(
+                    "MUD output appears here. Type moves in the chat bar.",
+                    id="mud",
+                    markup=False,
+                )
+
+    def on_mount(self):
+        """Repaint the last rendered view (see DoomScreen.on_mount)."""
+        self.app._mud.refresh_pane()
+
+    def action_dismiss(self):
+        self.app.pop_screen()
+
+
 class _ModuleList(VerticalScroll):
     """Container for module checkboxes that uses arrow keys to move focus."""
 
@@ -647,10 +678,11 @@ ASK_USER_ODDS = 0.35  # chance an idle wake utterance asks the user instead
 
 class OrganismApp(App):
     """Replicanta's terminal front-end, conversation-first: a workspace
-    chrome with a top organism bar, a nursery sidebar, a bottom status
-    line, and a tabbed main area (chat, mind, memory, inner). Commands:
-    /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save, /think,
-    /new, /swap, /organisms, /reload, /lua file.lua, /listen,
+    chrome with a top organism bar and a nursery sidebar around a
+    transcript-only main area; the mind/memory/inner/cells dashboards and
+    the doom/mud games live in full-screen overlays (F3, /doom, /mud).
+    Commands: /chaos N, /focus X, /sleep, /wake, /revive, /stats, /save,
+    /think, /new, /swap, /organisms, /reload, /lua file.lua, /listen,
     /microphone, /look, /camera, /help (or ctrl+p / F1)."""
 
     TITLE = "Replicanta"
@@ -659,17 +691,13 @@ class OrganismApp(App):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+p", "command_palette", "command palette"),
         Binding("f1", "help", "help"),
-        Binding("f2", "show_tab('chat-pane')", "chat"),
-        Binding("f3", "show_tab('mind-pane')", "mind"),
-        Binding("f4", "show_tab('memory-pane')", "memory"),
+        Binding("f3", "being", "being"),
         Binding("ctrl+s", "save_now", "save"),
         Binding("ctrl+t", "think_now", "think"),
         Binding("f5", "talk", "talk (push-to-talk)"),
         Binding("f6", "look", "look through the camera"),
-        Binding("f7", "show_tab('inner-pane')", "inner"),
-        Binding("f8", "show_tab('cells-pane')", "cells"),
-        Binding("shift+f8", "show_tab('visual-pane')", "visual"),
         Binding("f9", "modules", "modules"),
+        Binding("ctrl+b", "toggle_sidebar", show=False),
         Binding("up", "doom_up", "doom forward", show=False),
         Binding("down", "doom_down", "doom back", show=False),
         Binding("left", "doom_left", "doom turn left", show=False),
@@ -690,35 +718,14 @@ class OrganismApp(App):
                border-right: solid $primary; }
     #sidebar-header { height: 1; padding: 0 1; background: $surface;
                       color: $text-muted; text-style: bold; }
-    #quick-actions { height: auto; padding: 1 0; grid-size: 2; grid-gutter: 0 1; }
-    #quick-actions > Button { width: 1fr; margin: 0; height: 1; border: none;
-                              background: transparent; color: $text-muted; }
-    #quick-actions > Button:hover { background: $boost; color: $text; }
-    #quick-actions > Button:focus { background: $boost; border: none; }
     #sidebar-list { padding: 0; height: 1fr; border: none;
                      background: $surface; }
     #sidebar-list > ListItem { padding: 0 1; }
     #sidebar-list > ListItem.-highlight { background: $primary;
                                            color: $text; }
     #content { width: 1fr; height: 1fr; }
-    #tab-bar { height: 1; padding: 0 1; }
-    #tab-bar > Button { min-width: 8; margin: 0 1; height: 1; border: none;
-                        background: transparent; color: $text-muted; }
-    #tab-bar > Button:hover { background: transparent; color: $text; }
-    #tab-bar > Button:focus { background: transparent; border: none; }
-    #tab-bar > Button.-primary { color: $text; text-style: bold underline;
-                                 background: transparent; }
-    TabbedContent { height: 1fr; }
-    TabbedContent > ContentTabs { display: none; }
     #dreams { height: 1fr; padding: 0 1; }
     #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
-    #mind, #memory, #inner { padding: 1 2; }
-    #inner { overflow-y: auto; }
-    #visual { padding: 1 2; }
-    #doom { padding: 0 1; width: 80; min-width: 80; }
-    #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
-    #command-hints { height: auto; max-height: 4; padding: 0 1;
-                      color: $text-muted; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
                        background: $warning-darken-2; color: $text; }
     #mutation-banner > Static { width: 1fr; content-align: left middle; }
@@ -736,10 +743,6 @@ class OrganismApp(App):
     CellDetailScreen { align: center middle; }
     #cell-detail { border: round $secondary; padding: 1 2; width: 64;
                   height: auto; background: $surface; }
-    #bottombar { height: 1; padding: 0 1; background: $surface;
-                  color: $text-muted; }
-    #activity { width: auto; }
-    #bottombar-text { width: 1fr; content-align: right middle; }
     CommandPalette { align: center middle; }
     #palette { width: 72; height: auto; max-height: 26; border: round $primary;
                background: $surface; padding: 1 2; }
@@ -777,8 +780,11 @@ class OrganismApp(App):
         self.root = Path(root) if root is not None else organism.dir_path.parent.parent
         # kwargs for Organism() when birthing/swapping (wake/sleep/chaos)
         self._spawn = dict(spawn or {})
-        # metadata grid behind the cells tab, for click-to-inspect
+        # metadata grid behind the cells section (BeingScreen), for
+        # click-to-inspect
         self._cells_grid = []
+        # transient activity message (shown in the #pending region)
+        self._activity_text = ""
         # button of the most recent click anywhere; lets the sidebar tell a
         # right-click (context menu) apart from a left-click selection
         self._last_click_button = None
@@ -814,78 +820,41 @@ class OrganismApp(App):
         self._mud = MudController(self)
         self._doom = DoomController(self)
         self._voice = VoiceController(self)
-        self._brain_running = False  # cached fly-brain state for activity label
+        self._brain_running = False  # cached fly-brain state for the activity line
         self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
         self._visual_text = ""
         self._topbar_text = ""
-        self._bottombar_text = ""
         self._rendered_topbar_text = None
-        self._rendered_bottombar_text = None
 
     def compose(self) -> ComposeResult:
-        """Build the top bar, sidebar, tabbed content area, chat input, and bottom bar."""
+        """Build the top bar, sidebar, transcript, and chat input — the
+        only chrome is the single top-bar row."""
         yield Static("", id="topbar")
         with Horizontal(id="main"):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
                 yield ListView(id="sidebar-list")
-                yield QuickActions(id="quick-actions")
             with Vertical(id="content"):
-                yield TabBar(id="tab-bar")
-                with TabbedContent(initial="chat-pane"):
-                    with TabPane("chat", id="chat-pane"):
-                        dreams = RichLog(
-                            id="dreams",
-                            max_lines=1000,
-                            wrap=True,
-                            markup=True,
-                            highlight=False,
-                            auto_scroll=True,
-                        )
-                        dreams.can_focus = False
-                        yield dreams
-                        yield Static("", id="pending", markup=False)
-                    with TabPane("mind", id="mind-pane"), VerticalScroll():
-                        yield Static("", id="mind", markup=False)
-                    with TabPane("memory", id="memory-pane"), VerticalScroll():
-                        yield Static("", id="memory", markup=False)
-                    with TabPane("inner", id="inner-pane"), VerticalScroll():
-                        yield Static("", id="inner", markup=False)
-                    with TabPane("cells", id="cells-pane"), VerticalScroll():
-                        yield Static("", id="cells", markup=False)
-                    with TabPane("visual", id="visual-pane"), VerticalScroll():
-                        yield Static(
-                            "Run /visualize [beliefs|activity|memories] to build a chart.",
-                            id="visual",
-                            markup=False,
-                        )
-                    with TabPane("mud", id="mud-pane"), VerticalScroll():
-                        yield Static(
-                            "MUD output appears here. Type moves in the chat bar.",
-                            id="mud",
-                            markup=False,
-                        )
-                    with TabPane("doom", id="doom-pane"), ScrollableContainer():
-                        yield Static("", id="doom-thoughts", markup=False)
-                        yield Static(
-                            "Run /doom start to play DOOM (doom-ascii).",
-                            id="doom",
-                            markup=False,
-                        )
-        yield CommandHints("", id="command-hints")
+                dreams = RichLog(
+                    id="dreams",
+                    max_lines=1000,
+                    wrap=True,
+                    markup=True,
+                    highlight=False,
+                    auto_scroll=True,
+                )
+                dreams.can_focus = False
+                yield dreams
+                yield Static("", id="pending", markup=False)
         yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
-            placeholder="talk to me, or /help …  (tab completes · "
-            "F2 chat · F3 mind · F4 memory · F7 inner · F8 cells · shift+F8 visual · F9 modules)",
+            placeholder="talk to me, or /help …  (tab completes)",
             id="chat",
         )
         yield self.chat_input
         yield Toast("", id="toast")
-        with Horizontal(id="bottombar"):
-            yield ActivityLabel("", id="activity")
-            yield Static("", id="bottombar-text")
 
     def on_mount(self):
         """Render the initial organism state and start background timers."""
@@ -899,9 +868,12 @@ class OrganismApp(App):
             with contextlib.suppress(Exception):
                 driver._enable_mouse_support()
         self._show_org()
-        tab_bar = self._safe_query("#tab-bar", TabBar)
-        if tab_bar is not None:
-            tab_bar.set_active("chat-pane")
+        if self.screen.size.width < 80:
+            # narrow terminals start transcript-first; ctrl+b reveals the
+            # nursery sidebar
+            sidebar = self._safe_query("#sidebar", Vertical)
+            if sidebar is not None:
+                sidebar.styles.display = "none"
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
@@ -912,8 +884,8 @@ class OrganismApp(App):
 
     def _show_org(self):
         """(Re)render everything that reflects the current organism: chat
-        history, status bar, mind/memory tabs. Used on mount and after a
-        swap."""
+        history, the top bar, and the dashboard sections. Used on mount
+        and after a swap."""
         self._chat_history = [line for role, line in self.org.store.chat_log if role == "user"]
         if not self.org.store.chat_log and self.org.store.cycle == 0:
             self._append_log("a tiny replicanta wakes up inside your machine.", STYLE_DIM)
@@ -968,17 +940,17 @@ class OrganismApp(App):
         self._append_log(f"— now living with {name} —", STYLE_DIM, stamp=True)
 
     # -- actions ---------------------------------------------------------
-    def action_show_tab(self, pane):
-        """Switch to a tab pane by ID, creating/refreshing the tab bar selection
-        so the displayed pane and the highlighted tab stay in sync."""
-        tabbed = self.query_one(TabbedContent)
-        tabbed.active = pane
-        tab_bar = self._safe_query("#tab-bar", TabBar)
-        if tab_bar is not None:
-            tab_bar.set_active(pane)
-        # keep typing in the chat line, never stranded by a pane switch
-        if self.chat_input is not None:
-            self.chat_input.focus()
+    def action_being(self):
+        """F3: full-screen mind/memory/inner/cells dashboard overlay."""
+        self.push_screen(BeingScreen(self.org))
+
+    def action_toggle_sidebar(self):
+        """ctrl+b: show/hide the nursery sidebar (auto-hidden on narrow
+        terminals at mount)."""
+        sidebar = self._safe_query("#sidebar", Vertical)
+        if sidebar is None:
+            return
+        sidebar.styles.display = "none" if sidebar.styles.display != "none" else "block"
 
     def action_doom_up(self):
         self._doom.key_command("w")
@@ -999,11 +971,8 @@ class OrganismApp(App):
         self._doom.key_command("stop")
 
     def on_button_pressed(self, event):
-        """Route tab-bar, mutation, and quick-action button presses."""
+        """Route mutation banner button presses."""
         button_id = event.button.id
-        if button_id and button_id.startswith("tab-"):
-            self.action_show_tab(button_id[4:])
-            return
         if button_id == "mutation-approve":
             entry = extensions.approve(self.org.dir_path / "artifacts" / "extensions.json")
             if entry:
@@ -1025,16 +994,6 @@ class OrganismApp(App):
         if button_id == "mutation-why":
             self._show_mutation_why()
             return
-        mapping = {
-            "qa-sleep": self.action_sleep_wake,
-            "qa-voice": self.action_voice,
-            "qa-listen": self.action_talk,
-            "qa-look": self.action_look,
-            "qa-mud": self.action_mud,
-        }
-        action = mapping.get(button_id)
-        if action:
-            action()
 
     def action_help(self):
         self.push_screen(HelpScreen())
@@ -1414,9 +1373,10 @@ class OrganismApp(App):
             self._assign_to_group(name, target_group)
 
     def on_click(self, event):
-        """Left-click a neural-memory cell (F8 grid) to inspect what kind
-        of object it holds and its metadata. Grid geometry: one header
-        line, then CELLS_ROWS lines of 2-column-wide cells."""
+        """Left-click a neural-memory cell (CELLS section of the being
+        overlay) to inspect what kind of object it holds and its metadata.
+        Grid geometry: one header line, then CELLS_ROWS lines of
+        2-column-wide cells."""
         self._last_click_button = event.button
         if getattr(event.widget, "id", None) != "cells":
             return
@@ -1768,8 +1728,8 @@ class OrganismApp(App):
         elif event.key in ("up", "down"):
             if self.chat_input is None or not self.chat_input.has_focus:
                 return
-            if self.query_one(TabbedContent).active == "doom-pane":
-                # on the DOOM pane the arrows drive the player (doom_up/
+            if isinstance(self.screen, DoomScreen):
+                # on the DOOM overlay the arrows drive the player (doom_up/
                 # doom_down bindings); prevent_default here would swallow
                 # them, so leave the key to binding dispatch
                 return
@@ -1800,16 +1760,12 @@ class OrganismApp(App):
     def on_input_changed(self, event):
         if event.input.id != "chat":
             # rename/name prompts and the palette input also bubble
-            # Changed up to the app; only the chat line drives hints
-            # and typing state
+            # Changed up to the app; only the chat line drives typing state
             return
         if not self._suppress_changed:
             self._completion_matches = None
             self._completion_index = 0
             self._history_index = -1
-        hints = self._safe_query("#command-hints", CommandHints)
-        if hints is not None:
-            hints.update_for(event.value)
         self._suppress_changed = False
         if event.value and not event.value.startswith("/"):
             self._touch_typing()
@@ -1818,9 +1774,7 @@ class OrganismApp(App):
         """Record typing activity with debouncing; nudges near-boundary sleep."""
         now = time.monotonic()
         self._typing_last = now
-        activity_label = self._safe_query("#activity", ActivityLabel)
-        if activity_label is not None:
-            activity_label.show("listening…")
+        self.set_activity("listening…")
         if self._typing_timer is not None:
             self._typing_timer.stop()
         self._typing_timer = self.set_timer(0.6, self._end_typing)
@@ -1835,9 +1789,7 @@ class OrganismApp(App):
                 logger.debug("typing activity failed: %s", exc)
 
     def _end_typing(self):
-        activity_label = self._safe_query("#activity", ActivityLabel)
-        if activity_label is not None:
-            activity_label.clear()
+        self.clear_activity()
         self._typing_timer = None
 
     # -- voice health (worker boundary; behavior in VoiceController) --------
@@ -1883,20 +1835,17 @@ class OrganismApp(App):
         return self._narrating or self._responding or self._self_talking or self._group_responding
 
     def _refresh_views(self):
+        """Rebuild the cheap string views and, when the dashboard overlay is
+        up, its live sections; refresh the game overlays and banner."""
         self._mind_text = tui_views.mind_view(self.org)
         self._memory_text = tui_views.memory_view(self.org)
-        self.query_one("#mind", Static).update(tui_views.mind_renderable(self.org))
-        self.query_one("#memory", Static).update(tui_views.memory_renderable(self.org))
-        self.query_one("#inner", Static).update(tui_views.inner_renderable(self.org))
-        text, self._cells_grid = tui_views.cells_layout(self.org)
-        self.query_one("#cells", Static).update(text)
-        visual = self._safe_query("#visual", Static)
-        if visual is not None and not getattr(self, "_visual_text", ""):
-            visual.update(
-                "Run /visualize to render a live-updating RDD chart.\n"
-                "Kinds: beliefs | attributes | activity | memories | recent | mood | sentiment | stress | summary\n"
-                "Charts are saved as SVG in artifacts/visual-state/."
-            )
+        self._cells_grid = tui_views.cells_layout(self.org)[1]
+        try:
+            screen = self.screen
+        except ScreenStackError:
+            screen = None  # headless dispatch: no screen mounted yet
+        if isinstance(screen, BeingScreen):
+            screen.refresh_sections(self.org)
         # Live refresh: if a visual chart is active and state changed, re-render silently.
         if getattr(self, "_visual_kind", None):
             sig = self._visual_signature()
@@ -1987,98 +1936,34 @@ class OrganismApp(App):
             self._reflect()
 
     def refresh_status(self):
-        """Render the custom bottom bar: activity counters on the left,
-        keyboard shortcuts as styled key caps on the right. Hints drop
-        from the middle as the terminal narrows; palette and quit stay
-        anchored at the ends."""
-        m = self.org.metrics()
-        playing = ""
-        if self._mud.game is not None:
-            playing = " · 🗡 mud (paused)" if self._mud.paused else " · 🗡 mud"
-        if self._group is not None:
-            playing += f" · 👥 group ({len(self._group.names())})"
-        loader = getattr(self.org, "module_loader", None)
-        if loader is not None:
-            doom_svc = loader.registry.get("doom")
-            if doom_svc is not None and doom_svc.running():
-                playing += " · 💀 doom"
-            if "fly-brain" in loader.modules:
-                brain_svc = loader.registry.get("brain")
-                if brain_svc is not None and brain_svc.running():
-                    playing += " · \U0001fab0 fly brain running"
-                else:
-                    fly_svc = loader.registry.get("flybrain")
-                    if fly_svc is not None and fly_svc.available():
-                        playing += " · \U0001fab0 fly brain ready"
-                    else:
-                        playing += " · \U0001fab0 fly brain (no binary)"
-        counters = f"{m.belief_count} beliefs · {m.rule_count} rules · inner voice {voice.status()}{playing}"
-        hints = [
-            ("ctrl+p", " palette "),
-            ("F1", " help "),
-            ("F2-F8", " tabs "),
-            ("ctrl+q", " quit"),
-        ]
-
-        def build(segs):
-            parts = []
-            for i, (key, label) in enumerate(segs):
-                if i:
-                    parts.append((" · ", "dim"))
-                parts.append((key, "reverse"))
-                parts.append((label, ""))
-            return Text.assemble(*parts)
-
-        try:
-            width = self.screen.size.width
-        except Exception:  # noqa: BLE001 — headless/unit contexts may lack a screen
-            width = 80
-        segs = list(hints)
-        keys = build(segs)
-        while len(segs) > 2 and len(f"{counters}   {keys.plain}") > width:
-            segs.pop(-2)  # left of quit: tabs, then help
-            keys = build(segs)
-        text = f"{counters}   {keys.plain}"
-        self._bottombar_text = text
-        if text != self._rendered_bottombar_text:
-            self._rendered_bottombar_text = text
-            bottombar = self._safe_query("#bottombar-text", Static)
-            if bottombar is not None:
-                bottombar.update(Text(f"{counters}   ") + keys)
-        self._update_quick_actions()
-
-    def _update_quick_actions(self):
-        qa = self._safe_query("#quick-actions", QuickActions)
-        if not isinstance(qa, QuickActions):
-            return
-        sleep_btn = qa.query_one("#qa-sleep", Button)
-        sleep_btn.label = "Wake" if self.org.lifecycle.state == "sleep" else "Sleep"
-        voice_btn = qa.query_one("#qa-voice", Button)
-        voice_btn.label = f"Voice {'on' if speech.enabled else 'off'}"
-        listen_btn = qa.query_one("#qa-listen", Button)
-        listen_btn.label = "Listening…" if self.listener.recording else "Listen"
-        mud_btn = qa.query_one("#qa-mud", Button)
-        mud_btn.label = "MUD on" if self._mud.game is not None else "MUD off"
+        """Former bottom-bar updater. The single top bar is the only chrome
+        row now (refresh_top_bar renders it); this remains as the no-op seam
+        controllers and command handlers call after state changes."""
 
     def set_activity(self, text):
-        """Show a transient activity message in the status bar."""
-        label = self._safe_query("#activity", ActivityLabel)
-        if label is not None:
-            label.show(text)
+        """Show a transient activity message in the #pending region above
+        the chat line (also mirrored into the doom overlay's thought
+        stream by its controller)."""
+        self._activity_text = text
+        pending = self._safe_query("#pending", Static)
+        if pending is not None:
+            pending.update(text)
 
     def clear_activity(self):
-        """Hide the transient activity message."""
-        label = self._safe_query("#activity", ActivityLabel)
-        if label is not None:
-            label.clear()
+        """Hide the transient activity message, unless the #pending region
+        has moved on to other content (streamed reply tokens, doom
+        thoughts) — those own the region until their own hide."""
+        text, self._activity_text = self._activity_text, ""
+        if not text:
+            return
+        pending = self._safe_query("#pending", Static)
+        if pending is not None and str(getattr(pending, "_Static__content", "") or "") == text:
+            pending.update("")
 
     @property
     def activity_text(self):
-        """Current activity label text (for tests)."""
-        label = self._safe_query("#activity", ActivityLabel)
-        if label is None:
-            return ""
-        return str(getattr(label, "_Static__content", "") or "")
+        """Current activity message (for tests)."""
+        return self._activity_text
 
     def show_toast(self, message, duration=3.0):
         """Show a transient toast at the bottom of the screen."""
@@ -2425,7 +2310,7 @@ class OrganismApp(App):
 
     def _visualize_command(self, args):
         """Dispatch /visualize through the visual-state module's Lua-registered
-        handler, then refresh the TUI's live visual pane."""
+        handler, then keep the live SVG chart re-rendering from the tick."""
         loader = getattr(self.org, "module_loader", None)
         if loader is None:
             self._append_log("module loader unavailable", STYLE_WARN)
@@ -2440,12 +2325,11 @@ class OrganismApp(App):
             self._append_log(f"visualize failed: {exc}", STYLE_WARN)
             return
         self._append_log_lines(str(result or ""), STYLE_DIM)
-        # Keep the visual tab live: the Lua handler owns the verb and the
-        # text chart, while the pane re-renders the SVG silently.
+        # The Lua handler owns the verb and prints the text chart; a live
+        # SVG chart is re-rendered silently from the tick while active.
         kind = args[0] if args else "summary"
         if kind in rdd.supported_kinds():
             self._render_visual(kind, log=False)
-            self.action_show_tab("visual-pane")
 
     def _hand_command(self, args):
         """Dispatch /hand through the tendon-hand module's Lua-registered
@@ -2514,11 +2398,6 @@ class OrganismApp(App):
         self._visual_text = f"{header}\n\n{result.text_chart}"
         self._visual_kind = result.kind
         self._visual_sig = self._visual_signature()
-        visual = self._safe_query("#visual", Static)
-        if visual is not None:
-            visual.update(self._visual_text)
-        if log:
-            self.action_show_tab("visual-pane")
 
     def _visual_signature(self):
         """Return a cheap signature of organism state for live chart refresh."""
@@ -2615,7 +2494,7 @@ class OrganismApp(App):
         if reply is not None and org is self.org:
             # If the entity is in the middle of a doom game, show its thinking
             # in the chat log, execute any doom.command line, and refresh the
-            # DOOM pane so the user sees the result.
+            # DOOM overlay so the user sees the result.
             doom_cmd = extract_doom_command(reply)
             if doom_cmd is not None:
                 # Render the command itself in chat as a system line so the
@@ -2629,7 +2508,7 @@ class OrganismApp(App):
                 self.call_from_thread(self._doom.command, [doom_cmd])
                 with contextlib.suppress(Exception):
                     self.org.store.add(("doom", "last_action", doom_cmd), 0.7)
-            # Mirror the entity's prose reasoning into the DOOM pane when a game is running.
+            # Mirror the entity's prose reasoning into the DOOM overlay when a game is running.
             self._doom.mirror_thought(reply)
             self.call_from_thread(self._set_reply, reply)
             # If a doom game is still running after the entity's move, queue

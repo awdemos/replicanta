@@ -1,20 +1,20 @@
 """Headless regression tests for TUI key handling: Tab must never move
 focus off the chat input (typing would be lost), completion must still
-work, and F-pane switches must not strand a following Tab."""
+work, and the overlay screens must not strand a following Tab."""
 
 import asyncio
 
-from textual.widgets import Button, Input, RichLog, Static, TabbedContent
+from textual.widgets import Input, RichLog, Static
 
 from conftest import renderable_text, wait_until
 from replicanta.tui import (
-    CommandHints,
+    BeingScreen,
     CommandPalette,
+    DoomScreen,
     MutationBanner,
     OrganismApp,
     RenameScreen,
     SlashCommands,
-    TabBar,
     Toast,
 )
 
@@ -22,7 +22,7 @@ from replicanta.tui import (
 def test_tab_with_prefix_completes_and_keeps_focus(headless_app):
     """Regression: Tab with '/he' must complete to '/help' AND leave focus
     on the input. Without prevent_default, App._on_key ran Screen's
-    tab->focus_next after completion, moving focus to ContentTabs."""
+    tab->focus_next after completion, moving focus off the input."""
 
     app = headless_app
 
@@ -64,8 +64,8 @@ def test_tab_on_empty_input_keeps_focus_and_typing_lands(headless_app):
 
 
 def test_f3_then_tab_then_typing_lands(headless_app):
-    """Regression: F3 (pane switch) followed by Tab must keep focus in the
-    chat input so the next keystrokes are not lost."""
+    """Regression: F3 (being overlay) followed by esc and Tab must keep
+    focus in the chat input so the next keystrokes are not lost."""
 
     app = headless_app
 
@@ -76,42 +76,32 @@ def test_f3_then_tab_then_typing_lands(headless_app):
             await pilot.pause()
             await pilot.press("f3")
             await pilot.pause()
-            assert inp.has_focus, "F3 left the chat input unfocused"
+            assert isinstance(app.screen, BeingScreen), "F3 did not open the being overlay"
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, BeingScreen), "esc did not close the being overlay"
+            assert inp.has_focus, "esc left the chat input unfocused"
             await pilot.press("tab")
             await pilot.pause()
-            assert inp.has_focus, "Tab after F3 moved focus off the chat input"
+            assert inp.has_focus, "Tab after F3+esc moved focus off the chat input"
             await pilot.press("a", "b", "c")
             await pilot.pause()
-            assert inp.value == "abc", f"typing lost after F3+Tab: {inp.value!r}"
+            assert inp.value == "abc", f"typing lost after F3+esc+Tab: {inp.value!r}"
 
     asyncio.run(check())
 
 
-def test_f7_switches_to_inner_pane(headless_app):
-    """F7 must open the inner tab (mental state + perpetuation loop view)
-    while keeping focus on the chat input; the inner pane must exist."""
+def test_removed_f_keys_are_unbound_and_f3_opens_being(headless_app):
+    """The tabbed panes are gone: F2/F4/F7/F8/shift+F8 must not be bound,
+    and F3 must drive the being overlay action."""
 
     app = headless_app
-
-    async def check():
-        async with app.run_test() as pilot:
-            tabs = app.query_one(TabbedContent)
-            assert tabs.active == "chat-pane", "chat pane not active initially"
-            inp = app.chat_input
-            inp.focus()
-            await pilot.pause()
-            await pilot.press("f7")
-            await pilot.pause()
-            assert tabs.active == "inner-pane", "F7 did not activate the inner pane"
-            assert inp.has_focus, "F7 left the chat input unfocused"
-            inner_text = renderable_text(app.query_one("#inner", Static))
-            assert inner_text, "inner view rendered empty"
-            assert "mental state" in inner_text
-            await pilot.press("tab")
-            await pilot.pause()
-            assert inp.has_focus, "Tab after F7 moved focus off the chat input"
-
-    asyncio.run(check())
+    keys = app._bindings.key_to_bindings
+    for gone in ("f2", "f4", "f7", "f8", "shift+f8"):
+        assert gone not in keys, f"{gone} still bound"
+    f3_actions = [b.action for b in keys.get("f3", [])]
+    assert f3_actions == ["being"], f3_actions
+    assert "ctrl+b" in keys
 
 
 def test_ctrl_q_binding_exists_and_saves_before_quit(headless_app, monkeypatch):
@@ -159,23 +149,6 @@ def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
         tui.main()
 
 
-def test_command_hints_filter_on_slash(headless_app):
-    """Typing '/' must surface command hints, filtered by the command token."""
-    app = headless_app
-
-    async def check():
-        async with app.run_test():
-            hints = app.query_one(CommandHints)
-            hints.update_for("/voi")
-            text = renderable_text(hints)
-            assert "voice" in text.lower()
-            hints.update_for("/chaos ")
-            text = renderable_text(hints)
-            assert "/chaos 0..1" in text
-
-    asyncio.run(check())
-
-
 def test_command_palette_fills_input(headless_app):
     """ctrl+p must open the command palette; selecting a command fills the
     chat input with the command name and a trailing space."""
@@ -189,21 +162,6 @@ def test_command_palette_fills_input(headless_app):
             await pilot.pause()
             assert app.chat_input.value == "/chaos "
             assert app.chat_input.has_focus
-
-    asyncio.run(check())
-
-
-def test_tab_bar_labels_visible(headless_app):
-    """The custom tab bar must expose the main view labels."""
-    app = headless_app
-
-    async def check():
-        async with app.run_test():
-            bar = app.query_one(TabBar)
-            labels = [str(b.label) for b in bar.query(Button)]
-            assert "Chat" in labels
-            assert "Mind" in labels
-            assert "Memory" in labels
 
     asyncio.run(check())
 
@@ -285,10 +243,10 @@ def test_f10_binding_quits_not_doom(headless_app):
     assert "doom_toggle" not in all_actions, "F10 doom binding is back"
 
 
-def test_doom_pane_arrows_drive_doom_not_history(headless_app, monkeypatch):
-    """On the DOOM pane, up/down must reach the doom_up/doom_down
-    bindings; on_key used to prevent_default them away and browse chat
-    history instead. Other panes keep history browsing."""
+def test_doom_arrows_drive_doom_only_on_the_overlay(headless_app, monkeypatch):
+    """Arrows must reach the doom bindings only while the DoomScreen overlay
+    is up; everywhere else they browse chat history (on_key used to
+    prevent_default them away, and the old gate queried the removed tabs)."""
 
     app = headless_app
     doom_calls = []
@@ -298,19 +256,27 @@ def test_doom_pane_arrows_drive_doom_not_history(headless_app, monkeypatch):
     async def check():
         async with app.run_test() as pilot:
             app._chat_history = ["an old line"]
-            app.action_show_tab("doom-pane")
+            # off the overlay: up browses chat history, no doom command
+            await pilot.press("up")
             await pilot.pause()
-            assert app.chat_input.has_focus
+            assert app.chat_input.value == "an old line"
+            assert doom_calls == [], doom_calls
+            await pilot.press("down")
+            await pilot.pause()
+            assert app.chat_input.value == ""
+            assert doom_calls == [], doom_calls
+            # on the overlay: the arrows drive the game, not the history
+            app.push_screen(DoomScreen())
+            await pilot.pause()
             await pilot.press("up")
             await pilot.pause()
             assert doom_calls == ["up"], doom_calls
-            assert app.chat_input.value == ""
-            assert app._history_index == -1, "chat history was browsed on the doom pane"
+            assert app.chat_input.value == "", "chat history was browsed on the overlay"
             await pilot.press("down")
             await pilot.pause()
             assert doom_calls == ["up", "down"], doom_calls
-            # off the doom pane, up/down browse chat history again
-            app.action_show_tab("chat-pane")
+            # leaving the overlay restores history browsing
+            app.pop_screen()
             await pilot.pause()
             await pilot.press("up")
             await pilot.pause()

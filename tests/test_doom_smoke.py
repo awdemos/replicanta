@@ -1,5 +1,6 @@
 """Headless smoke test: start doom-ascii via the real TUI command path and
-verify the organism observes the frame.
+verify the organism observes the frame, with the game rendering into the
+DoomScreen overlay instead of a tab pane.
 
 Hermetic: DOOM_ASCII_BIN points at the committed stub binary double, so no
 C toolchain, network, or WAD is needed.
@@ -14,7 +15,7 @@ from textual.widgets import Input, Static
 from conftest import neuter_background_loops, wait_until
 from replicanta import nursery as nursery_mod
 from replicanta.organism import Organism
-from replicanta.tui import OrganismApp
+from replicanta.tui import DoomScreen, OrganismApp
 
 STUB = Path(__file__).parent / "fixtures" / "doom_ascii_stub.py"
 
@@ -46,16 +47,25 @@ def doom_app(monkeypatch, tmp_path):
     app.org.module_loader.registry.get("doom").stop()
 
 
+async def _start_doom(app, pilot):
+    """Drive '/doom start' through the chat line and wait for the overlay."""
+    chat = app.query_one("#chat", Input)
+    chat.focus()
+    chat.value = "/doom start"
+    await pilot.press("enter")
+    await wait_until(
+        lambda: type(app.screen) is DoomScreen,
+        message="doom overlay to open",
+    )
+    return app.screen.query_one("#doom", Static)
+
+
 def test_doom_command_renders_frame(doom_app):
     app = doom_app
 
     async def check():
         async with app.run_test() as pilot:
-            chat = app.query_one("#chat", Input)
-            chat.focus()
-            chat.value = "/doom start"
-            await pilot.press("enter")
-            doom = app.query_one("#doom", Static)
+            doom = await _start_doom(app, pilot)
             await wait_until(
                 lambda: "DOOM-ASCII STUB" in str(doom.render()),
                 message="doom frame to render",
@@ -70,10 +80,7 @@ def test_doom_command_observes_frame(doom_app):
 
     async def check():
         async with app.run_test() as pilot:
-            chat = app.query_one("#chat", Input)
-            chat.focus()
-            chat.value = "/doom start"
-            await pilot.press("enter")
+            await _start_doom(app, pilot)
 
             def observed():
                 memories = [m["text"] for m in app.org.store.memory if m.get("kind") == "doom"]
@@ -96,17 +103,21 @@ def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
 
     async def check():
         async with app.run_test() as pilot:
-            chat = app.query_one("#chat", Input)
-            chat.focus()
-            chat.value = "/doom start"
-            await pilot.press("enter")
-            doom = app.query_one("#doom", Static)
+            doom = await _start_doom(app, pilot)
             await wait_until(
                 lambda: "DOOM-ASCII STUB" in str(doom.render()),
                 message="doom frame to render",
             )
             await asyncio.sleep(1.0)  # let auto-play take a few turns
 
+            # esc closes the overlay; the game keeps running until /doom stop
+            await pilot.press("escape")
+            await pilot.pause()
+            assert type(app.screen) is not DoomScreen
+            assert app.org.module_loader.registry.get("doom").running()
+
+            chat = app.query_one("#chat", Input)
+            chat.focus()
             chat.value = "/doom stop"
             await pilot.press("enter")
             await asyncio.sleep(0.5)

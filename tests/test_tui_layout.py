@@ -3,8 +3,7 @@
 import asyncio
 from pathlib import Path
 
-from textual.containers import VerticalScroll
-from textual.widgets import Button, ListView, Static
+from textual.widgets import ListView, Static
 
 from conftest import renderable_text, wait_until
 
@@ -165,53 +164,79 @@ def test_menu_for_awake_organism_has_no_swap_option(nursery_app):
     asyncio.run(check())
 
 
-def test_bottom_bar_shows_counts_and_keys(nursery_app):
+def test_topbar_is_the_only_chrome_row(nursery_app):
+    """Transcript-first shell: the single top-bar row is the only chrome.
+    No tab bar, tabbed content, quick actions, command hints, or bottom bar."""
+    from textual.widgets import TabbedContent
+
     app = nursery_app
 
     async def check():
         async with app.run_test(size=(160, 48)):
-            app.refresh_status()
-            text = renderable_text(app.query_one("#bottombar-text", Static), width=160)
-            assert "beliefs" in text
-            assert "rules" in text
-            assert "ctrl+p" in text
-            assert "F1" in text
-            assert "ctrl+q quit" in text
-            assert text.strip() == app._bottombar_text
+            assert app.query_one("#topbar", Static)
+            assert len(app.query(TabbedContent)) == 0
+            for removed in ("#tab-bar", "#quick-actions", "#command-hints", "#bottombar"):
+                assert len(app.query(removed)) == 0, f"{removed} still in the DOM"
+            # the transcript fills the content column
+            content = app.query_one("#content")
+            dreams = app.query_one("#dreams")
+            assert dreams in list(content.children)
+            chat = app.query_one("#chat")
+            assert chat.styles.height.value == 3
 
     asyncio.run(check())
 
 
-def test_bottom_bar_drops_middle_hints_when_narrow(nursery_app):
-    """The status line must never wrap: as the terminal narrows, hints
-    drop from the middle (tabs first) while palette and quit stay anchored
-    at the ends."""
+def test_status_line_shows_identity_and_state(nursery_app):
+    """The top bar carries the whole status: organism identity, state,
+    mood, the a/c/i readout, voice, and the clock."""
+    app = nursery_app
 
     async def check():
-        app = nursery_app
-        async with app.run_test(size=(90, 40)):
-            app.refresh_status()
-            text = app._bottombar_text
-            assert len(text) <= 90
-            assert "ctrl+p" in text
-            assert "ctrl+q quit" in text
-            assert "F2-F8" not in text  # tabs hint drops first
+        async with app.run_test(size=(160, 48)):
+            app.refresh_top_bar()
+            text = renderable_text(app.query_one("#topbar", Static), width=160)
+            name = Path(app.org.dir_path).name
+            assert name in text
+            assert "awake" in text
+            assert "calm" in text  # default mood
+            assert "a/c/i" in text
+            assert "voice" in text
+            assert "UTC" in text
+            assert app._topbar_text  # the compact mirror string stays maintained
 
     asyncio.run(check())
 
 
-def test_bottom_bar_keeps_anchored_ends_at_the_floor(nursery_app):
-    """Below the fit floor only the anchored ends survive: palette and
-    quit stay, everything in between drops."""
+def test_ctrl_b_toggles_sidebar(nursery_app):
+    app = nursery_app
 
     async def check():
-        app = nursery_app
-        async with app.run_test(size=(60, 40)):
-            app.refresh_status()
-            text = app._bottombar_text
-            assert "ctrl+p" in text
-            assert "ctrl+q quit" in text
-            assert "F1" not in text
+        async with app.run_test(size=(120, 40)) as pilot:
+            sidebar = app.query_one("#sidebar")
+            assert sidebar.styles.display != "none"
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.styles.display == "none"
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.styles.display == "block"
+
+    asyncio.run(check())
+
+
+def test_narrow_terminal_hides_sidebar_on_mount(nursery_app):
+    """Below 80 columns the shell starts transcript-first; ctrl+b reveals
+    the nursery sidebar."""
+    app = nursery_app
+
+    async def check():
+        async with app.run_test(size=(60, 24)) as pilot:
+            sidebar = app.query_one("#sidebar")
+            assert sidebar.styles.display == "none"
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.styles.display == "block"
 
     asyncio.run(check())
 
@@ -228,15 +253,15 @@ def test_mouse_capture_enabled_by_default(nursery_app):
     asyncio.run(check())
 
 
-def test_mind_memory_inner_are_scrollable(nursery_app):
+def test_mind_memory_inner_live_in_being_overlay(nursery_app):
+    """The former mind/memory/inner/cells tabs moved into the F3 overlay;
+    the main screen DOM carries no pane widgets."""
     app = nursery_app
 
     async def check():
         async with app.run_test():
-            for pane in ("mind-pane", "memory-pane", "inner-pane"):
-                tab = app.query_one(f"#{pane}")
-                scroll = tab.query_one(VerticalScroll)
-                assert scroll is not None
+            for pane_widget in ("#mind", "#memory", "#inner", "#cells", "#visual", "#mud", "#doom"):
+                assert len(app.query(pane_widget)) == 0, f"{pane_widget} leaked into the main screen"
 
     asyncio.run(check())
 
@@ -248,27 +273,29 @@ def test_chat_input_stays_below_main_area(nursery_app):
         async with app.run_test():
             main = app.query_one("#main")
             chat = app.query_one("#chat")
-            bottom = app.query_one("#bottombar")
             assert main.styles.height.value == 1.0  # 1fr
             assert chat.styles.height.value == 3
-            assert bottom.styles.height.value == 1
 
     asyncio.run(check())
 
 
-def test_cells_tab_click_opens_detail(nursery_app):
-    """Left-clicking an occupied cell in the F8 grid opens the inspector
-    with the object's kind and metadata."""
+def test_cells_section_click_opens_detail(nursery_app):
+    """Left-clicking an occupied cell in the CELLS section of the being
+    overlay opens the inspector with the object's kind and metadata."""
     from replicanta import tui_views
-    from replicanta.tui import CellDetailScreen
+    from replicanta.tui import BeingScreen, CellDetailScreen
 
     app = nursery_app
     app.org.store.add(("cat", "has_fur", "true"), 0.9)
 
     async def check():
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 60)) as pilot:
             app._refresh_views()
-            app.action_show_tab("cells-pane")
+            app.action_being()
+            await pilot.pause()
+            assert isinstance(app.screen, BeingScreen)
+            cells = app.screen.query_one("#cells", Static)
+            cells.scroll_visible(animate=False)
             await pilot.pause()
             idx = next(i for i, c in enumerate(app._cells_grid) if c)
             row, col = divmod(idx, tui_views.CELLS_COLS)
@@ -287,17 +314,21 @@ def test_cells_tab_click_opens_detail(nursery_app):
     asyncio.run(check())
 
 
-def test_cells_tab_click_on_empty_cell_does_nothing(nursery_app):
+def test_cells_section_click_on_empty_cell_does_nothing(nursery_app):
     from replicanta import tui_views
-    from replicanta.tui import CellDetailScreen
+    from replicanta.tui import BeingScreen, CellDetailScreen
 
     app = nursery_app
     app.org.store.add(("cat", "has_fur", "true"), 0.9)
 
     async def check():
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(120, 60)) as pilot:
             app._refresh_views()
-            app.action_show_tab("cells-pane")
+            app.action_being()
+            await pilot.pause()
+            assert isinstance(app.screen, BeingScreen)
+            cells = app.screen.query_one("#cells", Static)
+            cells.scroll_visible(animate=False)
             await pilot.pause()
             idx = next(i for i, c in enumerate(app._cells_grid) if not c)
             row, col = divmod(idx, tui_views.CELLS_COLS)
@@ -807,18 +838,6 @@ def test_mud_organism_move_shows_its_reason(nursery_app):
     asyncio.run(check())
 
 
-def test_quick_actions_buttons_exist(nursery_app):
-    """The sidebar must expose one-click action buttons."""
-    app = nursery_app
-
-    async def check():
-        async with app.run_test():
-            for bid in ("qa-sleep", "qa-voice", "qa-listen", "qa-look", "qa-mud"):
-                assert app.query_one(f"#{bid}", Button)
-
-    asyncio.run(check())
-
-
 def test_swap_ends_active_group_chat(nursery_app):
     """Swapping organisms must end an active group chat: the group keeps
     the old (closed) organism object and would keep broadcasting against
@@ -862,20 +881,25 @@ def test_swap_without_group_is_quiet(nursery_app):
 
 def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
     """The 80-column game frame must never wrap: on narrow terminals the
-    pane scrolls horizontally instead of shredding the ASCII art."""
+    overlay scrolls horizontally instead of shredding the ASCII art."""
     from textual.containers import ScrollableContainer
-    from textual.widgets import TabbedContent
+
+    from replicanta.tui import DoomScreen
 
     app = nursery_app
 
     async def check():
         async with app.run_test(size=(60, 24)) as pilot:
-            app.query_one(TabbedContent).active = "doom-pane"
+            app.push_screen(DoomScreen())
             await pilot.pause()
-            doom = app.query_one("#doom", Static)
+            doom = app.screen.query_one("#doom", Static)
             await pilot.pause()
             assert doom.styles.width is not None and doom.styles.width.value == 80
             assert doom.region.width == 80
             assert isinstance(doom.parent, ScrollableContainer)
+            # esc closes the overlay; the (non-)game is untouched
+            await pilot.press("escape")
+            await pilot.pause()
+            assert type(app.screen).__name__ == "Screen"
 
     asyncio.run(check())
