@@ -66,10 +66,13 @@ def test_doom_command_renders_frame(doom_app):
     async def check():
         async with app.run_test() as pilot:
             doom = await _start_doom(app, pilot)
-            await wait_until(
-                lambda: "DOOM-ASCII STUB" in str(doom.render()),
-                message="doom frame to render",
-            )
+
+            def painted():
+                content = doom._Static__content
+                plain = getattr(content, "plain", str(content))
+                return len(plain.splitlines()) > 5
+
+            await wait_until(painted, message="doom frame to render")
             assert app.org.store.belief_value("doom", "frame") == "running"
 
     asyncio.run(check())
@@ -95,24 +98,33 @@ def test_doom_command_observes_frame(doom_app):
 def test_doom_frame_renderable_prefers_ansi_styles():
     """Unit: the pane renderable must stay a styled Rich Text — a str()
     conversion anywhere in the controller flattens the truecolor styles
-    into uncolored soup (the 'distorted raw ascii' regression)."""
+    into uncolored soup (the 'distorted raw ascii' regression). A parseable
+    block frame becomes half-block cells; anything else falls back to
+    Text.from_ansi."""
     from rich.text import Text
 
     from replicanta.tui_controllers import doom_frame_renderable
 
     class FakeSvc:
         def frame_ansi(self):
-            return "\x1b[38;2;255;0;0mAB\x1b[0m"
+            return "\x1b[38;2;255;0;0m██\x1b[0m"
 
         def frame(self):
             return "plain"
 
     renderable = doom_frame_renderable(FakeSvc(), running=True)
     assert isinstance(renderable, Text)
-    assert renderable.plain == "AB"
+    assert renderable.plain == "▀"  # red pixel over the black padding row
     assert any(s.style for s in renderable.spans)
     # no game -> nothing to paint
     assert doom_frame_renderable(FakeSvc(), running=False) == ""
+
+    class UnparsableSvc:
+        def frame_ansi(self):
+            return "\x1b[0m"  # no pixels: half-block parse yields None
+
+    fallback = doom_frame_renderable(UnparsableSvc(), running=True)
+    assert isinstance(fallback, Text)  # Text.from_ansi fallback, no crash
 
     class PlainOnly:
         def frame(self):
@@ -138,7 +150,8 @@ def test_doom_pane_receives_colored_frame(doom_app):
                 return isinstance(content, Text) and any(s.style for s in content.spans)
 
             await wait_until(colored, message="styled frame to reach the pane")
-            assert "DOOM-ASCII STUB" in doom._Static__content.plain
+            # the pane shows half-block pixels now, not the raw stub text
+            assert "█" in doom._Static__content.plain or "▀" in doom._Static__content.plain
 
     asyncio.run(check())
 
@@ -213,10 +226,13 @@ def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
     async def check():
         async with app.run_test() as pilot:
             doom = await _start_doom(app, pilot)
-            await wait_until(
-                lambda: "DOOM-ASCII STUB" in str(doom.render()),
-                message="doom frame to render",
-            )
+
+            def painted():
+                content = doom._Static__content
+                plain = getattr(content, "plain", str(content))
+                return len(plain.splitlines()) > 5
+
+            await wait_until(painted, message="doom frame to render")
             await asyncio.sleep(1.0)  # let auto-play take a few turns
 
             # esc closes the overlay; the game keeps running until /doom stop

@@ -262,17 +262,17 @@ def test_start_uses_block_chars_and_playable_flags(tmp_path, monkeypatch):
 
 
 def test_scaling_follows_viewport_width(tmp_path, monkeypatch):
-    """A wide terminal (>=166 cols) gets scaling 4 (160-col detail, the
-    engine default); a narrow one gets scaling 8 (80-col fit)."""
+    """A wide terminal (>=166 cols) gets scaling 2 (160x100 px -> 160x50
+    half-block cells); a narrow one gets scaling 4 (80x50 px -> 80x25)."""
     loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
     doom = loader.registry.get("doom")
     doom.set_viewport(200)
     doom.start()
-    assert _wait_for(lambda: "scaling=4" in doom.frame())
+    assert _wait_for(lambda: "scaling=2" in doom.frame())
     doom.stop()
     doom.set_viewport(100)
     doom.start()
-    assert _wait_for(lambda: "scaling=8" in doom.frame())
+    assert _wait_for(lambda: "scaling=4" in doom.frame())
     doom.stop()
 
 

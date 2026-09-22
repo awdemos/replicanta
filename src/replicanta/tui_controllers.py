@@ -18,6 +18,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Static
 
 from replicanta import mud, speech, voice
+from replicanta import tui_views
 from replicanta.tui_views import (
     STYLE_DIM,
     STYLE_DREAM,
@@ -446,16 +447,21 @@ class MudController:
 
 def doom_frame_renderable(svc, running):
     """The pane renderable for the current game frame: the ANSI-colored
-    frame when the module offers one — Text.from_ansi turns the game's
-    truecolor SGR into styled text; without those colors the gradient
-    characters are unreadable soup — else the plain frame. Empty string
-    when there is nothing to show."""
+    frame when the module offers one. The block-char stream is first
+    converted to half-block cells (▀ truecolor fg/bg, two vertical pixels
+    per cell — double the resolution at the same footprint); Text.from_ansi
+    is the fallback if that parse yields nothing. Without colors the
+    gradient characters are unreadable soup. Empty string when there is
+    nothing to show."""
     if running:
         ansi_fn = getattr(svc, "frame_ansi", None)
         if callable(ansi_fn):
             try:
                 text = str(ansi_fn() or "")
                 if text:
+                    halfblock = tui_views.doom_halfblock_text(text)
+                    if halfblock is not None:
+                        return halfblock
                     return Text.from_ansi(text)
             except Exception as exc:  # noqa: BLE001 — a bad frame must not kill the tick
                 logger.warning("doom ansi frame failed: %s", exc)

@@ -7,11 +7,15 @@ without a terminal."""
 
 import hashlib
 import json
+import re
+import contextlib
 
 from rich import box
 from rich.bar import Bar
+from rich.color import Color
 from rich.console import Group
 from rich.panel import Panel
+from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
@@ -80,6 +84,94 @@ def chat_card(who, text, timestamp=None, border_style=None):
         border_style=border_style,
         padding=(0, 1),
     )
+
+
+# -----------------------------------------------------------------------------
+# DOOM half-block renderer
+# -----------------------------------------------------------------------------
+
+_SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
+_BLACK = (0, 0, 0)
+_WHITE = (255, 255, 255)
+
+
+def _rgb(triplet):
+    return Color.from_rgb(triplet[0], triplet[1], triplet[2])
+
+
+def doom_halfblock_text(frame):
+    """Convert a doom-ascii block frame into a half-block truecolor Text.
+
+    The engine's -chars block -nograd wire format is a stream of SGR
+    color changes and two identical characters per pixel. Discarding the
+    characters and keeping only the per-pixel colors lets each terminal
+    cell carry TWO vertical pixels (▀ = fg on top / bg on bottom), so the
+    same 80x25 footprint shows an 80x50 image — double the resolution of
+    painting one pixel per cell, at correct aspect ratio. Returns None
+    when the frame does not parse (caller falls back to Text.from_ansi).
+    """
+    pixels = []  # rows of (r, g, b)
+    row = []
+    color = _WHITE  # the engine starts each frame at 0x00FFFFFF
+    pair = []  # two characters make one pixel
+
+    def consume(text):
+        nonlocal row, pair
+        for ch in text:
+            if ch == "\n":
+                pixels.append(row)
+                row = []
+                continue
+            pair.append(ch)
+            if len(pair) == 2:
+                row.append(color)
+                pair = []
+
+    pos = 0
+    for m in _SGR_RE.finditer(frame):
+        consume(frame[pos : m.start()])
+        params = m.group(1)
+        if params.startswith("38;2;"):
+            parts = params.split(";")
+            with contextlib.suppress(IndexError, ValueError):
+                color = (int(parts[2]), int(parts[3]), int(parts[4]))
+        elif params in ("", "0"):
+            color = _WHITE
+        # "1" (bold) and other SGRs carry no color information
+        pos = m.end()
+    consume(frame[pos:])
+    if row:
+        pixels.append(row)
+    if not pixels or not pixels[0]:
+        return None
+    width = max(len(r) for r in pixels)
+    if width == 0:
+        return None
+    for r in pixels:
+        if len(r) < width:
+            r.extend([_BLACK] * (width - len(r)))
+    if len(pixels) % 2:
+        pixels.append([_BLACK] * width)
+
+    text = Text()
+    for y in range(0, len(pixels), 2):
+        top_row, bot_row = pixels[y], pixels[y + 1]
+        for x in range(width):
+            top, bot = top_row[x], bot_row[x]
+            if top == bot:
+                if top == _BLACK:
+                    text.append(" ")
+                else:
+                    text.append("█", style=Style(color=_rgb(top)))
+            elif bot == _BLACK:
+                text.append("▀", style=Style(color=_rgb(top), bgcolor=_rgb(_BLACK)))
+            elif top == _BLACK:
+                text.append("▄", style=Style(color=_rgb(bot), bgcolor=_rgb(_BLACK)))
+            else:
+                text.append("▀", style=Style(color=_rgb(top), bgcolor=_rgb(bot)))
+        if y + 2 < len(pixels):
+            text.append("\n")
+    return text
 
 
 def _human_size(n):

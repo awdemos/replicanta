@@ -46,11 +46,11 @@ function init(ctx)
   -- starting with the cursor-home escape and ending with an SGR reset.
   local CURSOR_HOME = "\27[;H"
   local SGR_RESET = "\27[0m"
-  -- Plain-frame budget. The scaling-8 frame is 25 rows x 80 cols (~2024
-  -- chars); the cap only guards against pathological scalings wrapping the
-  -- TUI pane, it must never cut the status rows off the bottom.
-  local FRAME_PROMPT_CHARS = 4000
-  local FRAME_ANSI_CHARS = 120000
+  -- Plain-frame budget for the entity's text view: a scaling-2 frame is
+  -- 160 cols x 50 rows (~8050 chars); the cap must never cut rows off the
+  -- bottom where health/ammo live.
+  local FRAME_PROMPT_CHARS = 12000
+  local FRAME_ANSI_CHARS = 240000
   local START_TIMEOUT = 8.0
 
   -- Budget caps slice raw bytes; block characters are multi-byte UTF-8, so
@@ -278,11 +278,12 @@ function init(ctx)
     -- full blocks, -fixgamma offsets their darkening. -warp 1 1 sets
     -- autostart in d_main.c, skipping the title screen and demo playback
     -- (without it keys only skip demos — never control the marine).
-    -- Scaling: 4 (160 cols, the engine default, far more readable) when
-    -- the terminal is wide enough, else 8 (80 cols). Extras go FIRST so
-    -- a duplicated flag in DOOM_ASCII_ARGS wins (M_CheckParm takes the
-    -- first match).
-    local scaling = game.viewport_cols >= 166 and "4" or "8"
+    -- Scaling: the TUI paints the frame as half-block cells (two vertical
+    -- pixels per cell), so scaling 4 (80x50 px) fills the classic 80x25
+    -- footprint and scaling 2 (160x100 px) fills a wide terminal. Extras
+    -- go FIRST so a duplicated flag in DOOM_ASCII_ARGS wins (M_CheckParm
+    -- takes the first match).
+    local scaling = game.viewport_cols >= 166 and "2" or "4"
     local argv = { bin }
     local extra = externals:doom_args()
     if extra ~= nil then
