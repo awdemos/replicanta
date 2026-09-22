@@ -79,6 +79,6 @@ dagger call lint --source=.
 ## Gotchas
 
 - `ruff` target is `py312`; newer syntax is accepted but import style is intentionally left un-enforced (`I001` ignored).
-- `requirements-ci.txt` is exported from `uv.lock` with hashes; use `uv export --frozen --no-dev -o requirements-ci.txt` to refresh.
+- `requirements-ci.txt` is exported from `uv.lock` with hashes; use `uv export --locked --extra dev --no-emit-project --format requirements-txt -o requirements-ci.txt` to refresh.
 - Voice/listen/vision extras are optional; the core install does not include them.
 - The Scallopy wheel hash is hard-coded in `ci/main.go` and `readme.md`; update both if the wheel changes.

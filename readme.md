@@ -39,7 +39,7 @@ uv venv --python 3.14
 uv pip install -e .
 uv pip install \
     "https://github.com/awdemos/replicanta/releases/download/v0.1.0/scallopy-0.2.5-cp314-cp314-manylinux_2_39_x86_64.whl#sha256=ddc8d190a55681281f50dffe9f12ef1e04b90a38e1196b786ac2ddb9d7ec51be"
-ollama pull qwen3.8:latest
+ollama pull ternary-bonsai-1.7b:latest
 .venv/bin/replicanta
 ```
 
@@ -101,7 +101,7 @@ To build from source instead, see `ci/main.go` (~15 minutes).
 #### Ollama (default)
 
 ```bash
-ollama pull qwen3.8:latest
+ollama pull ternary-bonsai-1.7b:latest
 ```
 
 Override the model or endpoint with `OLLAMA_MODEL` and `OLLAMA_URL`.
