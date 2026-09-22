@@ -24,6 +24,46 @@ def test_top_bar_shows_organism_name(nursery_app):
     asyncio.run(check())
 
 
+def test_top_bar_shows_module_badges(nursery_app, monkeypatch):
+    """The capability glyphs (fly brain etc.) must be visible on the main
+    screen's top bar — the sidebar (their only previous home) is hidden by
+    default, so the badges were effectively invisible."""
+    app = nursery_app
+    monkeypatch.setattr(app, "_module_badges", lambda: " 🪰 💀")
+
+    async def check():
+        async with app.run_test():
+            app.refresh_top_bar()
+            text = renderable_text(app.query_one("#topbar", Static), width=120)
+            assert "🪰" in text and "💀" in text
+
+    asyncio.run(check())
+
+
+def test_sidebar_badges_come_from_each_organisms_own_config(nursery_app):
+    """Regression: every sidebar row showed the CURRENT organism's badges.
+    A row's glyphs must come from that organism's own module config."""
+    app = nursery_app
+    (app.root / "organisms" / "fern").mkdir(parents=True)
+    (app.root / "organisms" / "fern" / "replicanta.toml").write_text(
+        '[modules]\nenabled = ["base", "fly-brain"]\n'
+    )
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            lv = app.query_one("#sidebar-list", ListView)
+            labels = [renderable_text(item.children[0]) for item in lv.children]
+            fern = next(label for label in labels if "fern" in label)
+            assert "🪰" in fern, f"fern row lacks its fly-brain badge: {fern!r}"
+            current = Path(app.org.dir_path).name
+            mine = next(label for label in labels if current in label)
+            assert "🪰" not in mine, f"current row shows another organism's badge: {mine!r}"
+
+    asyncio.run(check())
+
+
 def test_sidebar_lists_organisms_and_highlights_current(nursery_app):
     app = nursery_app
     (app.root / "organisms" / "fern").mkdir(parents=True)

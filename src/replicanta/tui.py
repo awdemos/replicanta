@@ -10,6 +10,7 @@ import random
 import tempfile
 import threading
 import time
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -1191,6 +1192,7 @@ class OrganismApp(App):
             ("◆ REPLICANTA", "bold cyan"),
             ("  │  ", "dim"),
             (self._org_name(), "bold"),
+            (self._module_badges(), ""),
             ("  ·  ", "dim"),
             (word, state_style),
             ("  ·  ", "dim"),
@@ -1222,7 +1224,7 @@ class OrganismApp(App):
         bar.add_row(left, center, right)
         mic = f" mic {self._recording_elapsed()}" if recording else ""
         text = (
-            f"◆ REPLICANTA │ {self._org_name()} · {word} · {mood} · "
+            f"◆ REPLICANTA │ {self._org_name()}{self._module_badges()} · {word} · {mood} · "
             f"a/c/i {s.arousal:.2f}/{s.coherence:.2f}/{s.incoherence:.2f} · "
             f"voice {voice}{mic}{' spk' if spoken else ''} · {clock}"
         )
@@ -1242,6 +1244,20 @@ class OrganismApp(App):
             return ""
         return "".join(f" {glyph}" for name, glyph in MODULE_BADGES.items() if name in loader.modules)
 
+    def _badges_for_organism(self, name):
+        """Capability badges for one sidebar row. The app only holds the
+        current organism's module loader, so other organisms' badges come
+        from their own config file (same source the loader reads)."""
+        if name == self.org.dir_path.name:
+            return self._module_badges()
+        try:
+            cfg_path = nursery.organism_dir(self.root, name) / "replicanta.toml"
+            enabled = tomllib.loads(cfg_path.read_text()).get("modules", {}).get("enabled", [])
+        except Exception:  # noqa: BLE001 — a row without readable config just shows no badges
+            return ""
+        enabled = {"doom-ascii" if m == "nano-doom" else m for m in enabled}
+        return "".join(f" {glyph}" for mod, glyph in MODULE_BADGES.items() if mod in enabled)
+
     def _refresh_sidebar(self):
         """Rebuild the nursery sidebar, highlighting the current organism."""
         lv = self._safe_query("#sidebar-list", ListView)
@@ -1253,19 +1269,18 @@ class OrganismApp(App):
         if not names:
             lv.append(ListItem(Label("(no organisms)")))
             return
-        badges = self._module_badges()
         groups = nursery.load_groups(self.root)
         grouped = {m for members in groups.values() for m in members}
         for name in names:
             if name in grouped:
                 continue
             marker = "● " if name == current else "  "
-            lv.append(ListItem(Label(f"{marker}{name}{badges}"), name=name))
+            lv.append(ListItem(Label(f"{marker}{name}{self._badges_for_organism(name)}"), name=name))
         for gname in sorted(groups):
             lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
             for member in groups[gname]:
                 marker = "● " if member == current else "  "
-                lv.append(ListItem(Label(f"   {marker}{member}{badges}"), name=member))
+                lv.append(ListItem(Label(f"   {marker}{member}{self._badges_for_organism(member)}"), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection (left click or Enter) swaps to the organism
