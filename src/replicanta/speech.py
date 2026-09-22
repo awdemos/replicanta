@@ -100,6 +100,30 @@ _PINNED_VOICE_SHA256 = {
 }
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Console/game feed text reads fine on screen but garbles speech:
+# doom.command("w") lines, [HH:MM:SS] stamps, hp=100 stat dumps,
+# 11.8-style decimals, arrows and markup. speakable() smooths those into
+# plain prose before synthesis; the on-screen text is never touched.
+_COMMAND_CALL_RE = re.compile(r"\b[\w-]+\.command\([^)]*\)", re.IGNORECASE)
+_TIMESTAMP_LINE_RE = re.compile(r"^\[[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\]\s*", re.MULTILINE)
+_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+_DECIMAL_POINT_RE = re.compile(r"(?<=\d)\.(?=\d)")
+_EMOJI_RE = re.compile("[\U0001f000-\U0001faff←-⇿⌀-➿]")
+
+
+# Prosody: piper's default pace rushes slightly; a touch more length reads
+# noticeably more natural. Overridable for tuning; 0/invalid falls back.
+def _env_float(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+_LENGTH_SCALE = _env_float("REPLICANTA_SPEECH_LENGTH_SCALE", 1.1)
+if _LENGTH_SCALE <= 0:
+    _LENGTH_SCALE = 1.1
+
 # Long model replies can take ages to synthesize and occasionally hang the
 # audio backend; cap spoken output so voice stays responsive.
 _MAX_SPEECH_CHARS = 280
@@ -300,6 +324,31 @@ def say(text):
     _queue.put(text)
 
 
+def speakable(text):
+    """Turn console/game text into prose a TTS voice can deliver naturally.
+
+    Strips command calls (doom.command("w")), line timestamps, URLs, emoji
+    and markup; spells stat symbols out as words (hp=100 -> health 100,
+    == -> is, -> -> to); and expands decimal points (11.8 -> 11 point 8),
+    which piper would otherwise read as a stray stop. Never raises — the
+    worst case is the original text coming back only whitespace-cleaned.
+    """
+    if not text:
+        return text
+    cleaned = _COMMAND_CALL_RE.sub("", text)
+    cleaned = _TIMESTAMP_LINE_RE.sub("", cleaned)
+    cleaned = _URL_RE.sub("", cleaned)
+    cleaned = re.sub(r"\bhp\s*=", "health ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"==", " is ", cleaned)
+    cleaned = re.sub(r"(?<![<>=!])=(?!=)", " is ", cleaned)
+    cleaned = re.sub(r"-+>|→", " to ", cleaned)
+    cleaned = _DECIMAL_POINT_RE.sub(" point ", cleaned)
+    cleaned = _EMOJI_RE.sub("", cleaned)
+    cleaned = cleaned.replace("`", "").replace("*", "")
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return re.sub(r"\s*\n\s*", " ", cleaned).strip()
+
+
 def _trim_for_speech(text):
     """Keep spoken replies concise: first sentence, capped at a max length.
     Falls back to a hard truncation with ellipsis when no sentence boundary
@@ -320,7 +369,11 @@ def _drain():
             text = _queue.get(timeout=30)
         except queue.Empty:
             return
-        _speak_with_timeout(_trim_for_speech(text))
+        # cleanup can empty the text (e.g. it was only a command line) —
+        # nothing speakable left, so skip synthesis entirely
+        utterance = _trim_for_speech(speakable(text))
+        if utterance:
+            _speak_with_timeout(utterance)
 
 
 def _speak_with_timeout(text, timeout=30):
@@ -355,10 +408,11 @@ def _load_voice():
 def _speak(text):
     import numpy as np
     import soundcard as sc
+    from piper.config import SynthesisConfig
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
-        _load_voice().synthesize_wav(text, w)
+        _load_voice().synthesize_wav(text, w, syn_config=SynthesisConfig(length_scale=_LENGTH_SCALE))
     buf.seek(0)
     with wave.open(buf, "rb") as w:
         rate, channels = w.getframerate(), w.getnchannels()

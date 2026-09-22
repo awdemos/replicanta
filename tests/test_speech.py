@@ -182,6 +182,34 @@ def test_trim_for_speech_falls_back_to_ellipsis():
     assert trimmed.endswith("...")
 
 
+# -- speakable: console text -> natural spoken prose ---------------------------
+
+
+def test_speakable_strips_doom_command_lines():
+    text = 'The enemy is at distance 11.8.\ndoom.command("w")'
+    assert speech.speakable(text) == "The enemy is at distance 11 point 8."
+
+
+def test_speakable_strips_timestamps_urls_emoji_markup():
+    text = "[14:17:15] > look at https://example.com/x 🪰 *bold* `code`"
+    assert speech.speakable(text) == "> look at bold code"
+
+
+def test_speakable_spells_stats_and_arrows():
+    assert speech.speakable("hp=100") == "health 100"
+    assert speech.speakable("state == idle -> wake") == "state is idle to wake"
+
+
+def test_speakable_leaves_plain_prose_untouched():
+    text = "I was wondering about the nature of minds."
+    assert speech.speakable(text) == text
+
+
+def test_speakable_empty_and_garbage_safe():
+    assert speech.speakable("") == ""
+    assert speech.speakable('doom.command("w")') == ""
+
+
 def test_speak_with_timeout_abandons_hung_utterance(monkeypatch):
     started = threading.Event()
 
@@ -212,7 +240,8 @@ def test_speak_adds_preroll_silence(monkeypatch):
     monkeypatch.setitem(sys.modules, "soundcard", fake_soundcard)
 
     class FakeVoice:
-        def synthesize_wav(self, _text, wav_file):
+        def synthesize_wav(self, _text, wav_file, syn_config=None):
+            assert syn_config is not None  # prosody config is always passed
             rate = 22050
             duration = 0.2
             frames = int(rate * duration)
