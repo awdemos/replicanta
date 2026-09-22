@@ -65,6 +65,10 @@ class ExternalsService:
     def doom_wad(self) -> str | None:
         return doom_wad()
 
+    def doom_args(self) -> str:
+        """Raw DOOM_ASCII_ARGS string (test/debug knob); Lua splits it."""
+        return os.environ.get("DOOM_ASCII_ARGS", "")
+
     def wetware_binary(self) -> str | None:
         return wetware_binary()
 

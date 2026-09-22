@@ -2,6 +2,7 @@
 
 import importlib
 import logging
+import time
 import tomllib
 from pathlib import Path
 
@@ -14,13 +15,11 @@ from replicanta.fileutil import atomic_write_text
 logger = logging.getLogger(__name__)
 
 # Python services a Lua module may request from its manifest via
-# ``services = ["name"]``. They are constructed lazily, only when a module
-# that needs them is actually enabled — doom support is a plugin, not a
-# built-in: no game-process machinery exists unless the doom-ascii module
-# loads. Values are (module, class) pairs, imported on first use.
-_PLUGIN_SERVICE_FACTORIES = {
-    "doom": ("replicanta.doom_ascii", "DoomAsciiService"),
-}
+# ``services = ["name"]``, constructed lazily only when a module that needs
+# them loads. Capability-shaped modules should prefer the ctx bridges
+# (process/http/fs/json) and stay pure Lua; this hook remains for
+# integrations that are genuinely thread-heavy Python work.
+_PLUGIN_SERVICE_FACTORIES: dict[str, tuple[str, str]] = {}
 
 
 class ServiceRegistry:
@@ -383,10 +382,9 @@ class ModuleLoader:
         # so the context table lives in the same Lua world as the init()
         # function that receives it.
         lua = self._current_lua or self._runtime()
-        lock = self._host.lock if self._host is not None else None
         store = getattr(self.organism, "store", None)
         organism_dir = getattr(store, "dir_path", None)
-        bridges = capbridges.build(lua_lock=lock, organism_dir=organism_dir, emit=self.emit)
+        bridges = capbridges.build(organism_dir=organism_dir, emit=self.emit)
         return lua.table(
             module_name=module_name,
             log=lambda msg: self.emit(str(msg)),
@@ -396,6 +394,7 @@ class ModuleLoader:
             http=bridges.http,
             fs=bridges.fs,
             json=bridges.json,
+            clock=time.monotonic,
         )
 
 

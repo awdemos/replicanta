@@ -1,20 +1,23 @@
-"""Integration test against a real doom-ascii binary.
+"""Integration test: the pure-Lua doom-ascii module against the real binary.
 
-Skips unless a real binary and WAD resolve (after
-scripts/setup_doom_ascii.sh, or with DOOM_ASCII_BIN/DOOM_WAD set). The
-stub-based suite in test_doom_ascii.py covers the service hermetically;
-this only proves the wire-protocol assumptions (pty, fd-2 input, frame
-splitting) hold against the real game.
+Skips unless a real binary and WAD resolve through the externals service
+(after scripts/setup_doom_ascii.sh, or with DOOM_ASCII_BIN/DOOM_WAD set).
+The stub-based suite in test_doom_ascii.py covers everything hermetically;
+this only proves the Lua frame parser and pty wiring hold against the
+real game's output.
 """
 
+import shutil
 import time
+from pathlib import Path
 
 import pytest
 
-from replicanta import doom_ascii
+from replicanta import externals
+from replicanta.modules import ModuleLoader
 
-_BINARY = doom_ascii._find_binary()
-_WAD = doom_ascii._find_wad()
+_BINARY = externals.doom_binary()
+_WAD = externals.doom_wad()
 _IS_STUB = bool(_BINARY and "doom_ascii_stub" in _BINARY)
 
 pytestmark = pytest.mark.skipif(
@@ -23,15 +26,30 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_real_game_starts_moves_and_stops():
-    svc = doom_ascii.DoomAsciiService()
+def _wait_for(predicate, timeout=15.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_real_game_starts_moves_and_stops(tmp_path):
+    target = tmp_path / "modules"
+    shutil.copytree(Path(__file__).parent.parent / "modules", target)
+    loader = ModuleLoader(
+        target, organism=None, modules_config={"enabled": ["base", "doom-ascii"]}
+    )
+    loader.load_all()
+    doom = loader.registry.get("doom")
+    assert doom.start() is True
     try:
-        svc.start()
-        assert svc.running() is True
-        assert svc.frame()
-        svc.command("w")
-        time.sleep(0.5)
-        assert svc.frame_count() > 0
+        assert _wait_for(lambda: doom.frame_count() > 0)
+        assert doom.running() is True
+        assert doom.frame()
+        doom.command("w")
+        assert _wait_for(lambda: doom.frame_count() > 3)
     finally:
-        svc.stop()
-    assert svc.running() is False
+        doom.stop()
+    assert doom.running() is False

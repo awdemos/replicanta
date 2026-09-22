@@ -6,8 +6,10 @@ world without a bespoke Python service per integration:
 
 - ``ctx.process``: managed child processes — plain pipes, or the pty
   recipe terminal games need (tty on fd 0, keys read from fd 2, frames
-  on stdout). Stream callbacks fire on the reader thread under the host
-  lua_lock, the pattern fly_brain established for ``deliver``.
+  on stdout). Stream callbacks fire on the reader thread directly; lupa
+  serializes runtime access, and deliberately NOT taking the host lua_lock
+  avoids an ABBA inversion with api calls that emit events (runtime -> host)
+  from the UI thread.
 - ``ctx.http``: capped http(s) GET/POST.
 - ``ctx.fs``: filesystem access scoped to the organism directory.
 - ``ctx.json``: parse/encode plain data.
@@ -53,15 +55,26 @@ def _reap_all() -> None:
 atexit.register(_reap_all)
 
 
+def _opt(opts, key, default=None):
+    """Read an option from a Python dict or a lupa Lua table (nil-safe)."""
+    if opts is None:
+        return default
+    try:
+        value = opts[key]
+    except Exception:  # noqa: BLE001 — non-indexable fallback
+        getter = getattr(opts, "get", None)
+        value = getter(key, default) if callable(getter) else default
+    return default if value is None else value
+
+
 class _Child:
     """One spawned process: reader thread -> on_data, watcher -> on_exit."""
 
-    def __init__(self, argv, pty, on_data, on_exit, lua_lock, on_gone, emit):
+    def __init__(self, argv, pty, on_data, on_exit, on_gone, emit):
         self.argv = argv
         self.pty = pty
         self._on_data = on_data
         self._on_exit = on_exit
-        self._lua_lock = lua_lock
         self._on_gone = on_gone
         self._emit = emit
         self._proc: subprocess.Popen | None = None
@@ -169,11 +182,10 @@ class _Child:
             return
         text = chunk.decode("utf-8", "replace")
         try:
-            if self._lua_lock is not None:
-                with self._lua_lock:
-                    self._on_data(text)
-            else:
-                self._on_data(text)
+            # No host lua_lock here: lupa serializes runtime access, and
+            # taking the host lock from a reader thread invites ABBA
+            # deadlock against UI-thread api calls that emit events.
+            self._on_data(text)
         except Exception as exc:  # noqa: BLE001 — a bad callback must not kill the reader
             self._emit(f"process callback failed: {exc}")
 
@@ -186,11 +198,7 @@ class _Child:
         self._on_gone(self)
         if self._on_exit is not None:
             try:
-                if self._lua_lock is not None:
-                    with self._lua_lock:
-                        self._on_exit(code)
-                else:
-                    self._on_exit(code)
+                self._on_exit(code)
             except Exception as exc:  # noqa: BLE001
                 self._emit(f"process exit callback failed: {exc}")
 
@@ -198,41 +206,48 @@ class _Child:
 class ProcessBridge:
     """ctx.process: bounded child-process management for one module."""
 
-    def __init__(self, lua_lock=None, emit=None):
-        self._lua_lock = lua_lock
+    def __init__(self, emit=None):
         self._emit = emit or (lambda msg: None)
         self._lock = threading.Lock()
         self._procs: dict[int, _Child] = {}
         self._next = 0
 
     def spawn(self, argv, opts=None):
+        """Spawn a child; returns the process id. Raises ValueError with a
+        Lua-readable message on failure (project convention: bridges raise,
+        modules pcall)."""
+        from lupa import lua_type
+
         try:
-            args = [str(a) for a in argv]
-        except Exception as exc:  # noqa: BLE001
-            return None, f"argv: {exc}"
+            if lua_type(argv) == "table":
+                args = [str(argv[i]) for i in range(1, len(argv) + 1)]
+            else:
+                args = [str(a) for a in argv]
+        except Exception as exc:
+            raise ValueError(f"argv: {exc}") from exc
         if not args:
-            return None, "empty argv"
+            raise ValueError("empty argv")
         if "/" not in args[0]:
             found = shutil.which(args[0])
             if found is None:
-                return None, f"binary not found: {args[0]}"
+                raise ValueError(f"binary not found: {args[0]}")
             args[0] = found
         with self._lock:
             if len(self._procs) >= MAX_PROCS_PER_MODULE:
-                return None, "process limit reached (2 per module)"
-        pty = bool(opts and opts.get("pty"))
-        on_data = opts.get("on_data") if opts else None
-        on_exit = opts.get("on_exit") if opts else None
-        child = _Child(args, pty, on_data, on_exit, self._lua_lock, self._drop, self._emit)
+                raise ValueError("process limit reached (2 per module)")
+        pty = bool(_opt(opts, "pty"))
+        on_data = _opt(opts, "on_data")
+        on_exit = _opt(opts, "on_exit")
+        child = _Child(args, pty, on_data, on_exit, self._drop, self._emit)
         try:
             child.start()
-        except Exception as exc:  # noqa: BLE001
-            return None, str(exc)
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
         with self._lock:
             self._next += 1
             pid = self._next
             self._procs[pid] = child
-        return pid, None
+        return pid
 
     def write(self, pid, data) -> None:
         child = self._child(pid)
@@ -285,15 +300,16 @@ class HttpBridge:
         return self._request("POST", url, body, opts)
 
     def _request(self, method, url, body, opts):
+        """Returns {status=, body=}. Raises ValueError (Lua-catchable) on
+        transport failure, non-2xx status, oversize bodies, or bad schemes."""
         url = str(url)
         if not url.startswith(("http://", "https://")):
-            return None, "only http(s) URLs are allowed"
-        timeout = float(opts.get("timeout", HTTP_TIMEOUT)) if opts else HTTP_TIMEOUT
+            raise ValueError("only http(s) URLs are allowed")
+        timeout = float(_opt(opts, "timeout", HTTP_TIMEOUT))
         headers = {}
-        if opts:
-            raw_headers = opts.get("headers")
-            if raw_headers is not None:
-                headers = {str(k): str(v) for k, v in raw_headers.items()}
+        raw_headers = _opt(opts, "headers")
+        if raw_headers is not None:
+            headers = {str(k): str(v) for k, v in raw_headers.items()}
         data = None
         if body is not None:
             data = str(body).encode()
@@ -303,11 +319,13 @@ class HttpBridge:
             with urlopen(request, timeout=timeout) as response:
                 raw = response.read(HTTP_MAX_BYTES + 1)
                 status = response.status
-        except Exception as exc:  # noqa: BLE001 — network errors are Lua-catchable
-            return None, str(exc)
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
         if len(raw) > HTTP_MAX_BYTES:
-            return None, "response too large"
-        return {"status": status, "body": raw.decode("utf-8", "replace")}, None
+            raise ValueError("response too large")
+        if status >= 400:
+            raise ValueError(f"http {status}")
+        return {"status": status, "body": raw.decode("utf-8", "replace")}
 
 
 class FsBridge:
@@ -317,33 +335,34 @@ class FsBridge:
         self._root = Path(root).resolve() if root else None
 
     def read(self, rel):
+        """Returns the file text; raises ValueError (Lua-catchable)."""
         path, err = self._resolve(rel)
         if err:
-            return None, err
+            raise ValueError(err)
         if not path.is_file():
-            return None, "not a file"
+            raise ValueError("not a file")
         if path.stat().st_size > FS_MAX_READ:
-            return None, "file too large"
-        return path.read_text(), None
+            raise ValueError("file too large")
+        return path.read_text()
 
     def write(self, rel, content):
         path, err = self._resolve(rel)
         if err:
-            return None, err
+            raise ValueError(err)
         text = str(content)
         if len(text.encode()) > FS_MAX_WRITE:
-            return None, "content too large"
+            raise ValueError("content too large")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
-        return True, None
+        return True
 
     def list(self, rel):
         path, err = self._resolve(rel)
         if err:
-            return None, err
+            raise ValueError(err)
         if not path.is_dir():
-            return None, "not a directory"
-        return sorted(p.name for p in path.iterdir()), None
+            raise ValueError("not a directory")
+        return sorted(p.name for p in path.iterdir())
 
     def _resolve(self, rel):
         if self._root is None:
@@ -359,15 +378,15 @@ class JsonBridge:
 
     def parse(self, text):
         try:
-            return json.loads(str(text)), None
-        except Exception as exc:  # noqa: BLE001
-            return None, f"invalid json: {exc}"
+            return json.loads(str(text))
+        except Exception as exc:
+            raise ValueError(f"invalid json: {exc}") from exc
 
     def encode(self, value):
         try:
-            return json.dumps(_plain(value), ensure_ascii=False), None
-        except Exception as exc:  # noqa: BLE001
-            return None, f"cannot encode: {exc}"
+            return json.dumps(_plain(value), ensure_ascii=False)
+        except Exception as exc:
+            raise ValueError(f"cannot encode: {exc}") from exc
 
 
 def _plain(value):
@@ -389,15 +408,15 @@ def _plain(value):
 class Bridges:
     """The four bridges bound to one module context."""
 
-    def __init__(self, lua_lock=None, organism_dir=None, emit=None):
-        self.process = ProcessBridge(lua_lock=lua_lock, emit=emit)
+    def __init__(self, organism_dir=None, emit=None):
+        self.process = ProcessBridge(emit=emit)
         self.http = HttpBridge()
         self.fs = FsBridge(organism_dir)
         self.json = JsonBridge()
 
 
-def build(lua_lock=None, organism_dir=None, emit=None) -> Bridges:
-    return Bridges(lua_lock=lua_lock, organism_dir=organism_dir, emit=emit)
+def build(organism_dir=None, emit=None) -> Bridges:
+    return Bridges(organism_dir=organism_dir, emit=emit)
 
 
 def shutdown_all() -> None:
