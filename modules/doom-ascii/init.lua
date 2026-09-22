@@ -1,20 +1,21 @@
--- Nano DOOM module for Replicanta
+-- DOOM module for Replicanta (doom-ascii)
 --
--- The organism can play a tiny first-person shooter that renders in the
--- chat window as ASCII. The user can drive it with /doom commands or by
--- typing movement lines while a game is running.
+-- The organism plays real DOOM, rendered as ASCII by the external
+-- doom-ascii binary (github.com/wojciech-graj/doom-ascii, GPL-2.0;
+-- build it with scripts/setup_doom_ascii.sh). The user can drive the game
+-- with /doom commands, the arrow keys on the DOOM pane, or by typing
+-- movement lines while a game is running.
 --
 -- Public API (registered as the "doom" service):
---   doom.start()                    -- start a new game on the default map
---   doom.start(map_name)            -- start a named map
---   doom.stop()                     -- end the current game
---   doom.command("w")                -- send one movement/shoot command
+--   doom.start([skill])  -- begin a new game (skill 1-5, default 1)
+--   doom.stop()          -- end the current game (kills the game process)
+--   doom.command("w")    -- send one movement/action command
 --   doom.command("shoot")
---   doom.maps()                     -- sorted list of available map names
---   doom.tactical()                 -- enemy summary, or "no game running"
---   doom.can_shoot()                -- true if a lined-up enemy can be shot
---   doom.status()                  -- one-line state summary
---   doom.running()                   -- true if a game is in progress
+--   doom.status()        -- one-line state summary
+--   doom.frame()         -- latest ASCII screen (what the entity sees)
+--   doom.frame_ansi()    -- latest screen with colors, for the TUI pane
+--   doom.frame_count()   -- frames rendered so far
+--   doom.running()       -- true if a game is in progress
 --
 -- How the organism calls it: the LLM cannot execute Lua, so it writes a
 -- call as text on its own line — doom.command("w") — and the utterance
@@ -30,15 +31,15 @@ function init(ctx)
   local ok_ev, events = pcall(function() return ctx.events end)
   if not ok_ev then events = nil end
 
-  ctx.log("nano-doom: module init starting")
+  ctx.log("doom-ascii: module init starting")
   if game == nil then
-    ctx.log("nano-doom: game service not available")
+    ctx.log("doom-ascii: game service not available")
     return
   end
 
   local ok_avail, available = pcall(function() return game:available() end)
   if not ok_avail or not available then
-    ctx.log("nano-doom: bridge unavailable; module loaded but not playable")
+    ctx.log("doom-ascii: binary or WAD missing; module loaded but not playable")
   end
 
   if events ~= nil then
@@ -49,20 +50,9 @@ function init(ctx)
 
   local api = {}
 
-  function api.tactical()
-    local ok, txt = pcall(function() return game:tactical() end)
-    return ok and txt or ""
-  end
-
-  function api.can_shoot()
-    local ok, result = pcall(function() return game:can_shoot() end)
-    if not ok then return false end
-    return result and true or false
-  end
-
   function api.status()
     local ok, txt = pcall(function() return game:status() end)
-    return ok and txt or ("nano-doom error: " .. tostring(txt))
+    return ok and txt or ("doom-ascii error: " .. tostring(txt))
   end
 
   function api.running()
@@ -70,30 +60,42 @@ function init(ctx)
     return ok and running or false
   end
 
-  function api.start(map_name)
-    local ok, err = pcall(function() return game:start(map_name or "default") end)
+  function api.frame()
+    local ok, txt = pcall(function() return game:frame() end)
+    return ok and txt or ""
+  end
+
+  function api.frame_ansi()
+    local ok, txt = pcall(function() return game:frame_ansi() end)
+    return ok and txt or ""
+  end
+
+  function api.frame_count()
+    local ok, n = pcall(function() return game:frame_count() end)
+    if not ok then return 0 end
+    return tonumber(n) or 0
+  end
+
+  function api.start(skill)
+    local arg = tonumber(skill) or 1
+    local ok, err = pcall(function() return game:start(arg) end)
     if not ok then
-      ctx.log("nano-doom: start failed: " .. tostring(err))
+      ctx.log("doom-ascii: start failed: " .. tostring(err))
       return false
     end
-    ctx.log("nano-doom: started " .. tostring(map_name or "default"))
-    if events ~= nil then events:emit("doom_start", tostring(map_name or "default")) end
+    ctx.log("doom-ascii: started (skill " .. tostring(arg) .. ")")
+    if events ~= nil then events:emit("doom_start", "skill " .. tostring(arg)) end
     return true
   end
 
   function api.stop()
     local ok, err = pcall(function() return game:stop() end)
     if not ok then
-      ctx.log("nano-doom: stop failed: " .. tostring(err))
+      ctx.log("doom-ascii: stop failed: " .. tostring(err))
       return false
     end
     if events ~= nil then events:emit("doom_stop", "stopped") end
     return true
-  end
-
-  function api.frame()
-    local ok, txt = pcall(function() return game:frame() end)
-    return ok and txt or ""
   end
 
   function api.command(text)
@@ -103,7 +105,7 @@ function init(ctx)
     end
     local ok, result = pcall(function() return game:command(cmd) end)
     if not ok then
-      ctx.log("nano-doom: command failed: " .. tostring(result))
+      ctx.log("doom-ascii: command failed: " .. tostring(result))
       return false
     end
     if events ~= nil then events:emit("doom_tick", tostring(result)) end
@@ -115,10 +117,14 @@ function init(ctx)
   if hooks ~= nil then
     hooks:on("utterance", function(text)
       for ln in string.gmatch(tostring(text), "[^\n]+") do
-        -- Parse doom.start("map") or doom.command("x")
-        local map_arg = string.match(ln, "^%s*doom%.start%s*%(%s*[\"'](.-)[\"']?%s*%)%s*$")
-        if map_arg ~= nil then
-          api.start(map_arg)
+        -- Parse doom.start(2), doom.start("2"), or a bare doom.start()
+        local skill_arg = string.match(ln, "^%s*doom%.start%s*%(%s*[\"']?(%d+)[\"']?%s*%)%s*$")
+        if skill_arg ~= nil then
+          api.start(skill_arg)
+          break
+        end
+        if string.match(ln, "^%s*doom%.start%s*%(%s*%)%s*$") ~= nil then
+          api.start(1)
           break
         end
         -- search anywhere in the line: the model buries the call in prose
@@ -148,26 +154,23 @@ function init(ctx)
       end
       if sub == "stop" then
         api.stop()
-        return "nano-doom: stopped"
+        return "doom-ascii: stopped"
       end
-      if sub == "maps" then
-        local ok, result = pcall(function() return game:maps() end)
-        if not ok then
-          return "maps error: " .. tostring(result)
-        end
-        return "maps: " .. table.concat(result, ", ")
+      if sub == "frame" then
+        return api.frame()
       end
       if sub == "help" then
-        return "usage: /doom [start [map]|stop|status|maps|help]  in-game: w/a/s/d to move, q/e turn, shoot"
+        return "usage: /doom [start [skill]|stop|status|frame|help]"
+          .. "  in-game: w/a/s/d move, q/e strafe, shoot, use, 1-7 weapons"
       end
       -- Otherwise treat as a direct command if a game is running.
       if api.running() then
         api.command(sub)
         return api.status()
       end
-      return "usage: /doom [start [map]|stop|status|maps|help]"
+      return "usage: /doom [start [skill]|stop|status|frame|help]"
     end)
   end
 
-  ctx.log("nano-doom: module loaded")
+  ctx.log("doom-ascii: module loaded")
 end

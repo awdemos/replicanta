@@ -649,7 +649,7 @@ class Glasshouse:
             raise WebError("module loader unavailable")
         svc = loader.registry.get("doom")
         if svc is None:
-            raise WebError("nano-doom module not loaded (enable it via /modules)")
+            raise WebError("doom-ascii module not loaded (enable it via /modules)")
         commands = loader.registry.get("commands")
         if commands is None:
             raise WebError("command service unavailable")

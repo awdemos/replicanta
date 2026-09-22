@@ -164,7 +164,7 @@ def form_goal(org, model=None, timeout=None, rng=None):
 
 
 def doom_move(org, model=None, timeout=None, rng=None, on_token=None):
-    """Generate one nano-doom move from the current frame, streaming tokens.
+    """Generate one DOOM move from the current game screen, streaming tokens.
 
     Returns the raw model reply (which should contain a doom.command(...) line).
     Tokens are streamed through ``on_token`` so the DOOM pane can show the

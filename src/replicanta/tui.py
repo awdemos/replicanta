@@ -222,7 +222,7 @@ MODULE_BADGES = {
     "fly-brain": "\U0001fab0",  # 🪰
     "tendon-hand": "\U0001f9be",  # 🦾
     "visual-state": "\U0001f441",  # 👁
-    "nano-doom": "\U0001f480",  # 💀
+    "doom-ascii": "\U0001f480",  # 💀
 }
 
 

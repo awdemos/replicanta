@@ -74,7 +74,7 @@ def test_enabled_doom_module_reports_game_state(tmp_path, monkeypatch):
     monkeypatch.setenv("DOOM_WAD", str(wad))
     monkeypatch.setenv("DOOM_ASCII_ARGS", "--interval 0.02")
     org = _organism(tmp_path)
-    loader = _loader(tmp_path, ["base", "nano-doom"])
+    loader = _loader(tmp_path, ["base", "doom-ascii"])
     org.module_loader = loader
     loader.registry.get("doom").start("box")
 

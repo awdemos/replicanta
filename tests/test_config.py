@@ -87,12 +87,12 @@ def test_save_config_list_of_scalars_roundtrips(tmp_path):
     lists of scalars must survive save/load (regression: they rendered
     as a comment, silently discarding the user's module toggles)."""
     cfg = config.load_config(tmp_path)
-    cfg["modules"] = {"enabled": ["base", "fly-brain", "nano-doom"]}
+    cfg["modules"] = {"enabled": ["base", "fly-brain", "doom-ascii"]}
     config.save_config(tmp_path, cfg)
     text = (tmp_path / "replicanta.toml").read_text()
-    assert 'enabled = ["base", "fly-brain", "nano-doom"]' in text
+    assert 'enabled = ["base", "fly-brain", "doom-ascii"]' in text
     loaded = config.load_config(tmp_path)
-    assert loaded["modules"]["enabled"] == ["base", "fly-brain", "nano-doom"]
+    assert loaded["modules"]["enabled"] == ["base", "fly-brain", "doom-ascii"]
 
 
 def test_save_config_list_with_unrenderable_element_is_commented(tmp_path, caplog):

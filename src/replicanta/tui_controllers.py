@@ -1,5 +1,5 @@
 """Per-subsystem controllers for the TUI: each controller owns one domain's
-behavior — MudController the dungeon crawl, DoomController nano-doom play,
+behavior — MudController the dungeon crawl, DoomController doom-ascii play,
 VoiceController inner-voice health and piper downloads. The Textual app stays
 the composition root: it wires the controllers, keeps the @work worker/thread
 boundaries (workers must live on the App to reach run_worker), and delegates.
@@ -29,7 +29,7 @@ MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
 
 
 def doom_player_command(text):
-    """User chat input -> normalized nano-doom command, or None if not a move."""
+    """User chat input -> normalized doom-ascii command, or None if not a move."""
     if not text:
         return None
     words = [w for w in text.strip().lower().split()]
@@ -51,7 +51,25 @@ def extract_doom_command(reply):
     model output."""
     if not reply:
         return None
-    valid = {"w", "a", "s", "d", "q", "e", "shoot", "fire", "use"}
+    valid = {
+        "w",
+        "a",
+        "s",
+        "d",
+        "q",
+        "e",
+        "shoot",
+        "fire",
+        "use",
+        "open",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+    }
     for line in reply.strip().splitlines():
         line = line.strip()
         # The model often buries the call in prose ('The command is:
@@ -381,7 +399,7 @@ class MudController:
 
 
 class DoomController:
-    """Owns nano-doom play: /doom dispatch, the DOOM pane rendering, the
+    """Owns doom-ascii play: /doom dispatch, the DOOM pane rendering, the
     entity's auto-play turn loop, and the arrow/space key commands. The
     app's action_doom_* bindings are thin delegates so Textual dispatch and
     test monkeypatching stay on the app."""
@@ -461,7 +479,7 @@ class DoomController:
             return
         svc = loader.registry.get("doom")
         if svc is None:
-            self._app._append_log("nano-doom module not loaded (enable it via /modules)", STYLE_WARN)
+            self._app._append_log("doom-ascii module not loaded (enable it via /modules)", STYLE_WARN)
             return
         commands = loader.registry.get("commands")
         if commands is None:

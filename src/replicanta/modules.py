@@ -254,9 +254,11 @@ class ModuleLoader:
                 "visual-state",
                 "tendon-hand",
                 "fly-brain",
-                "nano-doom",
+                "doom-ascii",
             ]
-        enabled = set(enabled)
+        # Config alias: the engine swap renamed nano-doom to doom-ascii;
+        # existing organism configs that enable "nano-doom" keep working.
+        enabled = {"doom-ascii" if name == "nano-doom" else name for name in enabled}
         discovered = [m for m in discovered if m.get("name") in enabled]
         ordered = self._resolve_load_order(discovered)
         for manifest in ordered:
@@ -340,7 +342,7 @@ class ModuleLoader:
         # Each module gets its own hardened Lua runtime.  Sharing a runtime
         # across modules caused lupa to confuse local variables / attribute
         # lookups after several modules loaded, breaking later modules (e.g.
-        # nano-doom failing with "'DoomService' object has no attribute
+        # doom-ascii failing with "'DoomAsciiService' object has no attribute
         # 'register'").  Per-module runtimes avoid that state leakage.
         return lua_sandbox.build_runtime()
 

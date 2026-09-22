@@ -1,0 +1,5 @@
+name = "doom-ascii"
+description = "Play real DOOM, rendered as ASCII by the external doom-ascii binary"
+version = "0.2.0"
+provides = ["doom"]
+depends = ["base"]

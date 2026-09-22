@@ -28,8 +28,8 @@ def doom_app(monkeypatch, tmp_path):
     import shutil
 
     shutil.copytree(Path(__file__).parent.parent / "modules", tmp_path / "modules")
-    # Default modules list does not include nano-doom unless config enables it.
-    (tmp_path / "replicanta.toml").write_text('[modules]\nenabled = ["base", "nano-doom"]\n')
+    # Default modules list does not include doom-ascii unless config enables it.
+    (tmp_path / "replicanta.toml").write_text('[modules]\nenabled = ["base", "doom-ascii"]\n')
     # Point the doom service at the stub binary double (hermetic, no WAD).
     wad = tmp_path / "doom1.wad"
     wad.write_bytes(b"PWAD fake")

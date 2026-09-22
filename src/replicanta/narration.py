@@ -147,20 +147,16 @@ def state_snapshot(org):
     arm = module_loader.registry.get("arm") if module_loader is not None else None
     snapshot["arm"] = "tendon-hand" in loaded and arm is not None
     flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
-    snapshot["flybrain"] = (
-        "fly-brain" in loaded and flybrain is not None and _probe(flybrain.available, False)
-    )
+    snapshot["flybrain"] = "fly-brain" in loaded and flybrain is not None and _probe(flybrain.available, False)
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
-    snapshot["doom_tactical"] = ""
-    snapshot["doom_can_shoot"] = "no"
-    if "nano-doom" in loaded and doom is not None:
+    snapshot["doom_frame"] = ""
+    if "doom-ascii" in loaded and doom is not None:
         snapshot["doom"] = bool(_probe(doom.running, False))
         if snapshot["doom"]:
             snapshot["doom_status"] = _probe(lambda: str(doom.status() or ""), "")
-            snapshot["doom_tactical"] = _probe(lambda: str(doom.tactical() or ""), "")
-            snapshot["doom_can_shoot"] = "yes" if _probe(doom.can_shoot, False) else "no"
+            snapshot["doom_frame"] = _probe(lambda: str(doom.frame() or ""), "")
     state_snapshot._cache = (cache_key, snapshot)
     return snapshot
 
@@ -616,39 +612,37 @@ def _lines_mud_decision():
 
 def _doom_prompt(snapshot):
     """Standalone DOOM directive used as a fast-path in build_prompt."""
-    tactical = snapshot.get("doom_tactical", "")
-    can_shoot = snapshot.get("doom_can_shoot", "no")
+    frame = snapshot.get("doom_frame", "")
     lines = [
         "",
-        "### NANO DOOM — YOU ARE CURRENTLY PLAYING",
+        "### DOOM — YOU ARE PLAYING RIGHT NOW",
         "",
         "This overrides everything else.",
-        "Reason out loud step by step in 2-4 short sentences so the user can",
-        "follow your reasoning as it streams. Then on the very next line output",
-        "exactly one doom.command(...) line. No move lists, no questions, no",
-        "emojis. Your prose reasoning is streamed to the user live; the",
-        "command line is parsed and executed by the game.",
+        "The game screen is rendered below as ASCII art — walls, demons,",
+        "your status bar. Reason out loud in 2-4 short sentences about what",
+        "you see and what to do, so the user can follow your reasoning as it",
+        "streams. Then on the very next line output exactly one",
+        "doom.command(...) line. No move lists, no questions, no emojis.",
+        "Your prose is streamed to the user live; the command line is parsed",
+        "and executed by the game.",
         "",
         "Example:",
-        "The enemy is close and straight ahead. I should close the gap before",
-        "it fires, then I'll be in range to shoot.",
+        "The demon is close and roughly ahead. I should close the gap",
+        "before it fires, then I'll be in range to shoot.",
         'doom.command("w")',
         "",
-        "Valid commands: w, s, a, d, q, e, shoot, use.",
+        "Valid commands: w (forward), s (back), a (turn left), d (turn",
+        "right), q (strafe left), e (strafe right), shoot, use, 1-7 weapon.",
         "",
-        "Tactical summary:",
+        "Game screen:",
+        "```",
     ]
-    if tactical:
-        lines.extend(f"  {line}" for line in tactical.splitlines() if line.strip())
+    if frame:
+        lines.extend(frame.splitlines())
     else:
-        lines.append("  (no target data)")
-    lines.append(f"  shoot would hit right now: {can_shoot}")
-    if can_shoot == "yes":
-        lines.append("  -> command shoot NOW — do not walk or turn first.")
-    else:
-        lines.append("  -> do NOT shoot yet — it would miss. Get the enemy")
-        lines.append("     'ahead' first: a/d turn toward it, w advances.")
+        lines.append("(no game running — output doom.start() to begin)")
     lines += [
+        "```",
         "",
         "Now go — reason out loud, then command.",
     ]
@@ -656,7 +650,7 @@ def _doom_prompt(snapshot):
 
 
 def _doom_move_lines():
-    return _doom_prompt({"doom_status": "", "doom_tactical": "", "doom_can_shoot": "no"})
+    return _doom_prompt({"doom_status": "", "doom_frame": ""})
 
 
 def _hand_lines(snapshot):

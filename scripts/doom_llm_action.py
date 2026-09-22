@@ -12,7 +12,7 @@ def main():
             async with app.run_test() as pilot:
                 chat = app.query_one("#chat", Input)
                 chat.focus()
-                chat.value = "start nano-doom and take one action"
+                chat.value = "start doom-ascii and take one action"
                 await pilot.press("enter")
                 await asyncio.sleep(6.0)
                 print("--- log tail ---")

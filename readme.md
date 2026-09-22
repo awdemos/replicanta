@@ -265,7 +265,7 @@ container-use checkout <env-id>
 | `/listen` (F5) | Push-to-talk |
 | `/look` (F6) | Capture and describe camera frame |
 | `/mud` | Toggle dungeon crawl |
-| `/doom [start [map]\|stop\|status\|w/a/s/d\|shoot\|q/e]` | Tiny ASCII shooter the organism plays and narrates |
+| `/doom [start [skill]\|stop\|status\|w/a/s/d\|shoot\|q/e]` | Real DOOM (doom-ascii) the organism plays and narrates; arrow keys work on the DOOM tab |
 | `/approve`, `/reject`, `/revert` | Manage self-patches |
 | `/reload` | Re-read Lua hook scripts |
 | `/lua name.lua` | Run one script on demand |
@@ -281,6 +281,18 @@ container-use checkout <env-id>
 Kinds for `/visualize`: `beliefs`, `attributes`, `activity`, `memories`, `recent`, `mood`, `sentiment`, `stress`, or `summary`.
 
 Tabs: **chat** (F2), **mind** (F3), **memory** (F4), **inner** (F7), **cells** (F8), **visual** (shift+F8). The MUD and DOOM tabs open from their commands.
+
+### DOOM
+
+Replicanta plays real DOOM through [doom-ascii](https://github.com/wojciech-graj/doom-ascii), a terminal port that renders the game as ASCII in the DOOM tab. The organism watches the live screen, reasons out loud about what it sees, and plays by emitting `doom.command("w")`-style lines; you can take over any time with the arrow keys on the DOOM tab, `/doom w/a/s/d`, or by just typing `shoot`.
+
+doom-ascii is GPL-2.0 and ships separately from this MIT-licensed repo — the setup script clones and builds it into gitignored `.deps/` and fetches the freely-redistributable shareware `doom1.wad`:
+
+```bash
+scripts/setup_doom_ascii.sh
+```
+
+`/doom start [skill]` (skill 1-5, default 1) launches a game; `/doom stop` ends it; `w/s` move, `a/d` turn, `q/e` strafe, `shoot` fires, `use` opens doors, `1-7` switch weapons. If the binary or WAD is missing, the module still loads but reports itself unplayable — the same contract as the robot-hand and fly-brain bridges.
 
 ### Learning
 
