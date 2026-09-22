@@ -50,8 +50,18 @@ function init(ctx)
   -- chars); the cap only guards against pathological scalings wrapping the
   -- TUI pane, it must never cut the status rows off the bottom.
   local FRAME_PROMPT_CHARS = 4000
-  local FRAME_ANSI_CHARS = 60000
+  local FRAME_ANSI_CHARS = 120000
   local START_TIMEOUT = 8.0
+
+  -- Budget caps slice raw bytes; block characters are multi-byte UTF-8, so
+  -- a blind sub can split a sequence and poison every downstream decode.
+  local function utf8_safe_cut(s, n)
+    s = s:sub(1, n)
+    while #s > 0 and s:byte(-1) >= 0x80 do
+      s = s:sub(1, -2) -- walk back past continuation/lead bytes to ASCII
+    end
+    return s
+  end
 
   local KEYMAP = {
     w = "\27[A",
@@ -85,6 +95,8 @@ function init(ctx)
     plain_frame = "",
     frame_count = 0,
     skill = 1,
+    viewport_cols = 80, -- app terminal width; drives the scaling choice
+    yield_until = 0.0, -- entity play yields to the human until this clock
   }
 
   local function strip_ansi(s)
@@ -185,12 +197,29 @@ function init(ctx)
     return game.proc ~= nil
   end
 
+  function api.set_viewport(cols)
+    game.viewport_cols = tonumber(cols) or 80
+  end
+
+  function api.yield_to_human(secs)
+    -- Human took the keyboard: entity-issued play (entity_command, and
+    -- utterance-hook doom lines) stays quiet until this clock.
+    game.yield_until = ctx.clock() + (tonumber(secs) or 30)
+  end
+
+  function api.entity_command(text)
+    if ctx.clock() < game.yield_until then
+      return false
+    end
+    return api.command(text)
+  end
+
   function api.frame()
-    return game.plain_frame:sub(1, FRAME_PROMPT_CHARS)
+    return utf8_safe_cut(game.plain_frame, FRAME_PROMPT_CHARS)
   end
 
   function api.frame_ansi()
-    return game.ansi_frame:sub(1, FRAME_ANSI_CHARS)
+    return utf8_safe_cut(game.ansi_frame, FRAME_ANSI_CHARS)
   end
 
   function api.frame_count()
@@ -230,16 +259,36 @@ function init(ctx)
     game.ansi_frame = ""
     game.plain_frame = ""
     game.frame_count = 0
-    -- -warp 1 1 autostarts E1M1 (d_main.c sets autostart), skipping the
-    -- title screen and demo playback — without it the "game" is a demo
-    -- the user watches but cannot play, since keys only skip demos.
-    local argv = { bin, "-iwad", wad, "-scaling", "8", "-skill", tostring(arg), "-warp", "1", "1" }
+    -- Block characters are the only charset a human can actually play:
+    -- gradient letters are unreadable soup at game speed. -nograd paints
+    -- full blocks, -fixgamma offsets their darkening. -warp 1 1 sets
+    -- autostart in d_main.c, skipping the title screen and demo playback
+    -- (without it keys only skip demos — never control the marine).
+    -- Scaling: 4 (160 cols, the engine default, far more readable) when
+    -- the terminal is wide enough, else 8 (80 cols). Extras go FIRST so
+    -- a duplicated flag in DOOM_ASCII_ARGS wins (M_CheckParm takes the
+    -- first match).
+    local scaling = game.viewport_cols >= 166 and "4" or "8"
+    local argv = { bin }
     local extra = externals:doom_args()
     if extra ~= nil then
       for tok in string.gmatch(tostring(extra), "%S+") do
         argv[#argv + 1] = tok
       end
     end
+    table.insert(argv, "-iwad")
+    table.insert(argv, wad)
+    table.insert(argv, "-scaling")
+    table.insert(argv, scaling)
+    table.insert(argv, "-skill")
+    table.insert(argv, tostring(arg))
+    table.insert(argv, "-chars")
+    table.insert(argv, "block")
+    table.insert(argv, "-nograd")
+    table.insert(argv, "-fixgamma")
+    table.insert(argv, "-warp")
+    table.insert(argv, "1")
+    table.insert(argv, "1")
     local pid
     local ok_spawn, spawn_err = pcall(function()
       pid = ctx.process.spawn(argv, {
@@ -339,16 +388,23 @@ function init(ctx)
   -- ---------------------------------------------------- entity calling path
   if hooks ~= nil then
     hooks:on("utterance", function(text)
+      -- Every organism utterance passes here, and any doom.command line in
+      -- one used to execute immediately — even while the human was playing.
+      -- Entity-issued play respects the human yield; the utterance hook is
+      -- entity-initiated, unlike /doom and the arrow keys.
+      local yielded = ctx.clock() < game.yield_until
       for ln in string.gmatch(tostring(text), "[^\n]+") do
         -- Parse doom.start(2), doom.start("2"), or a bare doom.start()
-        local skill_arg = string.match(ln, "^%s*doom%.start%s*%(%s*[\"']?(%d+)[\"']?%s*%)%s*$")
-        if skill_arg ~= nil then
-          api.start(skill_arg)
-          break
-        end
-        if string.match(ln, "^%s*doom%.start%s*%(%s*%)%s*$") ~= nil then
-          api.start(1)
-          break
+        if not yielded then
+          local skill_arg = string.match(ln, "^%s*doom%.start%s*%(%s*[\"']?(%d+)[\"']?%s*%)%s*$")
+          if skill_arg ~= nil then
+            api.start(skill_arg)
+            break
+          end
+          if string.match(ln, "^%s*doom%.start%s*%(%s*%)%s*$") ~= nil then
+            api.start(1)
+            break
+          end
         end
         -- search anywhere in the line: the model buries the call in prose
         -- ('The command is: doom.command("shoot")') or punctuates after it
@@ -359,7 +415,7 @@ function init(ctx)
         end
         if cmd_arg ~= nil then
           pcall(function()
-            api.command(cmd_arg)
+            api.entity_command(cmd_arg)
           end)
           break
         end

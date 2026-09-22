@@ -2500,6 +2500,11 @@ class OrganismApp(App):
             # in the chat log, execute any doom.command line, and refresh the
             # DOOM overlay so the user sees the result.
             doom_cmd = extract_doom_command(reply)
+            if doom_cmd is not None and time.monotonic() < self._doom._manual_until:
+                # The human is driving: an entity move buried in a chat
+                # reply must not fire mid-play (the utterance hook is
+                # Lua-gated; this is the Python-side execution path).
+                doom_cmd = None
             if doom_cmd is not None:
                 # Render the command itself in chat as a system line so the
                 # user can analyze the entity's decision.

@@ -525,6 +525,23 @@ class DoomController:
             return
         self.refresh()
 
+    def _fit_pane_width(self, pane, renderable):
+        """Size the art Static to the frame: 80-col frames stay at the 82
+        CSS default, the 160-col scaling-4 frame widens the pane (with
+        horizontal scroll on narrower terminals) instead of wrapping."""
+        plain = getattr(renderable, "plain", str(renderable))
+        cols = max((len(line) for line in plain.splitlines()), default=0)
+        if cols:
+            width = max(cols + 2, 82)  # 1 col padding each side, CSS floor
+            pane.styles.width = width
+            pane.styles.min_width = width
+
+    def _sync_viewport(self, svc):
+        """Tell the module the terminal width so it can pick the scaling
+        (160-col detail vs 80-col fit) for the NEXT spawn."""
+        with contextlib.suppress(Exception):
+            svc.set_viewport(self._app.screen.size.width)
+
     def key_command(self, cmd):
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
@@ -545,9 +562,13 @@ class DoomController:
             return
         # Human took manual control: the entity yields for the cooldown so
         # the game is actually the human's — re-arming auto-play 300ms after
-        # every keypress made input feel pointless.
+        # every keypress made input feel pointless. The Lua-side yield gates
+        # entity-issued commands from the utterance hook; _manual_until
+        # gates this controller's own auto-play paths.
         self.cancel_auto()
         self._manual_until = time.monotonic() + MANUAL_PLAY_COOLDOWN
+        with contextlib.suppress(Exception):
+            svc.yield_to_human(MANUAL_PLAY_COOLDOWN)
         if cmd != "start":
             self.command([cmd])
 
@@ -590,6 +611,8 @@ class DoomController:
             # yields for the cooldown instead of answering over the player.
             self.cancel_auto()
             self._manual_until = time.monotonic() + MANUAL_PLAY_COOLDOWN
+            with contextlib.suppress(Exception):
+                doom_svc.yield_to_human(MANUAL_PLAY_COOLDOWN)
             command = doom_player_command(text)
             if command is not None:
                 self.command([command])
@@ -622,6 +645,7 @@ class DoomController:
         if commands is None:
             self._app._append_log("command service unavailable", STYLE_WARN)
             return
+        self._sync_viewport(svc)
         try:
             result = commands.dispatch("/doom", args if args else [])
         except Exception as exc:  # noqa: BLE001
@@ -650,6 +674,7 @@ class DoomController:
             doom = self._pane()
             if doom is not None:
                 doom.update(renderable)
+                self._fit_pane_width(doom, renderable)
         # Raise the DOOM overlay when a game starts or renders (idempotent).
         if args and args[0] in ("start", "status"):
             from replicanta.tui import DoomScreen
@@ -698,6 +723,7 @@ class DoomController:
             doom = self._pane()
             if doom is not None:
                 doom.update(renderable)
+                self._fit_pane_width(doom, renderable)
 
     def set_thought(self, text):
         """Append entity reasoning to the overlay's thought stream."""

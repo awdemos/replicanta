@@ -248,6 +248,56 @@ def test_start_warps_straight_into_a_map(tmp_path, monkeypatch):
     doom.stop()
 
 
+def test_start_uses_block_chars_and_playable_flags(tmp_path, monkeypatch):
+    """The human-playable charset must reach the spawned argv: gradient
+    letters are unreadable soup at game speed, so the module forces
+    -chars block -nograd -fixgamma."""
+    loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    doom = loader.registry.get("doom")
+    doom.start()
+    assert _wait_for(lambda: "chars=block" in doom.frame())
+    assert "nograd=True" in doom.frame()
+    assert "fixgamma=True" in doom.frame()
+    doom.stop()
+
+
+def test_scaling_follows_viewport_width(tmp_path, monkeypatch):
+    """A wide terminal (>=166 cols) gets scaling 4 (160-col detail, the
+    engine default); a narrow one gets scaling 8 (80-col fit)."""
+    loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    doom = loader.registry.get("doom")
+    doom.set_viewport(200)
+    doom.start()
+    assert _wait_for(lambda: "scaling=4" in doom.frame())
+    doom.stop()
+    doom.set_viewport(100)
+    doom.start()
+    assert _wait_for(lambda: "scaling=8" in doom.frame())
+    doom.stop()
+
+
+def test_entity_command_yields_to_the_human(tmp_path, monkeypatch):
+    """Regression: while the human is playing, entity-issued commands must
+    not execute. Every organism utterance fires the module's utterance
+    hook, which used to run doom.command lines even mid-play."""
+    loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    hooks = loader.registry.get("hooks")
+    doom = loader.registry.get("doom")
+    doom.start()
+    assert _wait_for(lambda: doom.frame_count() > 0)
+    hooks.emit("utterance", 'doom.command("shoot")')
+    assert _wait_for(lambda: "HIT!" in doom.frame())
+    doom.yield_to_human(30)
+    hooks.emit("utterance", 'doom.command("w")')
+    time.sleep(0.3)
+    assert "key=up" not in doom.frame()  # the human holds the keyboard
+    assert not doom.entity_command("w")  # lupa returns the (false, msg) tuple
+    doom.yield_to_human(0)  # cooldown lapses; the entity may move again
+    assert doom.entity_command("w")
+    assert _wait_for(lambda: "key=up" in doom.frame())
+    doom.stop()
+
+
 def test_module_events_declared(tmp_path, monkeypatch):
     loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
     hooks = loader.registry.get("hooks")

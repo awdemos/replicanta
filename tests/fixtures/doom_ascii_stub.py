@@ -136,7 +136,8 @@ def scene(args: argparse.Namespace, frame_no: int, last_key: str, hit_ttl: int, 
 
     lines = []
     inner = [
-        f"\x1b[38;2;255;0;0mDOOM-ASCII STUB\x1b[0m skill={args.skill} frame={frame_no:04d} key={last_key} args={args.unknown}",
+        f"\x1b[38;2;255;0;0mDOOM-ASCII STUB\x1b[0m skill={args.skill} scaling={args.scaling} chars={args.chars} frame={frame_no:04d} key={last_key}",
+        f"args={args.unknown} nograd={args.nograd} fixgamma={args.fixgamma}",
         "",
         "   @",
         "  ###",
