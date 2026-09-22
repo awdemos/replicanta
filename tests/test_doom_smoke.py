@@ -243,6 +243,7 @@ def test_overlay_arrows_reach_the_game_even_when_the_frame_overflows(doom_app):
             finally:
                 app._doom.key_command = real
             assert sorted(got) == ["a", "d", "s", "shoot", "w"], got
+
     asyncio.run(check())
 
 
