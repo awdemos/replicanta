@@ -1349,20 +1349,30 @@ class OrganismApp(App):
                 lv.append(ListItem(Label(f"   {marker}{member}{badges}"), name=member))
 
     def on_list_view_selected(self, event):
-        """Sidebar selection opens a dropdown (left click or Enter): an
-        organism gets swap / rename / move-to-group, a group header gets
-        rename / remove."""
+        """Sidebar selection (left click or Enter) swaps to the organism
+        immediately — no confirmation menu. Rename / move-to-group / cancel
+        live on the right-click menu."""
         if not event.item.name:
             return
         # a right-click opens the context menu (on_mouse_down); the ListView
-        # still posts Selected for it, which must not open a second menu
+        # still posts Selected for it, which must not ALSO swap
         if self._last_click_button == 3:
             self._last_click_button = None
             return
         if event.item.name.startswith("group:"):
             self._open_group_menu(event.item.name[6:])
         else:
-            self._open_org_menu(event.item.name)
+            self._swap_to_sidebar(event.item.name)
+
+    def _swap_to_sidebar(self, name):
+        """Swap straight to a sidebar organism. Clicking the current one is
+        a no-op; stale names (deleted out from under the list) warn."""
+        if name == self.org.dir_path.name:
+            return
+        if name not in nursery.list_organisms(self.root):
+            self._append_log(f"sidebar: no organism {name!r}", STYLE_WARN)
+            return
+        self._swap_to(name)
 
     def _sidebar_item_at(self, screen_x, screen_y):
         """(item, in_sidebar) for a screen position: the sidebar ListItem
@@ -1383,11 +1393,12 @@ class OrganismApp(App):
 
     def on_mouse_down(self, event):
         """Left button over a sidebar organism may start a drag into a
-        group (a plain click never moves far enough to become one).
-        Right-click in the sidebar: a group header opens its rename
-        prompt, an organism its action menu, empty space the new-group
-        prompt. (Textual's Click message is left-button only, so button 3
-        is handled directly here.)"""
+        group (a plain click never moves far enough to become one) — and a
+        plain left click swaps to that organism. Right-click in the sidebar:
+        an organism opens its action menu (swap / rename / move-to-group),
+        a group header its rename prompt, empty space the new-group prompt.
+        (Textual's Click message is left-button only, so button 3 is
+        handled directly here.)"""
         if event.button == 1:
             item, _in_sidebar = self._sidebar_item_at(event.screen_x, event.screen_y)
             if item is not None and not item.name.startswith("group:"):

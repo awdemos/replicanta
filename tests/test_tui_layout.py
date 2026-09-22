@@ -51,10 +51,10 @@ def _make_fern(app):
         (fern_dir / "organism.scl").write_text(seed.read_text())
 
 
-def test_sidebar_selection_opens_action_menu(nursery_app):
-    """Left-click / Enter on a sidebar organism opens its dropdown menu
-    instead of swapping immediately."""
-    from replicanta.tui import OrganismMenuScreen
+def test_sidebar_selection_swaps_immediately(nursery_app):
+    """Left-click / Enter on a sidebar organism swaps to it directly — no
+    confirmation menu. (Rename / move-to-group live on right-click.)"""
+    from textual.screen import ModalScreen
 
     app = nursery_app
     _make_fern(app)
@@ -68,8 +68,26 @@ def test_sidebar_selection_opens_action_menu(nursery_app):
             index = list(lv.children).index(fern_item)
             app.on_list_view_selected(ListView.Selected(lv, fern_item, index))
             await pilot.pause()
-            assert isinstance(app.screen, OrganismMenuScreen)
-            assert app.org.dir_path.name == "default"  # not swapped yet
+            assert app.org.dir_path.name == "fern"
+            assert not isinstance(app.screen, ModalScreen)  # no menu opened
+
+    asyncio.run(check())
+
+
+def test_sidebar_selection_of_current_organism_is_noop(nursery_app):
+    app = nursery_app
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            lv = app.query_one("#sidebar-list", ListView)
+            current_item = next(item for item in lv.children if "default" in renderable_text(item.children[0]))
+            index = list(lv.children).index(current_item)
+            app.on_list_view_selected(ListView.Selected(lv, current_item, index))
+            await pilot.pause()
+            assert app.org.dir_path.name == "default"
 
     asyncio.run(check())
 
@@ -630,10 +648,10 @@ def test_drag_member_onto_empty_space_ungroups(nursery_app):
 
 
 def test_plain_click_does_not_become_a_drag(nursery_app):
-    """A left click without movement still opens the action menu and
-    never assigns anything."""
+    """A plain left click without movement swaps to the organism and never
+    assigns anything to a group."""
     from replicanta import nursery as nursery_mod
-    from replicanta.tui import OrganismMenuScreen
+    from textual.screen import ModalScreen
 
     app = nursery_app
     _make_fern(app)
@@ -647,7 +665,8 @@ def test_plain_click_does_not_become_a_drag(nursery_app):
             src = regions["fern"]
             await pilot.click(None, offset=(src.x + 2, src.y))
             await pilot.pause()
-            assert isinstance(app.screen, OrganismMenuScreen)
+            assert app.org.dir_path.name == "fern"
+            assert not isinstance(app.screen, ModalScreen)  # no menu
             assert nursery_mod.group_of(app.root, "fern") is None
 
     asyncio.run(check())
