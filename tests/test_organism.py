@@ -364,7 +364,8 @@ def test_belief_store_derived_flags(tmp_path):
 
 def test_stress_mood_tracks_actual_mood_vocabulary(store):
     # _compute_mood only ever writes calm/curious/grateful/anxious/hurt/
-    # insane to (self, mood, X); stress_mood must fire on the stressful ones
+    # fraying/unhinged/insane to (self, mood, X); stress_mood must fire on
+    # the stressful ones
     store.observe(("self", "mood", "anxious"), 0.9)
     assert store.derived()["stress_mood"] is True
     store.observe(("self", "mood", "hurt"), 0.9)

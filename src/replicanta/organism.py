@@ -222,7 +222,7 @@ class BeliefStore:
             # only moods _compute_mood can actually write to (self, mood, X);
             # "tired"/"scared"/"angry" are user-feeling vocabulary and never
             # occur here. narration reads this into its snapshot.
-            "stress_mood": mood in {"insane", "hurt", "anxious"},
+            "stress_mood": mood in {"insane", "unhinged", "fraying", "hurt", "anxious"},
         }
         return self._derived_cache
 
@@ -743,6 +743,8 @@ class StressMeter:
         "anxious",
         "afraid",
         "hurt",
+        "fraying",
+        "unhinged",
         "insane",
     }
 
@@ -852,7 +854,10 @@ class MentalState:
             rested_bonus = 0.35 * (1.0 - fatigue)
             tired_penalty = -0.35 * fatigue
             arousal_t = self._clamp(base + rested_bonus + tired_penalty + 0.2 * chaos + 0.15 * stress)
-        irrationality_t = self._clamp(0.55 * chaos + 0.55 * stress)
+        # Incoherence unravels from stress, amplified by chaos — a calm mind
+        # stays coherent at any chaos, so the descent into insanity is
+        # earned by distress, not by ambient randomness.
+        irrationality_t = self._clamp(0.65 * stress * (0.5 + chaos))
         rationality_t = self._clamp(0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
         rate = min(1.0, self.SMOOTHING * dt)
         s = self.store
@@ -1225,6 +1230,10 @@ class Organism:
     STRESS_BANDS = (0.5, 0.9)  # crossing one upward emits a stress event
     RECENT_SENTIMENT_SECONDS = 120.0  # how long a harsh/kind tone lingers
     MOOD_CONF = 0.9  # confidence of the (self, mood, X) belief
+    # staged descent into insanity: incoherence thresholds for the moods
+    # between anxious and insane (each with a 0.05 hysteresis band below)
+    FRAYING_IRR = 0.50
+    UNHINGED_IRR = 0.60
     GOAL_COOLDOWN = 20  # cycles between goal completions/formations
     GOAL_PURSUIT_CYCLES = 30  # a generic goal is "pursued enough" after this
     GOAL_LEARN_GROWTH = 2  # learn-goals complete after this many new facts
@@ -1705,15 +1714,22 @@ class Organism:
 
     def _compute_mood(self):
         """Mood from body + recent treatment: extreme stress with
-        incoherence is insane and wins; being hurt is specific; a strained
-        body is anxious (with hysteresis so slow drifts across the
-        threshold don't flap the mood); learning sparks curiosity; kindness
-        leaves gratitude; otherwise calm."""
+        incoherence is insane and wins; being hurt is specific; past mere
+        anxiety the descent is staged by incoherence itself — fraying,
+        then unhinged — each with hysteresis so slow drifts across a
+        threshold don't flap the mood; a strained body is anxious (same
+        hysteresis); learning sparks curiosity; kindness leaves gratitude;
+        otherwise calm."""
         if self.store.insane:
             return "insane"
         tone = self._recent_tone()
         if tone == "harsh":
             return "hurt"
+        irr = self.store.irrationality
+        if irr >= self.UNHINGED_IRR or (self._mood == "unhinged" and irr >= self.UNHINGED_IRR - 0.05):
+            return "unhinged"
+        if irr >= self.FRAYING_IRR or (self._mood == "fraying" and irr >= self.FRAYING_IRR - 0.05):
+            return "fraying"
         if self.store.stress >= 0.5 or (self._mood == "anxious" and self.store.stress >= 0.45):
             return "anxious"
         if tone == "learn":

@@ -81,6 +81,16 @@ def test_calm_mind_stays_sane(store):
     assert store.insane is False
 
 
+def test_chaos_alone_cannot_unhinge(store):
+    """Incoherence unravels from stress, not ambient chaos: even at maximum
+    chaos a low-stress organism stays coherent (the 'too easy' fix)."""
+    mental = _mental(store)
+    store.stress = 0.2
+    _drive(store, mental, chaos=1.0)
+    assert store.irrationality < 0.45
+    assert store.insane is False
+
+
 def test_insanity_hysteresis(store):
     mental = _mental(store)
     store.stress = 0.9
@@ -141,6 +151,51 @@ def test_mood_line_insane():
     from replicanta.narration import _mood_line
 
     assert "incoherent" in _mood_line("insane")
+
+
+def test_mood_line_descent_stages():
+    from replicanta.narration import _mood_line
+
+    assert "slipping" in _mood_line("fraying")
+    assert "losing its grip" in _mood_line("unhinged")
+
+
+# -- staged descent moods ------------------------------------------------------
+
+
+def _mood_org(tmp_path):
+    org = Organism(tmp_path)
+    org.load()
+    return org
+
+
+def test_fraying_and_unhinged_moods_stage_the_descent(tmp_path):
+    org = _mood_org(tmp_path)
+    org.store.stress = 0.3  # below the anxious threshold: mood tracks incoherence
+    org.store.irrationality = 0.55
+    assert org._compute_mood() == "fraying"
+    org.store.irrationality = 0.65
+    assert org._compute_mood() == "unhinged"
+    org.store.insane = True
+    assert org._compute_mood() == "insane"  # the flag still wins
+
+
+def test_descent_stage_hysteresis(tmp_path):
+    org = _mood_org(tmp_path)
+    org.store.stress = 0.3
+    org.store.irrationality = 0.55
+    assert org._update_mood() == "fraying"
+    org.store.irrationality = 0.47  # dips inside the band: mood holds
+    assert org._update_mood() is None  # unchanged: still fraying
+    org.store.irrationality = 0.42  # out of the band: falls back through
+    assert org._update_mood() == "calm"
+
+
+def test_anxious_still_precedes_the_descent(tmp_path):
+    org = _mood_org(tmp_path)
+    org.store.stress = 0.55
+    org.store.irrationality = 0.2
+    assert org._compute_mood() == "anxious"
 
 
 def test_snapshot_includes_mental_attributes(tmp_path):

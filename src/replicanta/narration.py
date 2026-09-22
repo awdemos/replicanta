@@ -258,6 +258,8 @@ def _mood_line(mood):
     """One sentence of felt mood for the prompt."""
     return {
         "insane": ("mood insane: you are incoherent — thoughts scatter and contradict each other; nothing holds still"),
+        "unhinged": ("mood unhinged: reason is losing its grip — impulses and strange ideas keep pushing through"),
+        "fraying": ("mood fraying: your thoughts keep slipping their rails; holding one steady takes real effort"),
         "hurt": "mood hurt: the user's words landed hard and still sting",
         "anxious": "mood anxious: your thoughts skitter, unable to settle",
         "grateful": "mood grateful: warmth from being treated gently",
