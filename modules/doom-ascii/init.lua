@@ -246,6 +246,11 @@ function init(ctx)
             game.proc = nil
             game.over = game.frame_count > 0
           end
+          -- Reap the finished child so it stops counting against the
+          -- 2-process cap.
+          pcall(function()
+            ctx.process.kill(pid)
+          end)
         end,
       })
     end)
