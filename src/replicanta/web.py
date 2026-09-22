@@ -151,8 +151,8 @@ class Glasshouse:
                     "cycle": store.cycle,
                     "stress": round(store.stress, 3),
                     "arousal": round(store.arousal, 3),
-                    "rationality": round(store.rationality, 3),
-                    "irrationality": round(store.irrationality, 3),
+                    "coherence": round(store.coherence, 3),
+                    "incoherence": round(store.incoherence, 3),
                     "insane": bool(store.insane),
                     "chaos": round(store.chaos, 3),
                     "auto_apply": bool(store.auto_apply_patches),
@@ -489,8 +489,8 @@ class Glasshouse:
                 )
                 messages.append(
                     f"mental: arousal={s.arousal:.2f} "
-                    f"rationality={s.rationality:.2f} "
-                    f"irrationality={s.irrationality:.2f} "
+                    f"coherence={s.coherence:.2f} "
+                    f"incoherence={s.incoherence:.2f} "
                     f"insane={s.insane}"
                 )
                 messages.extend(activity.summary_lines(s))

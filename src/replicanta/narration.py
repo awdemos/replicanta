@@ -39,8 +39,8 @@ def state_snapshot(org):
         store.chaos,
         store.stress,
         store.arousal,
-        store.rationality,
-        store.irrationality,
+        store.coherence,
+        store.incoherence,
         store.insane,
         store.lifecycle.state if hasattr(store, "lifecycle") else None,
         len(store.beliefs_map),
@@ -102,8 +102,8 @@ def state_snapshot(org):
         "chaos": round(store.chaos, 2),
         "stress": round(store.stress, 2),
         "arousal": round(store.arousal, 2),
-        "rationality": round(store.rationality, 2),
-        "irrationality": round(store.irrationality, 2),
+        "coherence": round(store.coherence, 2),
+        "incoherence": round(store.incoherence, 2),
         "insane": store.insane,
         "sight": getattr(org, "last_sight", None),
         "mood": mood,
@@ -399,42 +399,42 @@ def _felt_experience(snapshot):
     lines = _experience_lines(snapshot, _FELT_BANDS)
 
     arousal = snapshot["arousal"]
-    rationality = snapshot["rationality"]
-    irrationality = snapshot["irrationality"]
+    coherence = snapshot["coherence"]
+    incoherence = snapshot["incoherence"]
     if snapshot["insane"]:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: your mind has come "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: your mind has come "
             "apart — incoherent, raving, unable to hold a thought"
         )
-    elif irrationality >= 0.6:
+    elif incoherence >= 0.6:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: strange ideas feel "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: strange ideas feel "
             "as true as real ones; logic slips"
         )
     elif arousal <= 0.25:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: quiet and heavy, "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: quiet and heavy, "
             "energy low — you want stillness"
         )
     elif arousal >= 0.7:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: wired and buzzing, "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: wired and buzzing, "
             "energy crackling through you"
         )
-    elif rationality >= 0.6:
+    elif coherence >= 0.6:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: clear-headed, "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: clear-headed, "
             "thoughts lining up honestly"
         )
     else:
         mental_line = (
-            f"arousal {arousal:.2f}, rationality {rationality:.2f}, "
-            f"irrationality {irrationality:.2f}: a muddled middle, "
+            f"arousal {arousal:.2f}, coherence {coherence:.2f}, "
+            f"incoherence {incoherence:.2f}: a muddled middle, "
             "neither sharp nor lost"
         )
 

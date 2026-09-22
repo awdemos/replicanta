@@ -1,4 +1,4 @@
-"""Mental-state feature: arousal/rationality/irrationality attributes,
+"""Mental-state feature: arousal/coherence/incoherence attributes,
 the insane flag at extreme stress + incoherence, mood override, TUI/narration
 exposure, and persistence."""
 
@@ -26,8 +26,8 @@ def _drive(store, mental, chaos, ticks=40, sleeping=False):
 
 def test_defaults(store):
     assert store.arousal == pytest.approx(0.3)
-    assert store.rationality == pytest.approx(0.5)
-    assert store.irrationality == pytest.approx(0.2)
+    assert store.coherence == pytest.approx(0.5)
+    assert store.incoherence == pytest.approx(0.2)
     assert store.insane is False
 
 
@@ -35,16 +35,16 @@ def test_attributes_clamped(store):
     mental = _mental(store)
     store.stress = 1.0
     _drive(store, mental, chaos=1.0)
-    for value in (store.arousal, store.rationality, store.irrationality):
+    for value in (store.arousal, store.coherence, store.incoherence):
         assert 0.0 <= value <= 1.0
 
 
-def test_high_stress_and_chaos_raise_irrationality(store):
+def test_high_stress_and_chaos_raise_incoherence(store):
     mental = _mental(store)
     store.stress = 0.9
     _drive(store, mental, chaos=0.9)
-    assert store.irrationality > 0.7
-    assert store.rationality < 0.4
+    assert store.incoherence > 0.7
+    assert store.coherence < 0.4
 
 
 def test_sleep_lowers_arousal(store):
@@ -55,12 +55,12 @@ def test_sleep_lowers_arousal(store):
     assert store.arousal < awake_arousal
 
 
-def test_grounded_utterances_raise_rationality(store):
+def test_grounded_utterances_raise_coherence(store):
     mental = _mental(store)
     store.note_activity("llm_calls", 50)
     store.note_activity("grounded_utterances", 10)
     _drive(store, mental, chaos=0.2)
-    assert store.rationality > 0.5
+    assert store.coherence > 0.5
 
 
 # -- insanity ----------------------------------------------------------------
@@ -87,7 +87,7 @@ def test_chaos_alone_cannot_unhinge(store):
     mental = _mental(store)
     store.stress = 0.2
     _drive(store, mental, chaos=1.0)
-    assert store.irrationality < 0.45
+    assert store.incoherence < 0.45
     assert store.insane is False
 
 
@@ -120,7 +120,7 @@ def test_tick_emits_mental_event_on_flip(tmp_path):
     org = Organism(tmp_path)
     org.load()
     org.store.stress = 0.95
-    org.store.irrationality = 0.9
+    org.store.incoherence = 0.9
     events = org.tick(dt=1.0)
     assert {"kind": "mental", "insane": True} in events
     moods = [e["mood"] for e in events if e["kind"] == "mood"]
@@ -131,16 +131,16 @@ def test_mental_attributes_persist(tmp_path):
     org = Organism(tmp_path)
     org.load()
     org.store.arousal = 0.77
-    org.store.rationality = 0.11
-    org.store.irrationality = 0.66
+    org.store.coherence = 0.11
+    org.store.incoherence = 0.66
     org.store.insane = True
     org.flush(force=True)
 
     fresh = BeliefStore(tmp_path)
     fresh.load()
     assert fresh.arousal == pytest.approx(0.77)
-    assert fresh.rationality == pytest.approx(0.11)
-    assert fresh.irrationality == pytest.approx(0.66)
+    assert fresh.coherence == pytest.approx(0.11)
+    assert fresh.incoherence == pytest.approx(0.66)
     assert fresh.insane is True
 
 
@@ -172,9 +172,9 @@ def _mood_org(tmp_path):
 def test_fraying_and_unhinged_moods_stage_the_descent(tmp_path):
     org = _mood_org(tmp_path)
     org.store.stress = 0.3  # below the anxious threshold: mood tracks incoherence
-    org.store.irrationality = 0.55
+    org.store.incoherence = 0.55
     assert org._compute_mood() == "fraying"
-    org.store.irrationality = 0.65
+    org.store.incoherence = 0.65
     assert org._compute_mood() == "unhinged"
     org.store.insane = True
     assert org._compute_mood() == "insane"  # the flag still wins
@@ -183,18 +183,18 @@ def test_fraying_and_unhinged_moods_stage_the_descent(tmp_path):
 def test_descent_stage_hysteresis(tmp_path):
     org = _mood_org(tmp_path)
     org.store.stress = 0.3
-    org.store.irrationality = 0.55
+    org.store.incoherence = 0.55
     assert org._update_mood() == "fraying"
-    org.store.irrationality = 0.47  # dips inside the band: mood holds
+    org.store.incoherence = 0.47  # dips inside the band: mood holds
     assert org._update_mood() is None  # unchanged: still fraying
-    org.store.irrationality = 0.42  # out of the band: falls back through
+    org.store.incoherence = 0.42  # out of the band: falls back through
     assert org._update_mood() == "calm"
 
 
 def test_anxious_still_precedes_the_descent(tmp_path):
     org = _mood_org(tmp_path)
     org.store.stress = 0.55
-    org.store.irrationality = 0.2
+    org.store.incoherence = 0.2
     assert org._compute_mood() == "anxious"
 
 
@@ -204,5 +204,5 @@ def test_snapshot_includes_mental_attributes(tmp_path):
     org = Organism(tmp_path)
     org.load()
     snap = state_snapshot(org)
-    for key in ("arousal", "rationality", "irrationality", "insane"):
+    for key in ("arousal", "coherence", "incoherence", "insane"):
         assert key in snap

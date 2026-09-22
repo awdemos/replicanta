@@ -19,7 +19,7 @@ def test_top_bar_shows_organism_name(nursery_app):
             assert "REPLICANTA" in text  # wordmark is upper-case in the new branding
             name = Path(app.org.dir_path).name
             assert name in text
-            assert "a/r/i" in text  # mental-state readout in the center zone
+            assert "a/c/i" in text  # mental-state readout in the center zone
             assert "UTC" in text  # clock in the right zone
 
     asyncio.run(check())

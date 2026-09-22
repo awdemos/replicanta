@@ -1234,8 +1234,8 @@ class OrganismApp(App):
             (mood, "dim"),
         )
         center = Text.assemble(
-            ("a/r/i ", "dim"),
-            (f"{s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f}", "bold"),
+            ("a/c/i ", "dim"),
+            (f"{s.arousal:.2f}/{s.coherence:.2f}/{s.incoherence:.2f}", "bold"),
         )
         right = Text.assemble(
             ("voice ", "dim"),
@@ -1260,7 +1260,7 @@ class OrganismApp(App):
         mic = f" mic {self._recording_elapsed()}" if recording else ""
         text = (
             f"◆ REPLICANTA │ {self._org_name()} · {word} · {mood} · "
-            f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f} · "
+            f"a/c/i {s.arousal:.2f}/{s.coherence:.2f}/{s.incoherence:.2f} · "
             f"voice {voice}{mic}{' spk' if spoken else ''} · {clock}"
         )
         self._topbar_text = text

@@ -123,8 +123,8 @@ class BeliefStore:
         self.chaos = 0.5
         self.stress = 0.05
         self.arousal = 0.15  # activation/energy; low at birth
-        self.rationality = 0.5  # grounded coherence (see MentalState)
-        self.irrationality = 0.2  # chaos/stress-driven incoherence
+        self.coherence = 0.5  # grounded coherence (see MentalState)
+        self.incoherence = 0.2  # chaos/stress-driven incoherence
         self.insane = False  # extreme stress + incoherence
         self.fade_streak = 0  # consecutive transitions at critical stress
         self.cycle = 0
@@ -473,8 +473,8 @@ class BeliefStore:
             "chaos": self.chaos,
             "stress": self.stress,
             "arousal": self.arousal,
-            "rationality": self.rationality,
-            "irrationality": self.irrationality,
+            "coherence": self.coherence,
+            "incoherence": self.incoherence,
             "insane": self.insane,
             "fade_streak": self.fade_streak,
             "cycle": self.cycle,
@@ -509,8 +509,10 @@ class BeliefStore:
         self.chaos = state.get("chaos", 0.5)
         self.stress = state.get("stress", 0.05)
         self.arousal = state.get("arousal", 0.15)
-        self.rationality = state.get("rationality", 0.5)
-        self.irrationality = state.get("irrationality", 0.2)
+        # Old state.json files carry the rationality/irrationality names; read
+        # them as a fallback so existing organisms migrate on first load.
+        self.coherence = state.get("coherence", state.get("rationality", 0.5))
+        self.incoherence = state.get("incoherence", state.get("irrationality", 0.2))
         self.insane = state.get("insane", False)
         self.fade_streak = state.get("fade_streak", 0)
         self.fatigue = state.get("fatigue", 0.0)
@@ -786,12 +788,12 @@ class StressMeter:
 
 
 class MentalState:
-    """Arousal, rationality and irrationality (0-1 each), EMA-smoothed
+    """Arousal, coherence and incoherence (0-1 each), EMA-smoothed
     every tick and persisted in state.json. Arousal is activation/energy;
-    rationality is grounded coherence (fed by the grounding proxy from the
-    activity meter, lowered by chaos and stress); irrationality is
-    chaos/stress-driven incoherence. When stress is extreme and
-    irrationality dominates, the organism is insane: its mood reads
+    coherence is grounded coherence (fed by the grounding proxy from the
+    activity meter, lowered by chaos and stress); incoherence is
+    chaos/stress-driven unraveling. When stress is extreme and
+    incoherence dominates, the organism is insane: its mood reads
     'insane' and the voice is told it is incoherent. Hysteresis keeps the
     flag from flapping near the thresholds."""
 
@@ -809,7 +811,7 @@ class MentalState:
     CIRCADIAN_SLEEP_RECOVERY_RATE = 0.65 / (45 * 60)  # 0.75 -> 0.10 in 45 min
 
     def __init__(self, store, circadian=False):
-        """MentalState smooths arousal/rationality/irrationality and decides the
+        """MentalState smooths arousal/coherence/incoherence and decides the
         insane flag with hysteresis. ``circadian`` swaps fatigue accrual to
         the day-scale rates that the circadian lifecycle schedules against."""
         self.store = store
@@ -827,13 +829,13 @@ class MentalState:
         utterances = a.get("llm_calls", 0) / 5
         return min(1.0, a.get("grounded_utterances", 0) / max(1.0, utterances))
 
-    def _crossed_into_insane(self, stress, irrationality):
+    def _crossed_into_insane(self, stress, incoherence):
         """True when stress and incoherence cross the entry threshold."""
-        return stress >= self.INSANE_STRESS and irrationality >= self.INSANE_IRRATIONALITY
+        return stress >= self.INSANE_STRESS and incoherence >= self.INSANE_IRRATIONALITY
 
-    def _recovered_from_insane(self, stress, irrationality):
+    def _recovered_from_insane(self, stress, incoherence):
         """Hysteresis: True when either metric has dropped below recovery."""
-        return stress < self.RECOVERY_STRESS or irrationality < self.RECOVERY_IRRATIONALITY
+        return stress < self.RECOVERY_STRESS or incoherence < self.RECOVERY_IRRATIONALITY
 
     def tick(self, sleeping, chaos, dt=1.0):
         """Advance the three attributes toward their targets. Returns True
@@ -857,19 +859,19 @@ class MentalState:
         # Incoherence unravels from stress, amplified by chaos — a calm mind
         # stays coherent at any chaos, so the descent into insanity is
         # earned by distress, not by ambient randomness.
-        irrationality_t = self._clamp(0.65 * stress * (0.5 + chaos))
-        rationality_t = self._clamp(0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
+        incoherence_t = self._clamp(0.65 * stress * (0.5 + chaos))
+        coherence_t = self._clamp(0.3 + 0.5 * share + 0.2 * (1.0 - chaos) - 0.3 * stress)
         rate = min(1.0, self.SMOOTHING * dt)
         s = self.store
         s.arousal += rate * (arousal_t - s.arousal)
-        s.irrationality += rate * (irrationality_t - s.irrationality)
-        s.rationality += rate * (rationality_t - s.rationality)
+        s.incoherence += rate * (incoherence_t - s.incoherence)
+        s.coherence += rate * (coherence_t - s.coherence)
         s.dirty = True
         was = s.insane
         if was:
-            s.insane = not self._recovered_from_insane(stress, s.irrationality)
+            s.insane = not self._recovered_from_insane(stress, s.incoherence)
         else:
-            s.insane = self._crossed_into_insane(stress, s.irrationality)
+            s.insane = self._crossed_into_insane(stress, s.incoherence)
         return s.insane != was
 
 
@@ -1708,7 +1710,7 @@ class Organism:
         tone = self._recent_tone()
         if tone == "harsh":
             return "hurt"
-        irr = self.store.irrationality
+        irr = self.store.incoherence
         if irr >= self.UNHINGED_IRR or (self._mood == "unhinged" and irr >= self.UNHINGED_IRR - 0.05):
             return "unhinged"
         if irr >= self.FRAYING_IRR or (self._mood == "fraying" and irr >= self.FRAYING_IRR - 0.05):

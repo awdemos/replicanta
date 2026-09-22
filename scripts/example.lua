@@ -13,7 +13,7 @@
 --   main(ctx)          run on demand with /lua <thisfile>.lua (ctx.event = "lua")
 --
 -- ctx reads:  event, text, state, cycle, mood, belief_count, rule_count,
---             score, chaos, stress, arousal, rationality, irrationality,
+--             score, chaos, stress, arousal, coherence, incoherence,
 --             insane, organism, activity (table of counters)
 -- ctx acts:   log(msg), set_chaos(x), focus(attr_or_nil)
 --
@@ -37,7 +37,7 @@
 -- example: notice when its mind comes apart (extreme stress + incoherence)
 -- function on_cycle(ctx)
 --   if ctx.insane then
---     ctx.log("it has gone incoherent — irrationality " .. ctx.irrationality)
+--     ctx.log("it has gone incoherent — incoherence " .. ctx.incoherence)
 --   end
 -- end
 

@@ -133,10 +133,10 @@ def test_inner_view_shows_mental_state(org):
 
 def test_inner_view_without_mental_state(org):
     # BeliefStore ships scalar defaults (arousal 0.3, stress 0.05,
-    # rationality 0.5, irrationality 0.2) — they must render.
+    # coherence 0.5, incoherence 0.2) — they must render.
     view = tui_views.inner_view(org)
     assert "mental state" in view
-    for label in ("arousal", "stress", "rationality", "irrationality"):
+    for label in ("arousal", "stress", "coherence", "incoherence"):
         assert label in view
     assert "mood" not in view  # mood only appears once believed
 

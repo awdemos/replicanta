@@ -128,8 +128,8 @@ def test_module_emit_builds_org_context_for_scripts(tmp_path):
         chaos = 0.5
         stress = 0.2
         arousal = 0.4
-        rationality = 0.9
-        irrationality = 0.1
+        coherence = 0.9
+        incoherence = 0.1
         insane = False
 
         def __init__(self):

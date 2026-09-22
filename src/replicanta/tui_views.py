@@ -216,8 +216,8 @@ def _mental_state(org):
     for attr, label in (
         ("arousal", "arousal"),
         ("stress", "stress"),
-        ("rationality", "rationality"),
-        ("irrationality", "irrationality"),
+        ("coherence", "coherence"),
+        ("incoherence", "incoherence"),
     ):
         value = getattr(store, attr, None)
         if isinstance(value, float):
@@ -280,8 +280,8 @@ def _gauge_color(label, value):
         return "green"
     return {
         "arousal": "magenta",
-        "rationality": "green",
-        "irrationality": "yellow",
+        "coherence": "green",
+        "incoherence": "yellow",
     }.get(label, "blue")
 
 

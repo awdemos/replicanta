@@ -221,8 +221,8 @@ def _cmd_stats(app, parts):
     )
     app._append_log(
         f"mental: arousal={s.arousal:.2f} "
-        f"rationality={s.rationality:.2f} "
-        f"irrationality={s.irrationality:.2f} "
+        f"coherence={s.coherence:.2f} "
+        f"incoherence={s.incoherence:.2f} "
         f"insane={s.insane}",
         STYLE_DIM,
     )

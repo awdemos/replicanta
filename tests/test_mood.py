@@ -151,8 +151,8 @@ def test_felt_experience_has_mood_line():
         "belief_count": 2,
         "mood": "grateful",
         "arousal": 0.3,
-        "rationality": 0.5,
-        "irrationality": 0.2,
+        "coherence": 0.5,
+        "incoherence": 0.2,
         "insane": False,
     }
     assert any("grateful" in line for line in _felt_experience(snap))
