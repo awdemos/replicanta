@@ -182,6 +182,9 @@ class _FakeListener:
     def transcribe(self, _audio):
         return ""
 
+    def warmup(self):
+        pass
+
 
 def test_listen_command_toggles_mic(tmp_path):
     from replicanta.organism import Organism
@@ -198,6 +201,59 @@ def test_listen_command_toggles_mic(tmp_path):
     app.dispatch_command("/listen")
     assert fake.recording is False
     assert fake.stopped is True
+
+
+def _headless_app(tmp_path):
+    from replicanta.organism import Organism
+    from replicanta.tui import OrganismApp
+
+    org = Organism(tmp_path)
+    org.load()
+    app = OrganismApp(org)
+    app.listener = _FakeListener()
+    app.refresh_status = lambda: None
+    app.refresh_top_bar = lambda: None
+    return app
+
+
+def test_transcript_lands_in_chat_input_not_auto_sent(tmp_path):
+    """The transcript must be editable: value in the chat line, nothing routed."""
+    app = _headless_app(tmp_path)
+    app.chat_input = SimpleNamespace(value="", cursor_position=0, focus=lambda: None)
+    app._deliver_transcript("hello there")
+    assert app.chat_input.value == "hello there"
+    assert app.chat_input.cursor_position == len("hello there")
+
+
+def test_empty_transcript_logs_heard_nothing(tmp_path):
+    app = _headless_app(tmp_path)
+    logged = []
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text) or True
+    app._deliver_transcript("")
+    assert any("heard nothing" in t for t in logged)
+
+
+def test_cancel_listen_discards_without_transcribing(tmp_path):
+    app = _headless_app(tmp_path)
+    logged = []
+    app._append_log = lambda text, style=None, stamp=False: logged.append(text) or True
+    app._toggle_listen()
+    assert app.listener.recording is True
+    assert app.cancel_listen() is True
+    assert app.listener.recording is False
+    assert app.cancel_listen() is False  # nothing recording: no-op
+    assert any("cancelled" in t for t in logged)
+    assert not any(t.startswith("heard") for t in logged)
+
+
+def test_recording_elapsed_formats(tmp_path):
+    import time as time_mod
+
+    app = _headless_app(tmp_path)
+    assert app._recording_elapsed() == "0:00"
+    app._toggle_listen()
+    app._recording_started = time_mod.monotonic() - 67
+    assert app._recording_elapsed() == "1:07"
 
 
 # -- device matching (/microphone) ---------------------------------------------

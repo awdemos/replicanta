@@ -1287,7 +1287,7 @@ class OrganismApp(App):
         )
         if recording:
             right.append("   ")
-            right.append("mic", style="reverse green")
+            right.append(f"mic {self._recording_elapsed()}", style="reverse green")
         if spoken:
             right.append("   ")
             # yellow when enabled but the voice extras are missing — the
@@ -1301,10 +1301,11 @@ class OrganismApp(App):
         bar.add_column(justify="center")
         bar.add_column(justify="right")
         bar.add_row(left, center, right)
+        mic = f" mic {self._recording_elapsed()}" if recording else ""
         text = (
             f"◆ REPLICANTA │ {self._org_name()} · {word} · {mood} · "
             f"a/r/i {s.arousal:.2f}/{s.rationality:.2f}/{s.irrationality:.2f} · "
-            f"voice {voice}{' mic' if recording else ''}{' spk' if spoken else ''} · {clock}"
+            f"voice {voice}{mic}{' spk' if spoken else ''} · {clock}"
         )
         self._topbar_text = text
         if text == self._rendered_topbar_text:
@@ -1665,27 +1666,67 @@ class OrganismApp(App):
     # -- heard voice (push-to-talk) -----------------------------------------
     def _toggle_listen(self):
         """Push-to-talk: first F5//listen starts the mic, second stops it
-        and transcribes; the text goes to the organism like a typed line."""
+        and transcribes. The transcript lands in the chat line — editable,
+        reviewed, sent with Enter like anything typed."""
         if self.listener.recording:
+            elapsed = self._recording_elapsed()
             audio = self.listener.stop()
-            self._append_log("transcribing…", STYLE_DIM)
+            self._append_log(f"transcribing ({elapsed})…", STYLE_DIM)
             self._transcribe_then_say(audio)
         else:
             self.listener.start()
             if self.listener.recording:
-                self._append_log("listening… (F5 or /listen again to stop)", STYLE_DIM)
+                self._recording_started = time.monotonic()
+                self._append_log("listening… (F5 or /listen to stop · Esc to cancel)", STYLE_DIM)
+                # load the STT model in the background so the stop press
+                # transcribes immediately instead of paying model load
+                threading.Thread(target=self.listener.warmup, daemon=True, name="stt-warmup").start()
             else:
                 self._append_log("no microphone (device missing or busy?)", STYLE_WARN)
         self.refresh_status()
+        self.refresh_top_bar()
+
+    def _recording_elapsed(self):
+        """mm:ss since recording started ('0:00' when not recording)."""
+        started = getattr(self, "_recording_started", None)
+        if started is None or not self.listener.recording:
+            return "0:00"
+        seconds = int(time.monotonic() - started)
+        return f"{seconds // 60}:{seconds % 60:02d}"
+
+    def cancel_listen(self):
+        """Discard the in-progress recording without transcribing it."""
+        if not self.listener.recording:
+            return False
+        self.listener.stop()
+        self._recording_started = None
+        self._append_log("listening cancelled", STYLE_DIM)
+        self.refresh_status()
+        self.refresh_top_bar()
+        return True
 
     @work(thread=True)
     def _transcribe_then_say(self, audio):
         text = self.listener.transcribe(audio)
+        self.call_from_thread(self._deliver_transcript, text)
+
+    def _deliver_transcript(self, text):
+        """UI-thread delivery of a transcript: the text lands in the chat
+        line (editable, reviewed) and Enter sends it like a typed line;
+        nothing is auto-submitted."""
         if text:
-            self.call_from_thread(self.route_chat_message, text)
+            self._set_chat_value(text)
+            if self.chat_input is not None:
+                self.chat_input.focus()
+            self._append_log(f"heard: {text}", STYLE_DIM)
         else:
-            self.call_from_thread(self._append_log, "(heard nothing)", STYLE_DIM)
-        self.call_from_thread(self.refresh_status)
+            self._append_log("(heard nothing)", STYLE_DIM)
+        self._recording_stopped()
+
+    def _recording_stopped(self):
+        self._recording_started = None
+        self.refresh_status()
+        self.refresh_top_bar()
 
     def _microphone(self, args):
         """Manage the heard voice: bare = status, list = input devices,
@@ -1721,6 +1762,14 @@ class OrganismApp(App):
 
     # -- keys ------------------------------------------------------------
     def on_key(self, event):
+        if event.key == "escape" and self.listener.recording:
+            # recording cancel wins over every other Escape meaning: the
+            # user is actively holding the mic and wants out without
+            # transcribing or sending anything
+            self.cancel_listen()
+            event.prevent_default()
+            event.stop()
+            return
         if event.key == "tab":
             if self.chat_input is None:
                 return
@@ -1845,6 +1894,7 @@ class OrganismApp(App):
             self._busy_frame = (self._busy_frame + 1) % 3
         self._update_brain_activity()
         self._refresh_views()
+        self.refresh_top_bar()
         self.refresh_status()
 
     def _update_brain_activity(self):
@@ -2039,6 +2089,8 @@ class OrganismApp(App):
         sleep_btn.label = "Wake" if self.org.lifecycle.state == "sleep" else "Sleep"
         voice_btn = qa.query_one("#qa-voice", Button)
         voice_btn.label = f"Voice {'on' if speech.enabled else 'off'}"
+        listen_btn = qa.query_one("#qa-listen", Button)
+        listen_btn.label = "Listening…" if self.listener.recording else "Listen"
         mud_btn = qa.query_one("#qa-mud", Button)
         mud_btn.label = "MUD on" if self._mud.game is not None else "MUD off"
 

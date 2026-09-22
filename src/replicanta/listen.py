@@ -211,6 +211,17 @@ class Listener:
             logger.warning("transcription failed: %s", exc)
             return ""
 
+    def warmup(self):
+        """Pre-load the STT model off the critical path. Safe to call any
+        time: a no-op when a transcriber is injected (tests) and failures
+        are contained (the later transcribe() retries the load)."""
+        if self._transcriber is not None:
+            return
+        try:
+            self._load_model()
+        except Exception as exc:  # noqa: BLE001 — warmup must never kill anything
+            logger.warning("stt warmup failed: %s", exc)
+
     def _capture(self, mic):
         try:
             with mic.recorder(samplerate=SAMPLE_RATE) as rec:
