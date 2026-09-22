@@ -455,10 +455,32 @@ class ThoughtArena:
     def _generate(self, prompt, model, timeout, temperature, org=None):
         if temperature is None:
             temperature = round(TEMP_MIN + self._rng.random() * (TEMP_MAX - TEMP_MIN), 2)
+            temperature = self._state_scale(temperature, org)
         text, stats = llmclient.generate_with_stats(prompt, model, timeout, temperature=temperature)
         if org is not None:
             self._meter(org, stats)
         return text
+
+    @staticmethod
+    def _state_scale(temperature, org):
+        """Mental state shapes the sampling itself, not just the prompt
+        text: chaos, stress, and insanity widen the jitter band so thought
+        genuinely loosens; a calm, rested organism draws slightly tighter
+        drafts. Caller-fixed temperatures (doom commands, deterministic
+        probes) never pass through the jitter branch and are untouched.
+        """
+        if org is None:
+            return temperature
+        try:
+            chaos = float(org.chaos_effective())
+            stress = float(getattr(org.store, "stress", 0.0) or 0.0)
+            insane = bool(getattr(org.store, "insane", False))
+        except Exception:  # noqa: BLE001 — duck-typed test doubles
+            return temperature
+        factor = 1.0 + 0.5 * chaos + 0.25 * stress + (0.45 if insane else 0.0)
+        if not insane and chaos < 0.15 and stress < 0.2:
+            factor = 0.85  # calm: a notch tighter than the default band
+        return round(min(max(temperature * factor, 0.3), 1.25), 2)
 
     def _fallback(self, store, snapshot, user_message, fallback):
         activity.note(store, "fallbacks")

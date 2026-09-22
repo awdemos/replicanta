@@ -782,3 +782,39 @@ def test_build_prompt_appends_persona(tmp_path):
 
     prompt = build_prompt(state_snapshot(FakeOrg()))
     assert "Persona:" not in prompt
+
+
+# -- felt state must prescribe speech, not just describe it -------------------------
+
+
+def _reply_prompt(org, monkeypatch, **state):
+    from replicanta import narration
+
+    snap = narration.state_snapshot(org)
+    snap.update(state)
+    monkeypatch.setattr(narration, "_pick_varied", lambda opts, s, m: opts[0])
+    return "\n".join(narration._lines_reply(snap))
+
+
+def test_high_stress_prescribes_short_replies(org, monkeypatch):
+    text = _reply_prompt(org, monkeypatch, stress=0.9)
+    assert "keep it short" in text
+
+
+def test_calm_state_prescribes_nothing_extra(org, monkeypatch):
+    text = _reply_prompt(org, monkeypatch, stress=0.1, mood="calm")
+    assert "keep it short" not in text
+    assert "incoherent" not in text
+
+
+def test_insanity_prescribes_fragmented_speech(org, monkeypatch):
+    text = _reply_prompt(org, monkeypatch, insane=True, mood="insane")
+    assert "fragment" in text
+
+
+def test_beliefs_prompt_speaks_from_and_revises(org, monkeypatch):
+    from replicanta import narration
+
+    snap = narration.state_snapshot(org)
+    prompt = narration.build_prompt(snap, task="reply", user_message="hi")
+    assert "speak from them" in prompt

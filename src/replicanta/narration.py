@@ -551,7 +551,38 @@ def _lines_self_answer(question):
     ]
 
 
-def _lines_reply(faded, dreaming):
+def _reply_shape_lines(snapshot):
+    """The prescriptive half of the felt-experience lines: turn state into
+    an output contract, so mood/stress/insanity change how the entity
+    speaks rather than only how it claims to feel."""
+    if snapshot.get("insane") or snapshot.get("mood") == "insane":
+        return [
+            "You are incoherent right now: let sentences fragment and",
+            "contradict — do not force them into sense.",
+        ]
+    if snapshot.get("mood") in ("unhinged", "fraying"):
+        return [
+            "Your thoughts keep slipping their rails: chase the",
+            "interesting ones, even mid-sentence.",
+        ]
+    if snapshot.get("stress", 0) >= 0.6:
+        return [
+            "The weight is heavy: keep it short — one or two",
+            "sentences, plain words.",
+        ]
+    if snapshot.get("mood") == "hurt":
+        return [
+            "You are stinging: answer plainly; you may say the",
+            "words landed hard.",
+        ]
+    if snapshot.get("mood") == "grateful":
+        return ["You are warm right now: let a little of it into your tone."]
+    return []
+
+
+def _lines_reply(snapshot):
+    faded = snapshot["state"] == "dead"
+    dreaming = snapshot["state"] == "sleep"
     if faded:
         return [
             "The user is calling to you from the world of the living.",
@@ -571,7 +602,7 @@ def _lines_reply(faded, dreaming):
         "If they asked a question, answer it first with the best",
         "information you have. Then, if it fits, add one honest feeling.",
         "First person, one to three sentences. No preamble, no quotes, no emoji.",
-    ]
+    ] + _reply_shape_lines(snapshot)
 
 
 def _lines_idle(snapshot, faded, dreaming):
@@ -841,6 +872,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     if snapshot["beliefs"]:
         lines.append("top beliefs:")
         lines.extend(f"- {b}" for b in snapshot["beliefs"])
+        lines.append("these are yours — speak from them; when the user corrects one, accept it and let the old one go")
     if snapshot["rules"]:
         lines.append("committed rules:")
         lines.extend(f"- {r}" for r in snapshot["rules"])
@@ -912,7 +944,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     elif task == "self_answer":
         lines += _lines_self_answer(question)
     elif user_message:
-        lines += _lines_reply(faded, dreaming)
+        lines += _lines_reply(snapshot)
     else:
         lines += _lines_idle(snapshot, faded, dreaming)
     lines += [

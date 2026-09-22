@@ -10,7 +10,7 @@ import random
 import pytest
 from conftest import patch_generate
 
-from replicanta.arena import ROGUE_THOUGHT, TEMP_MAX, TEMP_MIN, ThoughtArena
+from replicanta.arena import ROGUE_THOUGHT, TEMP_MAX, ThoughtArena
 from replicanta.organism import BeliefStore, Lifecycle, Metrics
 from replicanta.voice import narrate, respond
 
@@ -219,7 +219,19 @@ def test_temperature_jitters_per_round(org, monkeypatch):
     ThoughtArena(rng=random.Random(11)).emerge(org)
     temps = [t for _p, t in calls]
     assert len(set(temps)) > 1
-    assert all(TEMP_MIN <= t <= TEMP_MAX for t in temps)
+    # The jitter band is itself stateful: this org runs chaos 0.5, so the
+    # drafts draw hotter than the plain TEMP_MIN..TEMP_MAX window.
+    assert all(t > TEMP_MAX for t in temps)
+
+
+def test_temperature_tightens_when_calm(org, monkeypatch):
+    org.store.chaos = 0.05
+    org.store.stress = 0.1
+    calls = _scripted(monkeypatch, ["fur and paws"] * 5)
+    ThoughtArena(rng=random.Random(11)).emerge(org)
+    temps = [t for _p, t in calls]
+    assert len(set(temps)) > 1
+    assert max(temps) < TEMP_MAX * 0.9  # whole draw sits below the default band
 
 
 class _AlwaysZero:
@@ -600,3 +612,39 @@ def test_arbiter_down_falls_back_to_voters(org, monkeypatch):
     monkeypatch.setattr("replicanta.typeddecisions.decide", lambda state, questions: None)
     assert ThoughtArena().emerge(org) == "fur and paws"
     assert len(calls) == 5
+
+
+# -- mental state shapes the sampling itself ---------------------------------------
+
+
+def _scale(tmp_path, chaos=0.0, stress=0.0, insane=False):
+    org = _Org(tmp_path)
+    org.store.chaos = chaos
+    org.store.stress = stress
+    org.store.insane = insane
+    from replicanta.arena import ThoughtArena
+
+    return ThoughtArena()._state_scale(0.8, org)
+
+
+def test_calm_state_tightens_temperature(tmp_path):
+    assert _scale(tmp_path, chaos=0.05, stress=0.1) < 0.8
+
+
+def test_chaos_and_stress_widen_temperature(tmp_path):
+    assert _scale(tmp_path, chaos=1.0, stress=1.0) > 1.1
+
+
+def test_insanity_widens_temperature_most(tmp_path):
+    # Same organism, with and without the insanity flag: insanity must
+    # draw measurably hotter than its own calm baseline.
+    assert _scale(tmp_path, insane=True) > _scale(tmp_path)
+
+
+def test_state_scale_ignores_broken_stands_ins(tmp_path):
+    from replicanta.arena import ThoughtArena
+
+    assert ThoughtArena()._state_scale(0.8, None) == 0.8
+    bare = _Org(tmp_path)
+    bare.chaos_effective = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    assert ThoughtArena()._state_scale(0.8, bare) == 0.8
