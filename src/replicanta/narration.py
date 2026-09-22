@@ -139,16 +139,23 @@ def state_snapshot(org):
     persona_service = getattr(org, "persona_service", None)
     snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
     module_loader = getattr(org, "module_loader", None)
+    # The Python capability services (arm/flybrain/doom) are registered
+    # unconditionally, so service presence cannot gate the prompts — a
+    # disabled module would still advertise its capability and the entity
+    # would keep trying to use it. Only modules that actually loaded count.
+    loaded = set(module_loader.modules) if module_loader is not None else set()
     arm = module_loader.registry.get("arm") if module_loader is not None else None
-    snapshot["arm"] = arm is not None
+    snapshot["arm"] = "tendon-hand" in loaded and arm is not None
     flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
-    snapshot["flybrain"] = bool(flybrain is not None and _probe(flybrain.available, False))
+    snapshot["flybrain"] = (
+        "fly-brain" in loaded and flybrain is not None and _probe(flybrain.available, False)
+    )
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
     snapshot["doom_tactical"] = ""
     snapshot["doom_can_shoot"] = "no"
-    if doom is not None:
+    if "nano-doom" in loaded and doom is not None:
         snapshot["doom"] = bool(_probe(doom.running, False))
         if snapshot["doom"]:
             snapshot["doom_status"] = _probe(lambda: str(doom.status() or ""), "")
