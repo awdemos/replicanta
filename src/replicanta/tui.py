@@ -457,7 +457,9 @@ class DoomScreen(Screen):
     DoomScreen { background: $surface; }
     #doom-hint { height: 1; padding: 0 1; color: $text-muted; }
     #doom-scroll { height: 1fr; }
-    #doom { padding: 0 1; width: 80; min-width: 80; }
+    # 82 = 80-column frame + 1 col padding each side: the content width must
+    # be exactly 80 or Rich wraps the art mid-line and the picture shreds.
+    #doom { padding: 0 1; width: 82; min-width: 82; }
     #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
     """
 

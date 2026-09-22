@@ -46,7 +46,10 @@ function init(ctx)
   -- starting with the cursor-home escape and ending with an SGR reset.
   local CURSOR_HOME = "\27[;H"
   local SGR_RESET = "\27[0m"
-  local FRAME_PROMPT_CHARS = 1200
+  -- Plain-frame budget. The scaling-8 frame is 25 rows x 80 cols (~2024
+  -- chars); the cap only guards against pathological scalings wrapping the
+  -- TUI pane, it must never cut the status rows off the bottom.
+  local FRAME_PROMPT_CHARS = 4000
   local FRAME_ANSI_CHARS = 60000
   local START_TIMEOUT = 8.0
 

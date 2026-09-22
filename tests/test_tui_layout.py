@@ -894,8 +894,11 @@ def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
             await pilot.pause()
             doom = app.screen.query_one("#doom", Static)
             await pilot.pause()
-            assert doom.styles.width is not None and doom.styles.width.value == 80
-            assert doom.region.width == 80
+            # 82 outer - 2 padding = exactly the 80-column frame: any
+            # narrower content region wraps the art mid-line.
+            assert doom.styles.width is not None and doom.styles.width.value == 82
+            assert doom.region.width == 82
+            assert doom.content_region.width == 80
             assert isinstance(doom.parent, ScrollableContainer)
             # esc closes the overlay; the (non-)game is untouched
             await pilot.press("escape")

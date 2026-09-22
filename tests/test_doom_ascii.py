@@ -35,9 +35,7 @@ def _load_module(tmp_path, monkeypatch, enabled, args="--interval 0.02"):
     monkeypatch.setenv("DOOM_ASCII_ARGS", args)
     target = tmp_path / "modules"
     shutil.copytree(MODULES_SRC, target)
-    loader = ModuleLoader(
-        target, organism=None, modules_config={"enabled": enabled}, emit=lambda _m: None
-    )
+    loader = ModuleLoader(target, organism=None, modules_config={"enabled": enabled}, emit=lambda _m: None)
     loader.load_all()
     return loader
 
@@ -218,6 +216,24 @@ def test_module_frame_api(tmp_path, monkeypatch):
     assert _wait_for(lambda: "DOOM-ASCII STUB" in doom.frame())
     assert "DOOM-ASCII STUB" in doom.frame_ansi()
     assert doom.frame_count() > 0
+    doom.stop()
+
+
+def test_frame_keeps_all_rows_including_status_line(tmp_path, monkeypatch):
+    """The whole 25-row x 80-col frame must reach consumers: the bottom rows
+    carry the status bar, and a truncated frame both hides them and, at the
+    TUI pane's 78-column content width, wraps every line — shredding the
+    picture into distorted raw ascii."""
+    loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    doom = loader.registry.get("doom")
+    doom.start()
+    assert _wait_for(lambda: doom.frame_count() > 0)
+    frame = doom.frame()
+    lines = frame.splitlines()
+    assert len(lines) == 25, f"frame lost rows: {len(lines)}"
+    assert all(len(line) == 80 for line in lines)
+    assert lines[0] == "#" * 80  # top border
+    assert lines[-1] == "#" * 80  # bottom border / status row survives
     doom.stop()
 
 
