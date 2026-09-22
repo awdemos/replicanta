@@ -961,10 +961,12 @@ class OrganismApp(App):
         self._doom.key_command("s")
 
     def action_doom_left(self):
-        self._doom.key_command("q")
+        # left arrow TURNS left — the port's own binding (strafe is q/e)
+        self._doom.key_command("a")
 
     def action_doom_right(self):
-        self._doom.key_command("e")
+        # right arrow TURNS right — the port's own binding (strafe is q/e)
+        self._doom.key_command("d")
 
     def action_doom_shoot(self):
         self._doom.key_command("shoot")

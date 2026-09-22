@@ -46,7 +46,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-kpsmooth")
     parser.add_argument("-fixgamma", action="store_true")
     parser.add_argument("--die", action="store_true")
-    return parser.parse_known_args()[0]
+    args, unknown = parser.parse_known_args()
+    # Unknown flags (e.g. the module's -warp 1 1) are echoed into the scene
+    # so tests can assert the exact argv the module spawned with.
+    args.unknown = " ".join(unknown)
+    return args
 
 
 def main() -> int:
@@ -132,7 +136,7 @@ def scene(args: argparse.Namespace, frame_no: int, last_key: str, hit_ttl: int, 
 
     lines = []
     inner = [
-        f"\x1b[38;2;255;0;0mDOOM-ASCII STUB\x1b[0m skill={args.skill} frame={frame_no:04d} key={last_key}",
+        f"\x1b[38;2;255;0;0mDOOM-ASCII STUB\x1b[0m skill={args.skill} frame={frame_no:04d} key={last_key} args={args.unknown}",
         "",
         "   @",
         "  ###",

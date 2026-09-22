@@ -143,6 +143,64 @@ def test_doom_pane_receives_colored_frame(doom_app):
     asyncio.run(check())
 
 
+def test_manual_keypress_pauses_entity_autoplay(doom_app):
+    """A human arrow key puts the entity's auto-play on cooldown and must
+    not immediately re-arm it — previously every keypress scheduled an
+    entity turn 300ms later, so the game played itself against the human."""
+    import time
+
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await _start_doom(app, pilot)
+            await wait_until(
+                lambda: app.org.module_loader.registry.get("doom").frame_count() > 0,
+                message="stub frames to flow",
+            )
+            armed = []
+            real_set_timer = app.set_timer
+
+            def spy(delay, callback=None, **kw):
+                if callback == app._doom.take_turn:
+                    armed.append(callback)
+                return real_set_timer(delay, callback, **kw)
+
+            app.set_timer = spy
+            try:
+                app._doom.key_command("w")
+                assert app._doom._manual_until > time.monotonic()
+                app._doom.schedule_turn()
+                assert armed == []  # cooldown: the entity may not move
+                # once the cooldown lapses, auto-play may schedule again
+                app._doom._manual_until = 0.0
+                app._responding = False
+                app._doom.schedule_turn()
+                assert len(armed) == 1
+            finally:
+                app.set_timer = real_set_timer
+
+    asyncio.run(check())
+
+
+def test_repaint_interval_runs_only_during_a_game(doom_app):
+    """The overlay must repaint at game speed while a game runs (the 1s app
+    tick makes manual play feel frozen) and stop when the game ends."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await _start_doom(app, pilot)
+            await wait_until(
+                lambda: app._doom._repaint_timer is not None,
+                message="repaint loop to start with the game",
+            )
+            app._doom.command(["stop"])
+            assert app._doom._repaint_timer is None
+
+    asyncio.run(check())
+
+
 def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
     """Regression: /doom stop must kill the game process and silence the
     auto-play loop — no pending turn timers, no new game re-armed."""
@@ -175,9 +233,34 @@ def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
 
             svc = app.org.module_loader.registry.get("doom")
             assert svc.running() is False
-            pending = [t for t in getattr(app, "_timers", []) if getattr(t, "_callback", None) is app._doom.take_turn]
-            assert pending == []  # the loop is not re-armed
+            assert app._doom._turn_timers() == []  # the loop is not re-armed
             await asyncio.sleep(1.5)
             assert svc.running() is False  # no new game booted
+
+    asyncio.run(check())
+
+
+def test_cancel_auto_stops_pending_turns(doom_app, monkeypatch):
+    """Regression: cancel_auto must actually cancel. Bound methods never
+    match with `is`, so manual input used to leave the pending entity turn
+    alive and the entity grabbed the keyboard back 300ms later."""
+    from replicanta import voice
+
+    app = doom_app
+    monkeypatch.setattr(voice, "online", lambda: True)
+
+    async def check():
+        async with app.run_test() as pilot:
+            await _start_doom(app, pilot)
+            await wait_until(
+                lambda: app.org.module_loader.registry.get("doom").frame_count() > 0,
+                message="stub frames to flow",
+            )
+            app._doom._manual_until = 0.0
+            app._responding = False
+            app._doom.schedule_turn()
+            assert len(app._doom._turn_timers()) >= 1  # a turn is queued
+            app._doom.cancel_auto()
+            assert app._doom._turn_timers() == []  # and now it is not
 
     asyncio.run(check())

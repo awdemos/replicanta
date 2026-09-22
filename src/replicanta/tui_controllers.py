@@ -10,6 +10,7 @@ monkeypatching and organism swaps keep working."""
 import contextlib
 import logging
 import re
+import time
 from datetime import UTC, datetime
 
 from rich.text import Text
@@ -28,6 +29,8 @@ from replicanta.tui_views import (
 logger = logging.getLogger(__name__)
 
 MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
+MANUAL_PLAY_COOLDOWN = 30.0  # entity auto-play stays silent this long after human input
+DOOM_REPAINT_INTERVAL = 0.1  # overlay frame rate while a game runs (the 1s tick feels frozen)
 
 
 def doom_player_command(text):
@@ -472,6 +475,8 @@ class DoomController:
     def __init__(self, app):
         self._app = app
         self._text = ""
+        self._manual_until = 0.0  # monotonic; entity auto-play stays quiet before this
+        self._repaint_timer = None
 
     def _pane(self):
         """The active DoomScreen's art Static, or None when the overlay is
@@ -495,6 +500,31 @@ class DoomController:
                 return screen.query_one("#doom-thoughts", Static)
         return None
 
+    def start_repaint(self):
+        """Paint the overlay at game speed while a game runs. The 1s app
+        tick makes manual play feel frozen; 10Hz is enough to follow
+        movement without spending a frame conversion per game frame."""
+        if self._repaint_timer is None:
+            self._repaint_timer = self._app.set_interval(DOOM_REPAINT_INTERVAL, self._repaint_tick)
+
+    def stop_repaint(self):
+        timer = self._repaint_timer
+        self._repaint_timer = None
+        if timer is not None:
+            timer.stop()
+
+    def _repaint_tick(self):
+        loader = getattr(self._app.org, "module_loader", None)
+        svc = loader.registry.get("doom") if loader is not None else None
+        running = False
+        if svc is not None:
+            with contextlib.suppress(Exception):
+                running = bool(svc.running())
+        if not running:
+            self.stop_repaint()
+            return
+        self.refresh()
+
     def key_command(self, cmd):
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
@@ -513,20 +543,35 @@ class DoomController:
             self.command(["start"])
         if not svc.running():
             return
-        # Human took manual control: cancel any queued auto-turn and run the
-        # command immediately so the player feels in charge.
+        # Human took manual control: the entity yields for the cooldown so
+        # the game is actually the human's — re-arming auto-play 300ms after
+        # every keypress made input feel pointless.
         self.cancel_auto()
+        self._manual_until = time.monotonic() + MANUAL_PLAY_COOLDOWN
         if cmd != "start":
             self.command([cmd])
-        # After the human moves, let the entity respond and take its turn.
-        if svc.running():
-            self._app.set_timer(0.3, self.take_turn)
+
+    def _turn_timers(self):
+        """Timers armed for the entity's auto-play turn. App.set_timer wraps
+        callbacks in partial(call_next, cb), so compare the wrapped target,
+        not the partial (and never with `is` on bound methods)."""
+        timers = []
+        for timer in getattr(self._app, "_timers", []):
+            # stop() cancels _task but the timer stays in the set until
+            # Textual reaps it — only count timers that can still fire.
+            if getattr(timer, "_task", None) is None:
+                continue
+            cb = getattr(timer, "_callback", None)
+            args = getattr(cb, "args", None)
+            target = args[0] if args else cb
+            if target == self.take_turn:
+                timers.append(timer)
+        return timers
 
     def cancel_auto(self):
         """Cancel pending auto-play timers so manual control wins."""
-        for timer in list(getattr(self._app, "_timers", [])):
-            if getattr(timer, "_callback", None) is self.take_turn:
-                timer.stop()
+        for timer in self._turn_timers():
+            timer.stop()
 
     def chat_command(self, text):
         """User chat during a game counts as direction; cancel auto-play
@@ -541,7 +586,10 @@ class DoomController:
             except Exception:  # noqa: BLE001
                 doom_running = False
         if doom_running:
+            # Chatting during a game is human takeover too: the entity
+            # yields for the cooldown instead of answering over the player.
             self.cancel_auto()
+            self._manual_until = time.monotonic() + MANUAL_PLAY_COOLDOWN
             command = doom_player_command(text)
             if command is not None:
                 self.command([command])
@@ -583,6 +631,13 @@ class DoomController:
         # next timer tick: cancel any queued turn.
         if args and args[0] == "stop":
             self.cancel_auto()
+        # Keep the overlay painting at game speed for exactly as long as a
+        # game is actually running.
+        with contextlib.suppress(Exception):
+            if svc.running():
+                self.start_repaint()
+            else:
+                self.stop_repaint()
         # Render into the DOOM overlay instead of the chat log.
         # Prefer the live colored frame (a Rich renderable — str() would
         # strip its styles); the dispatch result is the one-line status
@@ -673,6 +728,8 @@ class DoomController:
             return
         if self._app._responding or self._app._self_talking:
             return
+        if time.monotonic() < self._manual_until:
+            return  # the human is driving; the entity waits its turn
         # short delay so the UI is readable and human input can interleave
         self._app.set_timer(0.3, self.take_turn)
 
@@ -680,6 +737,10 @@ class DoomController:
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None
         if svc is None or not svc.running():
+            return
+        if time.monotonic() < self._manual_until:
+            # A human keypress landed while this generation was in flight:
+            # the move is stale and would fight the player's input.
             return
         # Mark this turn as in-flight so later ticks don't stack another one.
         self._app._responding = True

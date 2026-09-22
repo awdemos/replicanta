@@ -230,7 +230,10 @@ function init(ctx)
     game.ansi_frame = ""
     game.plain_frame = ""
     game.frame_count = 0
-    local argv = { bin, "-iwad", wad, "-scaling", "8", "-skill", tostring(arg) }
+    -- -warp 1 1 autostarts E1M1 (d_main.c sets autostart), skipping the
+    -- title screen and demo playback — without it the "game" is a demo
+    -- the user watches but cannot play, since keys only skip demos.
+    local argv = { bin, "-iwad", wad, "-scaling", "8", "-skill", tostring(arg), "-warp", "1", "1" }
     local extra = externals:doom_args()
     if extra ~= nil then
       for tok in string.gmatch(tostring(extra), "%S+") do

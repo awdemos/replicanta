@@ -237,6 +237,17 @@ def test_frame_keeps_all_rows_including_status_line(tmp_path, monkeypatch):
     doom.stop()
 
 
+def test_start_warps_straight_into_a_map(tmp_path, monkeypatch):
+    """Regression: the game must autostart E1M1 (-warp 1 1). Without it the
+    binary sits on the title screen and demo playback, where keys don't
+    control anything — they only skip demos, so it was never playable."""
+    loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
+    doom = loader.registry.get("doom")
+    doom.start()
+    assert _wait_for(lambda: "-warp 1 1" in doom.frame())
+    doom.stop()
+
+
 def test_module_events_declared(tmp_path, monkeypatch):
     loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
     hooks = loader.registry.get("hooks")
