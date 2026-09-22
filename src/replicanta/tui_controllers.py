@@ -477,7 +477,16 @@ class DoomController:
         if args and args[0] == "stop":
             self.cancel_auto()
         # Render into the dedicated DOOM pane instead of the chat log.
-        lines = str(result or "").splitlines()
+        # Prefer the live screen capture; the dispatch result is the
+        # one-line status when no frame is available.
+        text = ""
+        frame_fn = getattr(svc, "frame", None)
+        if callable(frame_fn):
+            with contextlib.suppress(Exception):
+                text = str(frame_fn() or "")
+        if not text:
+            text = str(result or "")
+        lines = text.splitlines()
         if lines:
             self._text = "\n".join(lines)
             doom = self._app._safe_query("#doom", Static)
@@ -507,11 +516,19 @@ class DoomController:
         svc = loader.registry.get("doom") if loader is not None else None
         if svc is None or not svc.running():
             return
-        try:
-            text = svc.status()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("doom refresh failed: %s", exc)
-            return
+        text = ""
+        frame_fn = getattr(svc, "frame", None)
+        if callable(frame_fn):
+            try:
+                text = str(frame_fn() or "")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("doom frame failed: %s", exc)
+        if not text:
+            try:
+                text = svc.status()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("doom refresh failed: %s", exc)
+                return
         if text != self._text:
             self._text = text
             doom = self._app._safe_query("#doom", Static)

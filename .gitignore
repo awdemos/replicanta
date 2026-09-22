@@ -41,3 +41,6 @@ groups.json
 kimi-export-*.md
 session-ses_*.md
 .worktrees/
+
+# doom-ascii external component (GPL-2.0, built locally)
+.deps/

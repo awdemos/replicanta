@@ -7,7 +7,7 @@ from pathlib import Path
 from lupa import lua_type
 
 from replicanta import config as project_config
-from replicanta import fly_brain, lua_sandbox, nano_doom, rdd, tendon_hand
+from replicanta import doom_ascii, fly_brain, lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,21 @@ class ServiceRegistry:
 
     def get(self, name):
         return self._services.get(name)
+
+    def shutdown(self):
+        """Stop every service that exposes a stop() (best-effort, idempotent).
+
+        ModuleLoader calls this before replacing the registry on reload, so
+        replaced services (the arm bridge's SSE/volition threads) actually
+        retire instead of leaking and competing with their replacements.
+        """
+        for name, service in list(self._services.items()):
+            stop = getattr(service, "stop", None)
+            if callable(stop):
+                try:
+                    stop()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("service %s failed to stop: %s", name, exc)
 
 
 class HookService:
@@ -219,6 +234,10 @@ class ModuleLoader:
 
     def load_all(self):
         """Discover, resolve, and initialize all enabled modules."""
+        # Retire the previous load's services first (arm SSE/volition threads,
+        # future stoppable bridges); otherwise each reload leaks a competing
+        # driver that keeps moving the hand with a stale Lua policy.
+        self.registry.shutdown()
         self.registry = ServiceRegistry()
         self.modules = {}
         self.warnings = []
@@ -285,7 +304,7 @@ class ModuleLoader:
         )
         self.registry.register(
             "doom",
-            nano_doom.DoomService(
+            doom_ascii.DoomAsciiService(
                 organism=self.organism,
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),

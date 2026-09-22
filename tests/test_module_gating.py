@@ -66,7 +66,13 @@ def test_disabled_fly_brain_and_doom_are_not_advertised(tmp_path):
     assert narration._doom_lines(snap) == []
 
 
-def test_enabled_doom_module_reports_game_state(tmp_path):
+def test_enabled_doom_module_reports_game_state(tmp_path, monkeypatch):
+    # The service runs the stub binary double: no C toolchain or WAD needed.
+    wad = tmp_path / "doom1.wad"
+    wad.write_bytes(b"PWAD fake")
+    monkeypatch.setenv("DOOM_ASCII_BIN", str(Path(__file__).parent / "fixtures" / "doom_ascii_stub.py"))
+    monkeypatch.setenv("DOOM_WAD", str(wad))
+    monkeypatch.setenv("DOOM_ASCII_ARGS", "--interval 0.02")
     org = _organism(tmp_path)
     loader = _loader(tmp_path, ["base", "nano-doom"])
     org.module_loader = loader
@@ -74,4 +80,4 @@ def test_enabled_doom_module_reports_game_state(tmp_path):
 
     snap = narration.state_snapshot(org)
     assert snap["doom"] is True
-    assert "hp=" in snap["doom_status"]
+    assert "doom-ascii" in snap["doom_status"]

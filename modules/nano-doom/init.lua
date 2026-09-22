@@ -91,6 +91,11 @@ function init(ctx)
     return true
   end
 
+  function api.frame()
+    local ok, txt = pcall(function() return game:frame() end)
+    return ok and txt or ""
+  end
+
   function api.command(text)
     local cmd = tostring(text or "")
     if cmd == "" then
