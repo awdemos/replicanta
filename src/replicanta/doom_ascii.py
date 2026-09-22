@@ -124,13 +124,14 @@ def _find_binary() -> str | None:
         return env
     root = Path(__file__).resolve().parent.parent.parent
     matches = sorted(
-        glob.glob(str(root / ".deps" / "doom-ascii" / "_*" / "game" / "doom_ascii")),
+        glob.glob(str(root / ".deps" / "doom-ascii" / "_*" / "game" / "doom_ascii"))
+        + glob.glob(str(root / ".deps" / "doom-ascii" / "_*" / "game" / "doom-ascii")),
         key=os.path.getmtime,
     )
     for candidate in reversed(matches):
         if os.access(candidate, os.X_OK):
             return candidate
-    return shutil.which("doom_ascii")
+    return shutil.which("doom_ascii") or shutil.which("doom-ascii")
 
 
 def _find_wad() -> str | None:

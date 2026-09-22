@@ -15,7 +15,12 @@ WAD_SIZE=4196020  # shareware doom1.wad, bytes
 mkdir -p "$DEPS"
 
 # -- 1. binary ---------------------------------------------------------------
-BIN="$(find "$DEPS/doom-ascii" -path '*/game/doom_ascii' -type f 2>/dev/null | head -1 || true)"
+# v0.3.2+ names the binary doom-ascii; older docs said doom_ascii. Find both.
+find_bin() {
+    find "$DEPS/doom-ascii" \( -name doom_ascii -o -name doom-ascii \) -type f \
+        -path '*/game/*' 2>/dev/null | head -1 || true
+}
+BIN="$(find_bin)"
 if [ -z "${BIN}" ]; then
     if ! command -v cc >/dev/null 2>&1 || ! command -v make >/dev/null 2>&1; then
         echo "error: need a C compiler and make to build doom-ascii" >&2
@@ -26,7 +31,7 @@ if [ -z "${BIN}" ]; then
     git clone --depth 1 "$REPO_URL" "$DEPS/doom-ascii"
     echo "== building (make)"
     make -C "$DEPS/doom-ascii"
-    BIN="$(find "$DEPS/doom-ascii" -path '*/game/doom_ascii' -type f | head -1)"
+    BIN="$(find_bin)"
 fi
 [ -x "$BIN" ] || { echo "error: build finished but no doom_ascii binary found" >&2; exit 1; }
 echo "binary: $BIN"
@@ -38,8 +43,7 @@ if [ ! -s "$WAD" ] || [ "$(stat -c%s "$WAD")" != "$WAD_SIZE" ]; then
     rm -f "$WAD"
     fetch=0
     for url in \
-        "https://distro.ibiblio.org/slitaz/sources/packages/doom1.wad" \
-        "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip" \
+        "https://raw.githubusercontent.com/Akbar30Bill/DOOM_wads/master/doom1.wad" \
         ; do
         echo "   trying $url"
         if curl -fL --connect-timeout 10 -o "$WAD.download" "$url" 2>/dev/null; then
@@ -61,6 +65,7 @@ if [ ! -s "$WAD" ] || [ "$(stat -c%s "$WAD")" != "$WAD_SIZE" ]; then
         echo "error: could not download the shareware WAD from the mirror list." >&2
         echo "       place a doom1.wad (exactly $WAD_SIZE bytes) at $WAD" >&2
         echo "       or any .wad under ~/.local/share/replicanta/ and re-run." >&2
+        echo "       (Freedoom works too: https://github.com/freedoom/freedoom)" >&2
         exit 1
     fi
 fi
