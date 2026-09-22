@@ -5,12 +5,16 @@ adversarial chamber instead of a single solo model call: two proposers
 independently draft a candidate, an adversarial critic attacks both, and
 two voters pick a majority winner (or, when the vote deadlocks, the
 critic's own preference tips the tie, and a random draw decides a truly
-indifferent deadlock). The per-round temperature jitters so the debate
-is never two identical passes, and in high chaos the organism may inject
-a rogue thought of its own (never for structured tasks like reflections,
-whose output contract a rogue candidate would break). Any ollama failure
-at any stage falls back to the local deterministic answers, so the
-organism always has a voice."""
+indifferent deadlock). When the local arbiter typed-decision server is
+configured (ARBITER_URL), the two voter calls collapse into one batched
+typed decision — choice "which candidate responds better" plus noul
+"neither is acceptable" — falling back to the voter path on any arbiter
+failure or low-confidence answer. The per-round temperature jitters so
+the debate is never two identical passes, and in high chaos the organism
+may inject a rogue thought of its own (never for structured tasks like
+reflections, whose output contract a rogue candidate would break). Any
+ollama failure at any stage falls back to the local deterministic
+answers, so the organism always has a voice."""
 
 import logging
 import json
@@ -20,7 +24,7 @@ import re
 import urllib.error
 from typing import NamedTuple
 
-from replicanta import activity, llmclient, narration
+from replicanta import activity, llmclient, narration, typeddecisions
 from replicanta.llmclient import clean_candidate as _clean_candidate
 
 logger = logging.getLogger(__name__)
@@ -66,6 +70,14 @@ TEMP_MAX = 0.85  # upper bound
 # truncated verbose drafts before the command ever arrived, leaving the
 # turn with no move (the model kept 'shooting' into a silent no-op).
 QUICK_TAKE_MAX_TOKENS = 160
+
+# arbiter typed-decision vote (see _arbiter_verdict): the winning choice is
+# trusted from its probability, the neither candidate statement refuses
+# both, and anything short of the bar defers to the LLM voter path
+_ARBITER_CHOICE_QID = "better"
+_ARBITER_NEITHER_QID = "neither"
+ARBITER_VOTE_MIN_PROBABILITY = 0.5
+ARBITER_NEITHER_MIN_NOUL = 0.8
 
 
 class NoUsableCandidateError(ValueError):
@@ -313,6 +325,14 @@ class ThoughtArena:
         if len(drafts) == 1:
             return drafts[0]
         critique = self._generate(self._critique(base, drafts), model, timeout, temperature, org=org)
+        verdict = self._arbiter_verdict(base, drafts, critique)
+        if verdict == "neither":
+            # both candidates fail — the same refusal the arena raises when
+            # no usable draft survives (a content failure, so the voice is
+            # not marked offline and the caller's fallback answers)
+            raise NoUsableCandidateError("arbiter rejected both candidates")
+        if verdict in ("a", "b"):
+            return drafts[0] if verdict == "a" else drafts[1]
         votes = [
             self._generate(self._vote(base, drafts, critique), model, timeout, temperature, org=org) for _ in range(2)
         ]
@@ -379,6 +399,42 @@ class ThoughtArena:
             return 1
         if _SECOND_FIRST_RE.search(text):
             return 2
+        return None
+
+    def _arbiter_verdict(self, base, drafts, critique):
+        """One typed-decision pass replaces the two voter calls: a choice
+        over the candidates plus a noul that both are unacceptable.
+
+        Returns "a"/"b" to award the debate, "neither" to refuse both, or
+        None to defer to the LLM voter path — arbiter unconfigured, arbiter
+        error, a missing/malformed answer, or a winning choice whose
+        probability does not clear ARBITER_VOTE_MIN_PROBABILITY.
+        """
+        if not typeddecisions.enabled():
+            return None
+        state = (
+            base
+            + f"\n\nCandidate A (the first candidate):\n{drafts[0]}"
+            + f"\n\nCandidate B (the second candidate):\n{drafts[1]}"
+            + f"\n\nCritique of both candidates:\n{critique}"
+        )
+        answers = typeddecisions.decide(
+            state,
+            {
+                _ARBITER_CHOICE_QID: typeddecisions.q_choice(
+                    "Which candidate better responds to the task?",
+                    {"a": "the first candidate (Candidate A)", "b": "the second candidate (Candidate B)"},
+                ),
+                _ARBITER_NEITHER_QID: typeddecisions.q_noul("Neither candidate is acceptable; both fail the task."),
+            },
+        )
+        if answers is None:
+            return None
+        if (typeddecisions.noul_of(answers, _ARBITER_NEITHER_QID) or 0.0) >= ARBITER_NEITHER_MIN_NOUL:
+            return "neither"
+        picked = typeddecisions.choice_of(answers, _ARBITER_CHOICE_QID)
+        if picked is not None and picked[1] >= ARBITER_VOTE_MIN_PROBABILITY and picked[0] in ("a", "b"):
+            return picked[0]
         return None
 
     def _pick(self, drafts, votes, critique):

@@ -6,14 +6,26 @@ registry is versioned so the last applied entry can be reverted.
 
 Consumers (learning, narration, sentiment) read the module-level registry
 via active_entries(); it is (re)loaded by load_global() — on organism
-startup and after every approve/reject/revert. Pure module: no textual."""
+startup and after every approve/reject/revert. Pure module: no textual.
+
+When the local arbiter typed-decision server is configured (ARBITER_URL),
+applying a patch is preceded by one batched typed decision scoring its
+risk (a score over trivial..critical plus a noul that it could break core
+functionality). A blocked patch is refused, a medium-or-higher patch
+waits for the explicit /approve even when auto-apply is on, and any
+arbiter failure falls back to the current apply-what-was-approved
+behavior. See _patch_risk."""
 
 import json
+import logging
 import re
 import threading
 from pathlib import Path
 
 from replicanta.fileutil import atomic_write_text
+from replicanta import typeddecisions
+
+logger = logging.getLogger(__name__)
 
 _EMPTY = {"version": 0, "entries": [], "pending": None}
 
@@ -32,8 +44,55 @@ _MAX_PATTERN_LEN = 200
 _NESTED_QUANTIFIER = re.compile(r"\([^()]*[+*][^()]*\)\s*[+*{]")
 
 
+# -- arbiter risk gate ----------------------------------------------------------
+#
+# One batched typed decision scores a patch before it is applied: a score
+# over the ordered risk levels (the answer is the expectation, so the band
+# edges sit at the half-integers between levels) plus a noul that the patch
+# could break core functionality. "blocked" refuses the patch, "confirm"
+# keeps it behind the explicit /approve even when auto-apply is on, "ok"
+# applies. None means arbiter is unconfigured or failed — the caller keeps
+# its current behavior. The gate runs inside the registry lock; a down
+# arbiter only stalls the first mutation (the client cool-down suppresses
+# further attempts for DOWNTIME_SECONDS).
+
+_RISK_LEVELS = ["trivial", "low", "medium", "high", "critical"]
+_RISK_CONFIRM_AT = 1.5  # expectation at or above the medium band
+_RISK_BLOCK_AT = 3.5  # expectation at or above the critical band
+_RISK_BREAK_NOUL = 0.8
+
+
+def _patch_risk(entry):
+    """'blocked' | 'confirm' | 'ok', or None when arbiter cannot say."""
+    if not typeddecisions.enabled():
+        return None
+    state = "Proposed self-modification patch for the organism:\n" + json.dumps(entry, sort_keys=True)
+    answers = typeddecisions.decide(
+        state,
+        {
+            "risk": typeddecisions.q_score(
+                "How risky is applying this self-modification patch to the organism?", _RISK_LEVELS
+            ),
+            "breaks": typeddecisions.q_noul("This patch could break core functionality of the organism."),
+        },
+    )
+    if answers is None:
+        return None
+    if (typeddecisions.noul_of(answers, "breaks") or 0.0) >= _RISK_BREAK_NOUL:
+        return "blocked"
+    score = typeddecisions.score_of(answers, "risk")
+    if score is None:
+        return None
+    if score >= _RISK_BLOCK_AT:
+        return "blocked"
+    if score >= _RISK_CONFIRM_AT:
+        return "confirm"
+    return "ok"
+
+
 def validate(entry):
     """Check a proposed entry. Returns (ok, reason)."""
+
     kind = entry.get("kind")
     if kind == "pattern":
         pattern = entry.get("regex", "")
@@ -153,6 +212,9 @@ class ExtensionRegistry:
         """Stage an entry as pending, or apply it immediately if auto_apply is True.
 
         Returns the applied entry when auto_apply=True, otherwise None.
+        With arbiter configured, auto-apply still stages the patch when the
+        risk gate says it needs confirmation, and leaves a blocked patch
+        pending (visible, rejectable, and re-gated by approve).
         """
         ok, reason = validate(entry)
         if not ok:
@@ -163,14 +225,29 @@ class ExtensionRegistry:
             _write(path, reg)
             self.load_global(path)
             if auto_apply:
+                risk = _patch_risk(entry)
+                if risk == "confirm":
+                    logger.info(
+                        "patch (%s) scored medium+ risk; staged for /approve instead of auto-applying",
+                        entry.get("kind"),
+                    )
+                    return None
+                if risk == "blocked":
+                    logger.warning(
+                        "patch (%s) scored critical risk; left pending — /approve will refuse it",
+                        entry.get("kind"),
+                    )
+                    return None
                 return self.approve(path)
         return None
 
     def approve(self, path):
         """Apply the pending entry: append to entries, bump version, reload.
 
-        Returns the applied entry, or None when nothing is pending or the
-        pending entry fails validation. Invalid pending entries are cleared.
+        Returns the applied entry, or None when nothing is pending, the
+        pending entry fails validation, or the arbiter risk gate blocks it
+        (a blocked patch is cleared — refused). Invalid pending entries are
+        cleared.
         """
         with self._lock:
             reg = _read(path)
@@ -182,6 +259,12 @@ class ExtensionRegistry:
                 reg["pending"] = None
                 _write(path, reg)
                 self.load_global(path)
+                return None
+            if _patch_risk(entry) == "blocked":
+                reg["pending"] = None
+                _write(path, reg)
+                self.load_global(path)
+                logger.warning("patch (%s) blocked by risk gate; refusing to apply", entry.get("kind"))
                 return None
             reg["entries"].append(entry)
             reg["pending"] = None

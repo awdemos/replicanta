@@ -496,3 +496,107 @@ def test_clean_candidate_keeps_genuine_first_person():
 
     raw = "I asked myself about the rain, and I still have no answer."
     assert _clean_candidate(raw) == raw
+
+
+# -- arbiter typed-decision vote ---------------------------------------------------
+
+
+def _arbiter_answers(choice_name="a", choice_prob=0.8, neither=0.1):
+    other = "b" if choice_name == "a" else "a"
+    return {
+        "better": {
+            "type": "choice",
+            "choice": choice_name,
+            "probabilities": {choice_name: choice_prob, other: round(1.0 - choice_prob, 4)},
+            "confidence": 0.9,
+        },
+        "neither": {"type": "noul", "noul": neither, "confidence": 0.9},
+    }
+
+
+def _stub_arbiter(monkeypatch, answers):
+    """Route the arena's typed-decision vote through a stubbed decide()."""
+    calls = []
+    monkeypatch.setenv("ARBITER_URL", "http://localhost:8010")
+
+    def fake_decide(state, questions):
+        calls.append((state, questions))
+        return answers
+
+    monkeypatch.setattr("replicanta.typeddecisions.decide", fake_decide)
+    return calls
+
+
+def test_arbiter_picks_first_candidate(org, monkeypatch):
+    """A confident arbiter choice ends the debate after the critique: two
+    proposer calls + one critic, no voter calls."""
+    calls = _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            "thought 2 is the weaker",
+        ],
+    )
+    arbiter_calls = _stub_arbiter(monkeypatch, _arbiter_answers("a", 0.8))
+    assert ThoughtArena().emerge(org) == "fur and paws"
+    assert len(calls) == 3
+    ((state, questions),) = arbiter_calls
+    assert "Candidate A (the first candidate):" in state and "fur and paws" in state
+    assert "Candidate B (the second candidate):" in state and "fur and quiet" in state
+    assert set(questions) == {"better", "neither"}
+
+
+def test_arbiter_picks_second_candidate(org, monkeypatch):
+    _scripted(monkeypatch, ["fur and paws", "fur and quiet", "both fine"])
+    _stub_arbiter(monkeypatch, _arbiter_answers("b", 0.9))
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+
+
+def test_arbiter_low_confidence_falls_back_to_voters(org, monkeypatch):
+    """A winning choice under the probability bar does not decide the
+    debate; the existing voter path runs instead."""
+    calls = _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            "both fine",
+            "VOTE: 2",
+            "VOTE: 2",
+        ],
+    )
+    _stub_arbiter(monkeypatch, _arbiter_answers("a", 0.4))
+    assert ThoughtArena().emerge(org) == "fur and quiet"
+    assert len(calls) == 5
+
+
+def test_arbiter_neither_refuses_both_candidates(org, monkeypatch):
+    """noul(neither) over the bar triggers the arena's both-candidates-fail
+    path: the debate fails as a content failure, the fallback answers, and
+    the voice is not marked offline."""
+    _scripted(monkeypatch, ["fur and paws", "fur and quiet", "both fine"])
+    _stub_arbiter(monkeypatch, _arbiter_answers("a", 0.9, neither=0.95))
+    text = ThoughtArena().emerge(org)
+    assert text == ""  # wake-state fallback is intentionally quiet
+    from replicanta import llmclient
+
+    assert llmclient.voice_online() is not False
+
+
+def test_arbiter_down_falls_back_to_voters(org, monkeypatch):
+    """decide() -> None (server down) keeps the exact current voter path."""
+    calls = _scripted(
+        monkeypatch,
+        [
+            "fur and paws",
+            "fur and quiet",
+            "both fine",
+            "VOTE: 1",
+            "VOTE: 1",
+        ],
+    )
+    monkeypatch.setenv("ARBITER_URL", "http://localhost:8010")
+    monkeypatch.setattr("replicanta.typeddecisions.decide", lambda state, questions: None)
+    assert ThoughtArena().emerge(org) == "fur and paws"
+    assert len(calls) == 5

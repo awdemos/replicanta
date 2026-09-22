@@ -296,3 +296,87 @@ def test_registry_with_missing_fields_does_not_crash_consumers(tmp_path):
     assert extensions.approve(path) is None
     extensions.propose(path, {"kind": "seed", "text": "a quiet thought"}, auto_apply=True)
     assert extensions.active_entries("seed")[0]["text"] == "a quiet thought"
+
+
+# -- arbiter patch-risk gate --------------------------------------------------------
+#
+# With ARBITER_URL set, applying a patch is preceded by one batched typed
+# decision (risk score + could-break noul). Bands: expectation >= 3.5 is
+# critical (blocked), >= 1.5 is medium+ (stays behind explicit /approve
+# even when auto-apply is on). Any failure falls back to current behavior.
+
+
+def _risk_answers(score=0.5, breaks=0.1):
+    return {
+        "risk": {"type": "score", "score": score, "probabilities": {}, "confidence": 0.9},
+        "breaks": {"type": "noul", "noul": breaks, "confidence": 0.9},
+    }
+
+
+def _gate_env(monkeypatch, answers):
+    monkeypatch.setenv("ARBITER_URL", "http://localhost:8010")
+    monkeypatch.setattr("replicanta.typeddecisions.decide", lambda state, questions: answers)
+
+
+def test_risk_gate_blocks_critical_patch(tmp_path, monkeypatch):
+    _gate_env(monkeypatch, _risk_answers(score=3.9))
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is None
+    assert extensions.active_entries("pattern") == []  # not applied
+    assert extensions.pending() is not None  # left visible for /reject
+    # even an explicit /approve refuses and clears the blocked patch
+    assert extensions.approve(path) is None
+    assert extensions.active_entries("pattern") == []
+    assert extensions.pending() is None
+
+
+def test_risk_gate_blocks_on_break_noul_even_at_low_score(tmp_path, monkeypatch):
+    _gate_env(monkeypatch, _risk_answers(score=0.5, breaks=0.9))
+    path = _path(tmp_path)
+    assert extensions.propose(path, _good_pattern(), auto_apply=True) is None
+    assert extensions.active_entries("pattern") == []
+
+
+def test_risk_gate_confirms_medium_patch_behind_approve(tmp_path, monkeypatch):
+    """Medium risk: auto-apply stages instead of applying, and the existing
+    /approve flow applies it (the user's confirmation is the gate)."""
+    _gate_env(monkeypatch, _risk_answers(score=2.2))
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is None
+    assert extensions.active_entries("pattern") == []
+    assert extensions.pending() is not None
+    entry = extensions.approve(path)
+    assert entry is not None and entry["kind"] == "pattern"
+    assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
+
+
+def test_risk_gate_allows_low_risk_patch(tmp_path, monkeypatch):
+    _gate_env(monkeypatch, _risk_answers(score=0.9))
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is not None
+    assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
+
+
+def test_risk_gate_silent_when_arbiter_down(tmp_path, monkeypatch):
+    """decide() -> None keeps the current behavior: auto-apply applies."""
+    _gate_env(monkeypatch, None)
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is not None
+    assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
+
+
+def test_risk_gate_silent_when_arbiter_unconfigured(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARBITER_URL", raising=False)
+
+    def forbidden_decide(state, questions):
+        raise AssertionError("risk gate must not run without ARBITER_URL")
+
+    monkeypatch.setattr("replicanta.typeddecisions.decide", forbidden_decide)
+    path = _path(tmp_path)
+    applied = extensions.propose(path, _good_pattern(), auto_apply=True)
+    assert applied is not None
+    assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
