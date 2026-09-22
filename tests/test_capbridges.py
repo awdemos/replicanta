@@ -161,7 +161,9 @@ def test_fs_rejects_escape(tmp_path):
 
 def test_json_round_trip_and_errors():
     jb = capbridges.JsonBridge()
-    assert jb.parse('{"a": [1, 2], "b": "x"}') == {"a": [1, 2], "b": "x"}
+    parsed = jb.parse('{"a": [1, 2], "b": "x"}')
+    assert parsed["a"] == [1, 2]
+    assert parsed.b == "x"
     assert '"a"' in jb.encode({"a": [1, 2]})
     with pytest.raises(ValueError, match="invalid json"):
         jb.parse("{nope")
@@ -186,9 +188,7 @@ def test_module_ctx_exposes_bridges(tmp_path):
         "  end)\n"
         "end\n"
     )
-    loader = ModuleLoader(
-        tmp_path / "modules", organism=None, modules_config={"enabled": ["base", "probemod"]}
-    )
+    loader = ModuleLoader(tmp_path / "modules", organism=None, modules_config={"enabled": ["base", "probemod"]})
     loader.load_all()
     assert "probemod" in loader.modules
     out = loader.registry.get("commands").dispatch("/probe", [])

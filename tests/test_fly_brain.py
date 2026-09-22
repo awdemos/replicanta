@@ -1,15 +1,19 @@
-"""Service- and module-level tests for the fly-brain capability bridge."""
+"""Module-level tests for the pure-Lua fly-brain capability.
 
-import threading
+The module spawns the (fake) wetware CLI through ctx.process and parses
+reports with ctx.json — no Python service involved. The fake binaries are
+committed fixtures written into tmp dirs, selected via WETWARE_BIN.
+"""
+
+import shutil
 import time
 from pathlib import Path
 
 import pytest
 
-from replicanta.fly_brain import FlyBrainService
 from replicanta.modules import ModuleLoader
 
-REPO_MODULES = Path(__file__).parent.parent / "modules"
+MODULES_SRC = Path(__file__).parent.parent / "modules"
 
 FAKE_BIN = """#!/usr/bin/env python3
 import json, sys
@@ -29,14 +33,6 @@ elif has("bank"):
         "policy": "greedy", "entries": 0,
     }))
 elif has("run"):
-    print(json.dumps({
-        "task": "digits", "trials": 16, "best_config": "sr=0.9",
-        "median_val": 0.95, "seed_spread": 0.01, "default_median_val": 0.92,
-        "test": 0.975, "default_test": 0.9278, "improvement": 0.0472,
-        "bank": "/tmp/fake-bank.jsonl",
-        "bank_entries": 2, "events": 100,
-    }))
-elif has("optimize"):
     print(json.dumps({
         "task": "digits", "trials": 16, "best_config": "sr=0.9",
         "median_val": 0.95, "seed_spread": 0.01, "default_median_val": 0.92,
@@ -68,195 +64,20 @@ def _write_bin(tmp_path, name, body):
     return str(path)
 
 
-@pytest.fixture
-def fake(tmp_path):
-    return FlyBrainService(binary=_write_bin(tmp_path, "wetware", FAKE_BIN))
+def _wait_for(predicate, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
 
 
-@pytest.fixture
-def failing(tmp_path):
-    return FlyBrainService(binary=_write_bin(tmp_path, "wetware-fail", FAIL_BIN))
-
-
-# -- binary resolution ---------------------------------------------------------
-
-
-def test_available_reports_resolved_path(fake, tmp_path):
-    assert fake.available() is True
-    assert fake.path() == str(tmp_path / "wetware")
-
-
-def test_missing_binary_is_unavailable(tmp_path):
-    svc = FlyBrainService(binary=str(tmp_path / "nope"))
-    assert svc.available() is False
-    assert svc.path() is None
-    with pytest.raises(RuntimeError, match="wetware binary not found"):
-        svc.info()
-    assert "no binary" in svc.status()
-
-
-# -- sync API -------------------------------------------------------------------
-
-
-def test_info_returns_dict_proxy(fake):
-    info = fake.info()
-    assert info.neurons == 600
-    assert info.source == "synthetic sample"
-
-
-def test_run_task_sync_parses_report_and_summarizes(fake):
-    report = fake.run_task(wait=True)
-    assert report.task == "digits"
-    assert report.improvement == pytest.approx(0.0472)
-    last = fake.last()
-    assert last.ok is True
-    assert "digits done" in last.text
-    assert "test 0.9750" in last.text
-
-
-def test_run_task_validates_task(fake):
-    with pytest.raises(ValueError, match="unknown task"):
-        fake.run_task("chess", wait=True)
-
-
-def test_optimize_alias_delegates_to_run_task(fake):
-    report = fake.optimize(wait=True)
-    assert report.task == "digits"
-    assert report.improvement == pytest.approx(0.0472)
-
-
-def test_adapt_and_bank_work_with_rsi_wetware_cli(fake):
-    # The rsi-wetware-rs binary supports adapt and bank.
-    report = fake.adapt(wait=True)
-    assert report.l4_gated_val == pytest.approx(0.88)
-    bank = fake.bank()
-    assert bank.policy == "greedy"
-
-
-def test_failure_raises_with_stderr_tail(failing):
-    with pytest.raises(RuntimeError, match="connectome cache corrupted"):
-        failing.run_task(wait=True)
-
-
-def test_failure_summary_delivered_async(failing):
-    delivered = []
-    done = threading.Event()
-    failing.run_task(on_done=lambda text: (delivered.append(text), done.set()))
-    assert done.wait(5.0)
-    assert delivered[0].startswith("fly brain: run failed:")
-    assert "connectome cache corrupted" in delivered[0]
-    assert failing.last().ok is False
-
-
-# -- async API -------------------------------------------------------------------
-
-
-def test_run_task_async_delivers_summary(fake):
-    delivered = []
-    done = threading.Event()
-    status = fake.run_task(on_done=lambda text: (delivered.append(text), done.set()))
-    assert status["ok"] is True
-    assert status["async"] is True
-    assert status.kind == "run"
-    assert done.wait(5.0)
-    assert "digits done" in delivered[0]
-    assert fake.running() is False
-
-
-def test_second_async_run_rejected_while_running(fake):
-    fake._running = True  # simulate an in-flight run
-    with pytest.raises(RuntimeError, match="already running"):
-        fake.run_task(on_done=lambda _text: None)
-
-
-def test_async_callback_runs_under_lua_lock(fake):
-    delivered = []
-    done = threading.Event()
-    lock = threading.Lock()
-    svc = FlyBrainService(binary=fake._binary, lua_lock=lock)
-    svc.run_task(on_done=lambda text: (delivered.append(lock.locked()), done.set()))
-    assert done.wait(5.0)
-    assert delivered == [True]  # callback held the lock while running
-
-
-# -- module integration -----------------------------------------------------------
-
-
-def _load_fly_brain(tmp_path, logs):
-    import shutil
-
-    src = REPO_MODULES
-    if src.is_dir():
-        shutil.copytree(src, tmp_path / "modules", dirs_exist_ok=True)
-    loader = ModuleLoader(
-        tmp_path / "modules",
-        organism=None,
-        modules_config={"enabled": ["base", "fly-brain"]},
-        emit=logs.append,
-    )
-    loader.load_all()
-    return loader
-
-
-def test_fly_brain_module_loads_and_registers_brain(tmp_path):
-    loader = _load_fly_brain(tmp_path, [])
-    assert "fly-brain" in loader.modules, loader.warnings
-    brain = loader.registry.get("brain")
-    assert brain is not None
-    status = brain.status()
-    assert "fly brain bridge:" in status
-
-
-def test_fly_brain_utterance_dispatch_logs(tmp_path):
-    logs = []
-    loader = _load_fly_brain(tmp_path, logs)
-    hooks = loader.registry.get("hooks")
-    hooks.emit("utterance", 'brain.optimize("chess")')  # unknown task: graceful failure log
-    assert any("fly-brain: dispatched" in m for m in logs)
-    assert any("could not start" in m for m in logs)
-
-
-def test_fly_brain_slash_command_status(tmp_path):
-    loader = _load_fly_brain(tmp_path, [])
-    commands = loader.registry.get("commands")
-    out = commands.dispatch("/brain", ["status"])
-    assert "fly brain bridge:" in out
-
-
-def test_fly_brain_events_declared(tmp_path):
-    loader = _load_fly_brain(tmp_path, [])
-    events = loader.registry.get("hooks")
-    assert "flybrain_done" in events.known()
-    assert "flybrain_error" in events.known()
-
-
-def test_completion_event_reaches_bus(tmp_path):
-    logs = []
-    loader = _load_fly_brain(tmp_path, logs)
-    events = loader.registry.get("hooks")
-    got = []
-    events.on("flybrain_done", lambda text: got.append(text))
-    svc = loader.registry.get("flybrain")
-    svc._binary = _write_bin(tmp_path, "wetware", FAKE_BIN)
-    brain = loader.registry.get("brain")
-    assert brain.optimize("digits") is True
-    deadline = time.time() + 10.0
-    while time.time() < deadline and not got:
-        time.sleep(0.05)
-    assert got, f"no flybrain_done event; logs={logs}"
-    assert "digits" in got[0]
-    assert "done" in got[0]
-
-
-# -- module integration: results reach the organism --------------------------------
-
-
-def _module_loader(tmp_path, enabled, organism=None):
-    import shutil
-
+def _load(tmp_path, monkeypatch, enabled=None, binary=None, organism=None):
+    monkeypatch.setenv("WETWARE_BIN", binary)
     target = tmp_path / "modules"
-    shutil.copytree(REPO_MODULES, target)
-    loader = ModuleLoader(target, organism=organism, modules_config={"enabled": enabled})
+    shutil.copytree(MODULES_SRC, target)
+    loader = ModuleLoader(target, organism=organism, modules_config={"enabled": enabled or ["base", "fly-brain"]})
     loader.load_all()
     return loader
 
@@ -272,40 +93,137 @@ def _organism(tmp_path):
     return org
 
 
-def test_module_run_result_is_remembered(tmp_path, monkeypatch):
-    """A finished run must land in the organism's memory, not just the log."""
+# -- availability ----------------------------------------------------------------
 
-    def fake_run(self, task="digits", sample=False, wait=False, on_done=None):
-        if on_done is not None:
-            on_done("fly brain: digits improved: test 97.5% (fake)")
-        return True
 
-    monkeypatch.setattr(FlyBrainService, "run_task", fake_run)
-    org = _organism(tmp_path / "o")
-    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"], organism=org)
+def test_status_reports_ready_with_binary(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    assert brain.available() is True
+    status = brain.status()
+    assert "ready" in status
+    assert bin_path in status
+
+
+def test_status_reports_missing_binary(tmp_path, monkeypatch):
+    monkeypatch.delenv("WETWARE_BIN", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))  # keep the ~/code search empty
+    target = tmp_path / "modules"
+    shutil.copytree(MODULES_SRC, target)
+    loader = ModuleLoader(target, organism=None, modules_config={"enabled": ["base", "fly-brain"]})
+    loader.load_all()
+    brain = loader.registry.get("brain")
+    assert brain.available() is False
+    assert "no binary" in brain.status()
+
+
+# -- runs -------------------------------------------------------------------------
+
+
+def test_sync_run_returns_report_and_sets_last(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    report = brain.run("digits", True)
+    assert report.task == "digits"
+    last = brain.last()
+    assert last.ok is True
+    assert "97.50" in last.text or "0.9750" in last.text
+    assert "bank 2 entries" in last.text
+
+
+def test_sync_adapt_summary(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    report = brain.adapt(True)
+    assert report.l4_gated_val == 0.88
+    assert "gated 0.8800 vs naive 0.8200" in brain.last().text
+
+
+def test_unknown_task_raises_lua_catchable(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    with pytest.raises(Exception, match="unknown task"):
+        brain.run("chess", True)
+
+
+def test_async_run_delivers_summary_and_events(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    seen = []
     hooks = loader.registry.get("hooks")
-    hooks.emit("utterance", 'brain.run("digits")')
+    hooks.on("flybrain_done", seen.append)
+    assert brain.run("digits") is True
+    assert brain.running() is True
+    assert _wait_for(lambda: len(seen) == 1)
+    assert "digits done" in seen[0]
+    assert brain.running() is False
+
+
+def test_failure_delivery_marks_error(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware-fail", FAIL_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
+    brain = loader.registry.get("brain")
+    seen = []
+    loader.registry.get("hooks").on("flybrain_error", seen.append)
+    assert brain.run("digits") is True
+    assert _wait_for(lambda: len(seen) == 1)
+    assert "failed" in seen[0]
+    assert "connectome cache corrupted" in seen[0]
+    assert brain.last().ok is False
+
+
+# -- persistence into the organism --------------------------------------------------
+
+
+def test_run_result_is_remembered(tmp_path, monkeypatch):
+    """A finished run must land in the organism's memory, not just the log."""
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    org = _organism(tmp_path / "o")
+    loader = _load(tmp_path, monkeypatch, binary=bin_path, organism=org)
+    brain = loader.registry.get("brain")
+    brain.run("digits", True)
     assert any(m["kind"] == "flybrain" for m in org.store.memory)
-    assert any("97.5%" in m["text"] for m in org.store.memory)
+    assert any("0.9750" in m["text"] for m in org.store.memory)
 
 
-def test_module_brain_last_command(tmp_path):
-    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"])
+def test_utterance_dispatches_brain_run(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    org = _organism(tmp_path / "o")
+    loader = _load(tmp_path, monkeypatch, binary=bin_path, organism=org)
+    hooks = loader.registry.get("hooks")
+    hooks.emit("utterance", 'brain.optimize("digits")')
+    assert _wait_for(lambda: any(m["kind"] == "flybrain" for m in org.store.memory))
+
+
+# -- commands and snapshot -----------------------------------------------------------
+
+
+def test_brain_bank_command(tmp_path, monkeypatch):
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path)
     commands = loader.registry.get("commands")
+    assert "policy: greedy" in commands.dispatch("/brain", ["bank"])
     assert "no finished runs" in commands.dispatch("/brain", ["last"])
-    loader.registry.get("flybrain")._last = (True, "digits improved: test 97.5%", None)
-    assert "97.5%" in commands.dispatch("/brain", ["last"])
+    loader.registry.get("brain").run("digits", True)
+    assert "0.9750" in commands.dispatch("/brain", ["last"])
 
 
 def test_snapshot_includes_last_run_summary(tmp_path, monkeypatch):
     from replicanta import narration
 
+    bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
     org = _organism(tmp_path / "o")
-    loader = _module_loader(tmp_path / "m", ["base", "fly-brain"], organism=org)
+    loader = _load(tmp_path, monkeypatch, binary=bin_path, organism=org)
     org.module_loader = loader
-    monkeypatch.setattr(FlyBrainService, "available", lambda self: True)
-    loader.registry.get("flybrain")._last = (True, "digits improved: test 97.5%", None)
+    brain = loader.registry.get("brain")
+    brain.run("digits", True)
 
     snap = narration.state_snapshot(org)
-    assert snap["brain_last"] == "digits improved: test 97.5%"
-    assert any("Last run: digits improved" in line for line in narration._brain_lines(snap))
+    assert snap["flybrain"] is True
+    assert "0.9750" in snap["brain_last"]
+    assert any("Last run: fly brain: digits done" in line for line in narration._brain_lines(snap))

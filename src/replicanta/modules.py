@@ -9,7 +9,7 @@ from pathlib import Path
 from lupa import lua_type
 
 from replicanta import capbridges, config as project_config, externals
-from replicanta import fly_brain, lua_sandbox, rdd, tendon_hand
+from replicanta import lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -302,19 +302,12 @@ class ModuleLoader:
         )
         self.registry.register(
             "externals",
-            externals.ExternalsService(),
+            externals.ExternalsService(root=self.root),
         )
         self.registry.register(
             "arm",
             tendon_hand.ArmService(
                 self.organism,
-                lua_lock=(self._host.lock if self._host is not None else None),
-            ),
-        )
-        self.registry.register(
-            "flybrain",
-            fly_brain.FlyBrainService(
-                root=self.root,
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
         )

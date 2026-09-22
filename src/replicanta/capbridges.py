@@ -104,7 +104,8 @@ class _Child:
                 os.close(slave)
         self._master = master
         self.pid = self._proc.pid
-        threading.Thread(target=self._read_loop, daemon=True, name="capbridge-reader").start()
+        self._reader = threading.Thread(target=self._read_loop, daemon=True, name="capbridge-reader")
+        self._reader.start()
         threading.Thread(target=self._watch_loop, daemon=True, name="capbridge-watcher").start()
         with _ACTIVE_LOCK:
             _ACTIVE.add(self)
@@ -129,6 +130,13 @@ class _Child:
             with contextlib.suppress(OSError):
                 os.close(self._master)
             self._master = None
+        with _ACTIVE_LOCK:
+            _ACTIVE.discard(self)
+
+    def _release_active(self) -> None:
+        """Exit bookkeeping: leave the atexit-reap set once the child has
+        finished. The bridge keeps the child tracked (for output()/kill())
+        until the owner reaps it with kill()."""
         with _ACTIVE_LOCK:
             _ACTIVE.discard(self)
 
@@ -194,13 +202,27 @@ class _Child:
         if proc is None:
             return
         code = proc.wait()
+        # Take over from the reader thread so on_exit callbacks observe the
+        # COMPLETE stream: stop the reader, join it, then drain to EOF.
         self._stopped.set()
-        self._on_gone(self)
+        reader = self._reader
+        if reader is not None:
+            reader.join(timeout=0.5)
+        if proc.stdout is not None:
+            with contextlib.suppress(OSError):
+                while True:
+                    chunk = os.read(proc.stdout.fileno(), 65536)
+                    if not chunk:
+                        break
+                    self._feed(chunk)
         if self._on_exit is not None:
             try:
                 self._on_exit(code)
             except Exception as exc:  # noqa: BLE001
                 self._emit(f"process exit callback failed: {exc}")
+        # Still tracked by the owning bridge for output()/kill(); only the
+        # atexit-reap set is released.
+        self._release_active()
 
 
 class ProcessBridge:
@@ -239,14 +261,17 @@ class ProcessBridge:
         on_data = _opt(opts, "on_data")
         on_exit = _opt(opts, "on_exit")
         child = _Child(args, pty, on_data, on_exit, self._drop, self._emit)
-        try:
-            child.start()
-        except Exception as exc:
-            raise ValueError(str(exc)) from exc
+        # Register before the threads start: a fast-dying child's on_exit
+        # callback must already see the process through output()/kill().
         with self._lock:
             self._next += 1
             pid = self._next
             self._procs[pid] = child
+        try:
+            child.start()
+        except Exception as exc:
+            self._drop(child)
+            raise ValueError(str(exc)) from exc
         return pid
 
     def write(self, pid, data) -> None:
@@ -260,6 +285,17 @@ class ProcessBridge:
 
     def running(self, pid) -> bool:
         return self._child(pid).running()
+
+    def wait(self, pid, timeout=None) -> int:
+        """Block for the child's exit code. Raises ValueError on timeout
+        (Lua-catchable); the child stays tracked so output() still works."""
+        child = self._child(pid)
+        try:
+            if timeout is None:
+                return child._proc.wait()
+            return child._proc.wait(timeout=float(timeout))
+        except subprocess.TimeoutExpired as exc:
+            raise ValueError(f"process did not exit within {timeout:.0f}s") from exc
 
     def output(self, pid) -> str:
         return self._child(pid).output().decode("utf-8", "replace")
@@ -378,7 +414,9 @@ class JsonBridge:
 
     def parse(self, text):
         try:
-            return json.loads(str(text))
+            from replicanta.lua_sandbox import DictProxy
+
+            return DictProxy(json.loads(str(text)))
         except Exception as exc:
             raise ValueError(f"invalid json: {exc}") from exc
 

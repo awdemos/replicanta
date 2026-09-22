@@ -48,16 +48,38 @@ def doom_wad() -> str | None:
     return candidates[0] if candidates else None
 
 
-def wetware_binary() -> str | None:
-    """Path to the rsi-wetware-rs CLI, or None."""
+def wetware_binary(root: str | None = None) -> str | None:
+    """Path to the rsi-wetware-rs CLI, or None.
+
+    Search order: WETWARE_BIN, then the usual cargo target locations under
+    the nursery root's parent and ~/code (preferring the richer
+    rsi-wetware-rs over minimal wetware-rs, release over debug), then PATH.
+    """
     env = os.environ.get("WETWARE_BIN")
     if env and os.path.isfile(env) and os.access(env, os.X_OK):
         return env
+    bases = []
+    if root is not None:
+        bases.append(Path(root).parent)
+    bases.append(Path.home() / "code")
+    seen = set()
+    for base in bases:
+        for profile in ("release", "debug"):
+            for repo in ("rsi-wetware-rs", "wetware-rs"):
+                cand = base / repo / "target" / profile / "wetware"
+                if cand in seen:
+                    continue
+                seen.add(cand)
+                if cand.is_file() and os.access(cand, os.X_OK):
+                    return str(cand)
     return shutil.which("wetware")
 
 
 class ExternalsService:
     """Registry-facing facade so Lua modules can ask 'is X installed?'."""
+
+    def __init__(self, root: str | None = None):
+        self._root = root
 
     def doom_binary(self) -> str | None:
         return doom_binary()
@@ -70,10 +92,10 @@ class ExternalsService:
         return os.environ.get("DOOM_ASCII_ARGS", "")
 
     def wetware_binary(self) -> str | None:
-        return wetware_binary()
+        return wetware_binary(self._root)
 
     def available(self, name: str) -> bool:
         return {
             "doom": doom_binary() is not None and doom_wad() is not None,
-            "wetware": wetware_binary() is not None,
+            "wetware": self.wetware_binary() is not None,
         }.get(str(name), False)

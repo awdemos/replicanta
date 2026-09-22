@@ -211,6 +211,12 @@ class DictProxy:
     def __contains__(self, name):
         return name in self._data
 
+    def __getitem__(self, name):
+        val = self._data[name]
+        if isinstance(val, dict):
+            return DictProxy(val)
+        return val
+
     def __iter__(self):
         return iter(self._data)
 
@@ -219,9 +225,6 @@ class DictProxy:
 
     def __len__(self):
         return len(self._data)
-
-    def __getitem__(self, key):
-        return self._data[key]
 
 
 def to_py(obj, seen=None):

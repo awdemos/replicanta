@@ -148,13 +148,13 @@ def state_snapshot(org):
     loaded = set(module_loader.modules) if module_loader is not None else set()
     arm = module_loader.registry.get("arm") if module_loader is not None else None
     snapshot["arm"] = "tendon-hand" in loaded and arm is not None
-    flybrain = module_loader.registry.get("flybrain") if module_loader is not None else None
-    snapshot["flybrain"] = "fly-brain" in loaded and flybrain is not None and _probe(flybrain.available, False)
+    brain = module_loader.registry.get("brain") if module_loader is not None else None
+    snapshot["flybrain"] = "fly-brain" in loaded and brain is not None and _probe(brain.available, False)
     snapshot["brain_last"] = ""
-    if "fly-brain" in loaded and flybrain is not None:
-        _last = _probe(lambda: flybrain.last(), None)
+    if "fly-brain" in loaded and brain is not None:
+        _last = _probe(lambda: brain.last(), None)
         if _last is not None:
-            snapshot["brain_last"] = _probe(lambda: str(getattr(_last, "text", "") or ""), "")
+            snapshot["brain_last"] = _probe(lambda: str(_last["text"] or ""), "")
     doom = module_loader.registry.get("doom") if module_loader is not None else None
     snapshot["doom"] = False
     snapshot["doom_status"] = ""
