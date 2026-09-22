@@ -2768,6 +2768,18 @@ def main():
     parser.add_argument("--org", default=None, help="organism name in the nursery")
     parser.add_argument("--wake", type=int, default=300)
     parser.add_argument("--sleep", type=int, default=60)
+    parser.add_argument(
+        "--bed-hour",
+        type=int,
+        default=23,
+        help="local hour (0-23) the organism goes to sleep; -1 disables circadian scheduling",
+    )
+    parser.add_argument(
+        "--rise-hour",
+        type=int,
+        default=7,
+        help="local hour (0-23) the organism wakes for the day",
+    )
     parser.add_argument("--chaos", type=float, default=0.5)
     parser.add_argument(
         "-web",
@@ -2791,6 +2803,8 @@ def main():
         "wake_seconds": args.wake,
         "sleep_seconds": args.sleep,
         "chaos": args.chaos,
+        "bed_hour": args.bed_hour if 0 <= args.bed_hour <= 23 else None,
+        "rise_hour": args.rise_hour if 0 <= args.rise_hour <= 23 else None,
     }
     org = Organism(org_dir, **spawn)
     org.load()

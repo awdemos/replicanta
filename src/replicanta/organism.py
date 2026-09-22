@@ -800,11 +800,19 @@ class MentalState:
     SMOOTHING = 0.25  # EMA share per tick-second
     WAKE_FATIGUE_RATE = 0.02  # fatigue per second while awake
     SLEEP_RECOVERY_RATE = 0.08  # fatigue recovered per second while asleep
+    # circadian mode: sleep debt accrues over waking hours, not seconds, so
+    # the lifecycle can hold a real day schedule; recovery is sized for a
+    # ~45-min afternoon doze to erase most of a day's tiredness
+    CIRCADIAN_WAKE_FATIGUE_RATE = 0.75 / (10 * 3600)  # nap-worthy after ~10h awake
+    CIRCADIAN_SLEEP_RECOVERY_RATE = 0.65 / (45 * 60)  # 0.75 -> 0.10 in 45 min
 
-    def __init__(self, store):
+    def __init__(self, store, circadian=False):
         """MentalState smooths arousal/rationality/irrationality and decides the
-        insane flag with hysteresis."""
+        insane flag with hysteresis. ``circadian`` swaps fatigue accrual to
+        the day-scale rates that the circadian lifecycle schedules against."""
         self.store = store
+        self._wake_fatigue_rate = self.CIRCADIAN_WAKE_FATIGUE_RATE if circadian else self.WAKE_FATIGUE_RATE
+        self._sleep_recovery_rate = self.CIRCADIAN_SLEEP_RECOVERY_RATE if circadian else self.SLEEP_RECOVERY_RATE
 
     @staticmethod
     def _clamp(value):
@@ -832,9 +840,9 @@ class MentalState:
         share = self._grounded_share()
         # Fatigue tracks sleep debt: builds while awake, recovers while asleep.
         if sleeping:
-            self.store.fatigue = self._clamp(self.store.fatigue - self.SLEEP_RECOVERY_RATE * dt)
+            self.store.fatigue = self._clamp(self.store.fatigue - self._sleep_recovery_rate * dt)
         else:
-            self.store.fatigue = self._clamp(self.store.fatigue + self.WAKE_FATIGUE_RATE * dt)
+            self.store.fatigue = self._clamp(self.store.fatigue + self._wake_fatigue_rate * dt)
         # Arousal is energy: low when asleep, low when fatigued, moderate when fresh.
         fatigue = self.store.fatigue
         if sleeping:
@@ -1025,27 +1033,56 @@ class DreamEngine:
 
 
 class Lifecycle:
-    """Wake/sleep clock. Wake: self-questioning loop runs at chaos-governed
-    rate; window narrows with fatigue. Sleep: dreams fire, then beliefs
-    consolidate, window resets wide, state auto-saves. Sustained critical
-    stress fades the organism: FADE_LIMIT consecutive transitions taken at
-    stress >= FADE_STRESS end it. Death persists across restarts until
-    `revive()` is called."""
+    """Wake/sleep clock. Two scheduling modes:
+
+    - Timer-only (``bed_hour`` None): alternate wake/sleep after
+      ``wake_seconds`` / ``sleep_seconds`` — the historical behavior.
+    - Circadian (``bed_hour``/``rise_hour`` set, e.g. 23 and 7 local): the
+      organism sleeps through the night window and stays up across the day,
+      taking a daytime nap only when the wake timer has elapsed AND fatigue
+      has crossed ``NAP_FATIGUE``. ``due()`` accepts an explicit ``now``
+      timestamp so tests stay deterministic regardless of wall clock.
+
+    Wake: self-questioning loop runs at chaos-governed rate; window narrows
+    with fatigue. Sleep: dreams fire, then beliefs consolidate, window
+    resets wide, state auto-saves. Sustained critical stress fades the
+    organism: FADE_LIMIT consecutive transitions taken at stress >=
+    FADE_STRESS end it. Death persists across restarts until ``revive()``
+    is called."""
 
     FADE_STRESS = 0.95  # at/above this, a transition counts toward fading
     FADE_LIMIT = 3  # consecutive critical transitions before death
+    NAP_FATIGUE = 0.75  # daytime tiredness that earns a nap
+    RESTED_FATIGUE = 0.10  # a nap ends when fatigue drops to this
+    NAP_MAX_SECONDS = 45 * 60  # circadian afternoon dozes cap out here
 
-    def __init__(self, store, wake_seconds=180, sleep_seconds=60):
-        """Wake/sleep clock. Transitions after ``wake_seconds`` / ``sleep_seconds``."""
+    def __init__(self, store, wake_seconds=180, sleep_seconds=60, bed_hour=None, rise_hour=None):
+        """Wake/sleep clock. Transitions after ``wake_seconds`` / ``sleep_seconds``
+        (timer mode), or follow the local night window when ``bed_hour`` and
+        ``rise_hour`` are set (circadian mode)."""
         self.store = store
         self.wake_seconds = wake_seconds
         self.sleep_seconds = sleep_seconds
+        self.bed_hour = bed_hour
+        self.rise_hour = rise_hour
         self.state = "wake"
         self.state_started = time.time()
 
     def elapsed(self):
         """Seconds since the last state transition."""
         return time.time() - self.state_started
+
+    def night_now(self, now=None):
+        """True when the local wall clock is inside the night-sleep window.
+        Always False without a configured window (or a degenerate one)."""
+        if self.bed_hour is None or self.rise_hour is None:
+            return False
+        if self.bed_hour == self.rise_hour:
+            return False  # degenerate window — treat as disabled
+        hour = time.localtime(now if now is not None else time.time()).tm_hour
+        if self.bed_hour < self.rise_hour:
+            return self.bed_hour <= hour < self.rise_hour
+        return hour >= self.bed_hour or hour < self.rise_hour
 
     def tick(self):
         """Advance lifecycle by one forced transition (used by the scheduler
@@ -1105,12 +1142,35 @@ class Lifecycle:
             # Falling asleep begins recovery; final recovery happens during sleep ticks.
             self.store.fatigue = max(0.0, self.store.fatigue - 0.3)
 
-    def due(self):
-        """True when the current state's duration has elapsed."""
+    def due(self, now=None):
+        """True when the current state's duration has elapsed.
+
+        Timer mode: pure elapsed-time check. Circadian mode: bedtime falls
+        due the moment the night window opens and night sleep holds until it
+        closes; during the day a nap needs both the wake timer and the
+        fatigue threshold, and ends when rested or when the nap length
+        elapses. ``now`` (epoch seconds) overrides the wall clock for tests.
+        """
         if self.state == "dead":
             return False
-        limit = self.wake_seconds if self.state == "wake" else self.sleep_seconds
-        return self.elapsed() >= limit
+        elapsed = (now if now is not None else time.time()) - self.state_started
+        if not (self.bed_hour is not None and self.rise_hour is not None):
+            limit = self.wake_seconds if self.state == "wake" else self.sleep_seconds
+            return elapsed >= limit
+        if self.state == "wake":
+            if self.night_now(now):
+                return True  # bedtime
+            if elapsed < self.wake_seconds:
+                return False
+            return self.store.fatigue >= self.NAP_FATIGUE
+        # asleep: night sleep holds until the window closes; a daytime nap
+        # ends when rested again or when the nap cap elapses (the short
+        # sleep_seconds nap length belongs to the timer-only mode)
+        if self.night_now(now):
+            return False
+        if self.bed_hour is not None:
+            return elapsed >= self.NAP_MAX_SECONDS or self.store.fatigue <= self.RESTED_FATIGUE
+        return elapsed >= self.sleep_seconds or self.store.fatigue <= self.RESTED_FATIGUE
 
 
 class Metrics:
@@ -1178,6 +1238,8 @@ class Organism:
         wake_seconds=180,
         sleep_seconds=60,
         chaos=0.5,
+        bed_hour=None,
+        rise_hour=None,
         probe=None,
         git_probe=None,
     ):
@@ -1190,8 +1252,8 @@ class Organism:
         self.meter = StressMeter(self.store)
         self.questioner = SelfQuestioner(self.store, self.mind, dir_path, stress=self.meter)
         self.dreamer = DreamEngine(self.store, self.mind, stress=self.meter)
-        self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds)
-        self.mental = MentalState(self.store)
+        self.lifecycle = Lifecycle(self.store, wake_seconds, sleep_seconds, bed_hour, rise_hour)
+        self.mental = MentalState(self.store, circadian=bed_hour is not None)
         self.probe = probe if probe is not None else SystemProbe()
         self.git_probe = git_probe
         self.skills = SkillStore(dir_path / "artifacts" / "skills")
@@ -1438,11 +1500,16 @@ class Organism:
         """Record that the user is typing. Called by front-ends (web/TUI).
 
         Returns True if the typing nudged a near-boundary sleep toward wake.
+        Night sleep is never nudged — only daytime naps yield to company.
         """
         self.store.note_activity("user_typing")
         self.store.activity["typing_sessions"] = self.store.activity.get("typing_sessions", 0) + 1
         nudged = False
-        if self.lifecycle.state == "sleep" and self.lifecycle.elapsed() >= self.lifecycle.sleep_seconds * 0.8:
+        if (
+            self.lifecycle.state == "sleep"
+            and not self.lifecycle.night_now()
+            and self.lifecycle.elapsed() >= self.lifecycle.sleep_seconds * 0.8
+        ):
             self.lifecycle.transition("wake")
             self.store.dirty = True
             nudged = True

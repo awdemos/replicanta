@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -650,6 +651,91 @@ def test_revive_restores_wake_baseline(tmp_path):
     assert lc.state == "wake"
     assert store.fade_streak == 0
     assert store.stress == 0.05  # StressMeter.BASELINE
+
+
+# -- circadian scheduling -----------------------------------------------------
+# due() takes an explicit ``now`` (epoch seconds) so the window logic is
+# testable at any wall clock; these tests never depend on the real hour.
+
+
+def _at_local_hour(hour, minute=0):
+    """Epoch seconds for the next occurrence of a given local wall time."""
+    import datetime
+
+    now = datetime.datetime.now(tz=datetime.timezone.utc).astimezone()
+    candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now:
+        candidate += datetime.timedelta(days=1)
+    return candidate.timestamp()
+
+
+def _circadian(tmp_path, state="wake", fatigue=0.0):
+    store = BeliefStore(tmp_path)
+    store.fatigue = fatigue
+    lc = Lifecycle(store, wake_seconds=300, sleep_seconds=60, bed_hour=23, rise_hour=7)
+    lc.state = state
+    lc.state_started = time.time() - 1000  # long elapsed: timers never block
+    return lc, store
+
+
+def test_circadian_bedtime_falls_due(tmp_path):
+    lc, _ = _circadian(tmp_path, state="wake", fatigue=0.0)  # fresh: no nap
+    assert not lc.due(now=_at_local_hour(15))
+    assert lc.due(now=_at_local_hour(23))
+    assert lc.due(now=_at_local_hour(3))
+
+
+def test_circadian_night_sleep_holds_until_rise(tmp_path):
+    lc, _ = _circadian(tmp_path, state="sleep", fatigue=1.0)
+    assert not lc.due(now=_at_local_hour(23, 30))
+    assert not lc.due(now=_at_local_hour(6, 59))
+    assert lc.due(now=_at_local_hour(7))
+
+
+def test_circadian_daytime_nap_needs_fatigue(tmp_path):
+    # the wake timer has long elapsed; only fatigue decides the nap
+    lc, store = _circadian(tmp_path, state="wake", fatigue=0.3)
+    assert not lc.due(now=_at_local_hour(12))
+    store.fatigue = 0.9
+    assert lc.due(now=_at_local_hour(12))
+
+
+def test_circadian_nap_ends_when_rested(tmp_path):
+    lc, store = _circadian(tmp_path, state="sleep", fatigue=0.5)
+    noon = _at_local_hour(12)
+    lc.state_started = noon - 10  # short nap (in synthetic time): only fatigue decides
+    assert not lc.due(now=noon)  # neither rested nor nap length
+    store.fatigue = 0.05
+    assert lc.due(now=noon)  # rested: wake up
+
+
+def test_circadian_window_without_wraparound(tmp_path):
+    store = BeliefStore(tmp_path)
+    lc = Lifecycle(store, wake_seconds=0, sleep_seconds=0, bed_hour=22, rise_hour=6)
+    assert lc.night_now(now=_at_local_hour(22, 30))
+    assert not lc.night_now(now=_at_local_hour(21, 59))
+    assert not lc.night_now(now=_at_local_hour(6, 30))
+
+
+def test_timer_mode_ignores_wall_clock(tmp_path):
+    """Without a window the lifecycle stays a pure timer (back-compat)."""
+    store = BeliefStore(tmp_path)
+    lc = Lifecycle(store, wake_seconds=300, sleep_seconds=60)
+    assert not lc.night_now(now=_at_local_hour(3))
+    lc.state_started = time.time() - 301
+    assert lc.due(now=_at_local_hour(3))
+
+
+def test_typing_nudges_nap_but_not_night_sleep(tmp_path):
+    org = Organism(tmp_path, wake_seconds=60, sleep_seconds=60, bed_hour=23, rise_hour=7)
+    org.lifecycle.transition("sleep")
+    org.lifecycle.state_started = time.time() - 120  # past the nudge threshold
+    # monkeypatch night_now to control the branch deterministically
+    org.lifecycle.night_now = lambda now=None: True
+    assert not org.typing_activity()  # deep night: company does not wake it
+    org.lifecycle.night_now = lambda now=None: False
+    assert org.typing_activity()  # daytime nap: typing wakes it
+    assert org.lifecycle.state == "wake"
 
 
 def test_metrics_score_components(tmp_path):
