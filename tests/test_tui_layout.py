@@ -45,9 +45,7 @@ def test_sidebar_badges_come_from_each_organisms_own_config(nursery_app):
     A row's glyphs must come from that organism's own module config."""
     app = nursery_app
     (app.root / "organisms" / "fern").mkdir(parents=True)
-    (app.root / "organisms" / "fern" / "replicanta.toml").write_text(
-        '[modules]\nenabled = ["base", "fly-brain"]\n'
-    )
+    (app.root / "organisms" / "fern" / "replicanta.toml").write_text('[modules]\nenabled = ["base", "fly-brain"]\n')
 
     async def check():
         async with app.run_test() as pilot:
