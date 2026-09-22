@@ -69,3 +69,44 @@ def test_doom_command_observes_frame(doom_app):
             assert app.org.store.belief_value("doom", "frame") == "running"
 
     asyncio.run(check())
+
+
+def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
+    """Regression: /doom stop must halt the game and silence the auto-play
+    loop — no pending turn timers, no further advances."""
+    from replicanta import voice
+
+    app = doom_app
+    monkeypatch.setattr(voice, "doom_move", lambda org, **kw: 'moving.\ndoom.command("w")')
+    monkeypatch.setattr(voice, "online", lambda: True)
+
+    async def check():
+        async with app.run_test() as pilot:
+            chat = app.query_one("#chat", Input)
+            chat.focus()
+            chat.value = "/doom start"
+            await pilot.press("enter")
+            doom = app.query_one("#doom", Static)
+            await wait_until(lambda: "hp=" in str(doom.render()), message="doom frame to render")
+            await asyncio.sleep(1.5)  # let auto-play advance a few turns
+
+            chat.value = "/doom stop"
+            await pilot.press("enter")
+            await asyncio.sleep(0.5)
+
+            svc = app.org.module_loader.registry.get("doom")
+            assert svc.running() is False
+            pending = [t for t in getattr(app, "_timers", []) if getattr(t, "_callback", None) is app._doom.take_turn]
+            assert pending == []  # the loop is not re-armed
+            turns_at_stop = re_turns(svc)
+            await asyncio.sleep(1.5)
+            assert re_turns(svc) == turns_at_stop  # nothing advances anymore
+
+    asyncio.run(check())
+
+
+def re_turns(svc):
+    import re
+
+    match = re.search(r"turns=(\d+)", svc.status())
+    return match.group(1) if match else None

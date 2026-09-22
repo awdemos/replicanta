@@ -491,6 +491,10 @@ class DoomController:
         except Exception as exc:  # noqa: BLE001
             self._app._append_log(f"doom command failed: {exc}", STYLE_WARN)
             return
+        # Stopping must silence the auto-play loop immediately, not on the
+        # next timer tick: cancel any queued turn.
+        if args and args[0] == "stop":
+            self.cancel_auto()
         # Render into the dedicated DOOM pane instead of the chat log.
         lines = str(result or "").splitlines()
         if lines:
@@ -598,6 +602,10 @@ class DoomController:
             reply = voice.doom_move(self._app.org, on_token=on_token)
             if reply is None:
                 self.schedule_turn()
+                return
+            if not svc.running():
+                # /doom stop landed while the generation was in flight: do
+                # not execute the stale move or re-arm the loop
                 return
             doom_cmd = extract_doom_command(reply)
             if doom_cmd is not None:
