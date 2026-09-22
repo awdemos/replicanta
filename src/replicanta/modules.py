@@ -7,7 +7,7 @@ from pathlib import Path
 
 from lupa import lua_type
 
-from replicanta import config as project_config
+from replicanta import capbridges, config as project_config, externals
 from replicanta import fly_brain, lua_sandbox, rdd, tendon_hand
 from replicanta.fileutil import atomic_write_text
 
@@ -248,6 +248,7 @@ class ModuleLoader:
         # future stoppable bridges); otherwise each reload leaks a competing
         # driver that keeps moving the hand with a stale Lua policy.
         self.registry.shutdown()
+        capbridges.shutdown_all()
         self.registry = ServiceRegistry()
         self.modules = {}
         self.warnings = []
@@ -299,6 +300,10 @@ class ModuleLoader:
         self.registry.register(
             "visual",
             VisualService(self.organism),
+        )
+        self.registry.register(
+            "externals",
+            externals.ExternalsService(),
         )
         self.registry.register(
             "arm",
@@ -378,11 +383,19 @@ class ModuleLoader:
         # so the context table lives in the same Lua world as the init()
         # function that receives it.
         lua = self._current_lua or self._runtime()
+        lock = self._host.lock if self._host is not None else None
+        store = getattr(self.organism, "store", None)
+        organism_dir = getattr(store, "dir_path", None)
+        bridges = capbridges.build(lua_lock=lock, organism_dir=organism_dir, emit=self.emit)
         return lua.table(
             module_name=module_name,
             log=lambda msg: self.emit(str(msg)),
             services=self.registry,
             events=(self._host.events if self._host is not None else self.registry.get("hooks")),
+            process=bridges.process,
+            http=bridges.http,
+            fs=bridges.fs,
+            json=bridges.json,
         )
 
 

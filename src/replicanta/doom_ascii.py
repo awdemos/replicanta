@@ -185,6 +185,10 @@ class DoomAsciiService:
             )
         self.stop()
         self._stopped.clear()
+        with self._frame_lock:
+            self._ansi_frame = ""
+            self._plain_frame = ""
+            self._frame_count = 0
         master, slave = os.openpty()
         argv = [
             binary,
@@ -319,7 +323,8 @@ class DoomAsciiService:
     def _read_loop(self) -> None:
         import selectors
 
-        stdout = self._proc.stdout if self._proc is not None else None
+        owner = self._proc
+        stdout = owner.stdout if owner is not None else None
         if stdout is None:
             return
         selector = selectors.DefaultSelector()
@@ -338,7 +343,11 @@ class DoomAsciiService:
                     chunk = b""
                 if key.fileobj is stdout:
                     if not chunk:
-                        self._stopped.set()
+                        # Only stamp the shared stop flag when this reader
+                        # still belongs to the current game — a replaced
+                        # game's threads must not kill the new one.
+                        if self._proc is owner:
+                            self._stopped.set()
                         return
                     self._feed(chunk)
                 elif chunk:
@@ -351,7 +360,9 @@ class DoomAsciiService:
         if proc is None:
             return
         proc.wait()
-        self._stopped.set()
+        # A replaced game's watcher must not trip the new game's stop flag.
+        if self._proc is proc:
+            self._stopped.set()
 
     def _slave_tail(self) -> str:
         raw = bytes(self._slave_log).decode("utf-8", errors="replace")

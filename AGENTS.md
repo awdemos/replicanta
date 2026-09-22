@@ -27,7 +27,12 @@ requirements-ci.txt# Hash-pinned CI dependencies exported from uv.lock
    `ctx.events.declare/on/emit/known`). Python services must stay thin
    bridges: table-in/plain-data-out, raising Lua-catchable errors that
    modules wrap in pcall. New hooks must respect the Lua sandbox in
-   `lua_sandbox.py` — no os/io/require/load.
+   `lua_sandbox.py` — no os/io/require/load. Modules that need the world
+   use the generic capability bridges in `capbridges.py`
+   (`ctx.process` managed children incl. the pty recipe, `ctx.http`,
+   `ctx.fs` scoped to the organism dir, `ctx.json`); discovery of external
+   binaries lives in `externals.py`. Bespoke per-module Python services
+   are for genuinely thread-heavy bridges only (tendon-hand).
 
 ## Build / Install Commands
 

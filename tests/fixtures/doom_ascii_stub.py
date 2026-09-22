@@ -77,7 +77,10 @@ def main() -> int:
     try:
         while True:
             try:
-                data = os.read(2, 64)
+                if os.isatty(2):
+                    data = os.read(2, 64)
+                else:
+                    data = b""
             except OSError:
                 data = b""
             for seq, name in ARROWS.items():
