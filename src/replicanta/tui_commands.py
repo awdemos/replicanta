@@ -333,12 +333,19 @@ def voice_command(args):
         else:
             speech.set_enabled(not speech.enabled)
         state = "on" if speech.enabled else "off"
-        if speech.enabled and not speech.available():
-            message = (
-                f"spoken voice {state}, but no piper model at "
-                f"{speech.model_path()} — staying mute "
-                f"(/voice get en_US-lessac-medium)"
-            )
+        if speech.enabled and not speech.ready():
+            if not speech.available():
+                message = (
+                    f"spoken voice {state}, but no piper model at "
+                    f"{speech.model_path()} — staying mute "
+                    f"(/voice get en_US-lessac-medium)"
+                )
+            else:
+                message = (
+                    "spoken voice on, but the piper/soundcard packages are "
+                    "missing — staying mute; install the 'voice' extra "
+                    '(pip install "replicanta[voice]")'
+                )
             return (message, True)
         if speech.enabled:
             speech.say("I can speak now.")

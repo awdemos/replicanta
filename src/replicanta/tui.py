@@ -1290,7 +1290,10 @@ class OrganismApp(App):
             right.append("mic", style="reverse green")
         if spoken:
             right.append("   ")
-            right.append("spk", style="reverse green")
+            # yellow when enabled but the voice extras are missing — the
+            # indicator must not claim speech that cannot sound
+            spk_style = "reverse green" if speech.ready() else "reverse yellow"
+            right.append("spk", style=spk_style)
         right.append("   ")
         right.append(clock, style="bold")
         bar = Table.grid(expand=True)

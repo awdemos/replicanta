@@ -34,6 +34,38 @@ def test_speech_disabled_by_default(monkeypatch):
     assert speech._queue.empty()
 
 
+# -- readiness: model file + runtime packages ---------------------------------
+
+
+def test_ready_false_without_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(speech, "model_path", lambda: tmp_path / "nope.onnx")
+    assert speech.ready() is False
+
+
+def test_ready_false_when_voice_packages_missing(tmp_path, monkeypatch):
+    (tmp_path / "en_US-lessac-medium.onnx").write_text("fake")
+    monkeypatch.setattr(speech, "model_path", lambda: tmp_path / "en_US-lessac-medium.onnx")
+    real_find_spec = speech.importlib.util.find_spec
+    monkeypatch.setattr(
+        speech.importlib.util,
+        "find_spec",
+        lambda name: None if name == "piper" else real_find_spec(name),
+    )
+    assert speech.ready() is False
+
+
+def test_ready_true_with_model_and_packages(tmp_path, monkeypatch):
+    (tmp_path / "en_US-lessac-medium.onnx").write_text("fake")
+    monkeypatch.setattr(speech, "model_path", lambda: tmp_path / "en_US-lessac-medium.onnx")
+    real_find_spec = speech.importlib.util.find_spec
+    monkeypatch.setattr(
+        speech.importlib.util,
+        "find_spec",
+        lambda name: object() if name in ("piper", "soundcard") else real_find_spec(name),
+    )
+    assert speech.ready() is True
+
+
 def test_speech_noop_without_model(monkeypatch):
     called = []
     monkeypatch.setattr(speech, "_speak", lambda text: called.append(text))

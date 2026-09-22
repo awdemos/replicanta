@@ -20,8 +20,10 @@ voice, one queue per process. reset() is the test hook.
 
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
+import logging
 import os
 import queue
 import re
@@ -29,6 +31,8 @@ import subprocess  # nosec
 import threading
 import wave
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def _find_voices_dir():
@@ -120,6 +124,22 @@ def available():
     """True when a piper model file is present (packages may still be
     missing — failures are contained at speak time)."""
     return model_path().exists()
+
+
+def ready():
+    """True when speech can actually sound: a model file is present and
+    both runtime packages (piper, soundcard) are importable. Unlike
+    available(), this catches an environment that lost its voice extras
+    (e.g. a recreated venv) instead of silently no-oping at speak time."""
+    if not available():
+        return False
+    for module in ("piper", "soundcard"):
+        try:
+            if importlib.util.find_spec(module) is None:
+                return False
+        except (ImportError, OSError, ValueError):
+            return False
+    return True
 
 
 def model_path():
@@ -309,7 +329,13 @@ def _speak_with_timeout(text, timeout=30):
 
     def target():
         with contextlib.suppress(Exception):  # nosec — speech must never kill anything
-            _speak(text)
+            try:
+                _speak(text)
+            except Exception:
+                # A recreated venv silently loses the voice extras; without
+                # this the failure would be invisible.
+                log.warning("speech failed; is the 'voice' extra installed?", exc_info=True)
+                raise
 
     t = threading.Thread(target=target, daemon=True, name="speech-utterance")
     t.start()

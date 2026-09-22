@@ -1,6 +1,6 @@
 """Unit tests for the slash-command registry helpers."""
 
-from replicanta import tui_commands
+from replicanta import speech, tui_commands
 
 
 def test_filter_commands_matches_name_and_description():
@@ -71,3 +71,49 @@ def test_complete_command_without_matches_is_noop():
     value, index = tui_commands.complete_command("/zzz", [], 0)
     assert value == "/zzz"
     assert index == 0
+
+
+# -- /voice on: surface a broken TTS runtime instead of silently staying mute -
+
+
+def test_voice_on_warns_when_voice_extra_missing(monkeypatch):
+    """A venv recreated without the voice extras used to pass the model-file
+    check and then silently no-op every say(); /voice on must call that out."""
+    monkeypatch.setattr(speech, "ready", lambda: False)
+    monkeypatch.setattr(speech, "available", lambda: True)
+    said = []
+    monkeypatch.setattr(speech, "say", lambda text: said.append(text))
+    try:
+        message, warn = tui_commands.voice_command(["on"])
+        assert warn
+        assert "voice" in message and "extra" in message
+        assert said == []  # nothing to speak with
+    finally:
+        speech.set_enabled(False)
+
+
+def test_voice_on_warns_when_no_model(monkeypatch):
+    monkeypatch.setattr(speech, "ready", lambda: False)
+    monkeypatch.setattr(speech, "available", lambda: False)
+    monkeypatch.setattr(speech, "model_path", lambda: "/nope.onnx")
+    monkeypatch.setattr(speech, "say", lambda text: None)
+    try:
+        message, warn = tui_commands.voice_command(["on"])
+        assert warn
+        assert "no piper model" in message
+    finally:
+        speech.set_enabled(False)
+
+
+def test_voice_on_speaks_when_ready(monkeypatch):
+    monkeypatch.setattr(speech, "ready", lambda: True)
+    monkeypatch.setattr(speech, "available", lambda: True)
+    said = []
+    monkeypatch.setattr(speech, "say", lambda text: said.append(text))
+    try:
+        message, warn = tui_commands.voice_command(["on"])
+        assert not warn
+        assert "on" in message
+        assert said == ["I can speak now."]
+    finally:
+        speech.set_enabled(False)
