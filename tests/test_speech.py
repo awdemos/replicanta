@@ -16,15 +16,6 @@ import numpy as np
 from replicanta import speech
 
 
-def _drain_until_empty(timeout=2.0):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if speech._queue.empty():
-            return True
-        time.sleep(0.01)
-    return False
-
-
 def test_speech_disabled_by_default(monkeypatch):
     called = []
     monkeypatch.setattr(speech, "_speak", lambda text: called.append(text))

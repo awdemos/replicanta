@@ -9,6 +9,8 @@ from replicanta import extensions, llmclient, narration, skills, tui_views, voic
 from replicanta.organism import Organism
 from replicanta.probe import SystemProbe
 
+from conftest import patch_generate
+
 
 def _store(tmp_path):
     return skills.SkillStore(tmp_path / "skills")
@@ -172,15 +174,6 @@ def _organism(tmp_path, **kwargs):
     org = Organism(tmp_path, **kwargs)
     org.load()
     return org
-
-
-def patch_generate(monkeypatch, fn):
-    """Patch llmclient.generate_with_stats with a deterministic text fake."""
-
-    def wrapper(*a, **k):
-        return fn(*a, **k), {"prompt_tokens": 0, "gen_tokens": 0}
-
-    monkeypatch.setattr("replicanta.llmclient.generate_with_stats", wrapper)
 
 
 def test_reflect_creates_skill(tmp_path, monkeypatch):

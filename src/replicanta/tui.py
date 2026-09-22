@@ -553,36 +553,6 @@ class ModulesScreen(ModalScreen):
         self._refresh_list()
         self.set_timer(0.05, self._ensure_focus)
 
-    def action_focus_prev(self):
-        """Move focus to the previous module checkbox."""
-        container = self.query_one("#module-list", _ModuleList)
-        checkboxes = list(container.query(Checkbox))
-        if not checkboxes:
-            return
-        focused = self.app.focused
-        try:
-            idx = checkboxes.index(focused)
-        except ValueError:
-            idx = 0
-        idx = max(0, idx - 1)
-        checkboxes[idx].focus()
-        self._show_detail(checkboxes[idx].id.split("-", 1)[1])
-
-    def action_focus_next(self):
-        """Move focus to the next module checkbox."""
-        container = self.query_one("#module-list", _ModuleList)
-        checkboxes = list(container.query(Checkbox))
-        if not checkboxes:
-            return
-        focused = self.app.focused
-        try:
-            idx = checkboxes.index(focused)
-        except ValueError:
-            idx = -1
-        idx = min(len(checkboxes) - 1, idx + 1)
-        checkboxes[idx].focus()
-        self._show_detail(checkboxes[idx].id.split("-", 1)[1])
-
     def _ensure_focus(self):
         container = self.query_one("#module-list", _ModuleList)
         checkboxes = list(container.query(Checkbox))
@@ -622,25 +592,6 @@ class ModulesScreen(ModalScreen):
             state = "disabled"
         self._show_detail(name)
         self.notify(f"{name} {state}")
-
-    def _on_checkbox_change(self, name, value):
-        """Update enabled set and detail when a module checkbox changes."""
-        if value:
-            self._enabled.add(name)
-            state = "enabled"
-        else:
-            self._enabled.discard(name)
-            state = "disabled"
-        self._show_detail(name)
-        self.notify(f"{name} {state}")
-
-    def _make_toggle_handler(self, name):
-        """Return a value-changed callback that updates _enabled and detail."""
-
-        def _on_change(value):
-            self._on_checkbox_change(name, value)
-
-        return _on_change
 
     def _show_detail(self, name):
         manifest = next((m for m in self._discovered() if m.get("name") == name), {})
@@ -746,12 +697,8 @@ class OrganismApp(App):
     #sidebar-list { padding: 0; height: 1fr; border: none;
                      background: $surface; }
     #sidebar-list > ListItem { padding: 0 1; }
-    #sidebar-list > ListItem.--highlight { background: $primary;
-                                            color: $text; }
-    #sidebar-list > ListItem.group-header { color: $text-muted;
-                                             text-style: bold; }
-    #sidebar.-dragging #sidebar-list > ListItem.group-header {
-        background: $boost; color: $text; text-style: bold underline; }
+    #sidebar-list > ListItem.-highlight { background: $primary;
+                                           color: $text; }
     #content { width: 1fr; height: 1fr; }
     #tab-bar { height: 1; padding: 0 1; }
     #tab-bar > Button { min-width: 8; margin: 0 1; height: 1; border: none;
@@ -801,7 +748,7 @@ class OrganismApp(App):
                        background: $surface; margin-top: 1; }
     #palette-results > ListItem { padding: 0 1; height: auto; }
     #palette-results > ListItem > Vertical { height: auto; }
-    #palette-results > ListItem.--highlight { background: $primary; color: $text; }
+    #palette-results > ListItem.-highlight { background: $primary; color: $text; }
     #palette-meta { height: 1; padding: 0 1; color: $text-muted; }
     .palette-usage { text-style: bold; }
     .palette-desc { color: $text-muted; }
@@ -809,8 +756,6 @@ class OrganismApp(App):
     #modules-box { width: 78; height: 24; border: round $primary; background: $surface; padding: 0 1; }
     #modules-title { width: 100%; height: 1; padding: 0 1; background: $surface; color: $text; text-style: bold; }
     #module-list { width: 100%; height: 1fr; min-height: 12; border: none; background: $surface; padding: 0; }
-    #module-list > ListItem { height: auto; padding: 0 1; color: $text; }
-    #module-list > ListItem.--highlight { background: $primary; color: $text; }
     #module-detail { width: 100%; height: auto; min-height: 4; padding: 1 2; color: $text-muted; border-top: solid $primary; }
     """
 
@@ -1033,9 +978,6 @@ class OrganismApp(App):
         # keep typing in the chat line, never stranded by a pane switch
         if self.chat_input is not None:
             self.chat_input.focus()
-
-    def action_doom_toggle(self):
-        self._doom.toggle()
 
     def action_doom_up(self):
         self._doom.key_command("w")

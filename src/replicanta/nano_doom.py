@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Self
 
 # Block type nibbles (matching the original doom-nano legend)
 E_FLOOR = 0x0
-E_PLAYER = 0x1
 E_ENEMY = 0x2
 E_DOOR = 0x4
 E_LOCKEDDOOR = 0x5
@@ -33,8 +31,6 @@ S_MELEE = 3
 S_HIT = 4
 S_DEAD = 5
 S_HIDDEN = 6
-S_OPEN = 7
-S_CLOSE = 8
 
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 24
@@ -50,7 +46,6 @@ MAX_SPRITE_DEPTH = 8
 
 ROT_SPEED = 0.12
 MOV_SPEED = 0.25
-MOV_SPEED_INV = 4.0
 JOGGING_SPEED = 0.05
 ENEMY_SPEED = 0.06
 FIREBALL_SPEED = 0.2
@@ -75,7 +70,6 @@ MAX_ENEMIES_ON_START = 2
 # ASCII wall/floor gradient. Lower index = darker/farther.
 GRADIENT = " .-=#@"
 GRADIENT_COUNT = len(GRADIENT)
-FLOOR_GRADIENT = " .-="
 CEILING_CHAR = " "
 
 
@@ -229,9 +223,6 @@ class _DoomGame:
 
     def _create_uid(self, etype: int, x: int, y: int) -> int:
         return (etype << 16) | (x << 8) | y
-
-    def _uid_type(self, uid: int) -> int:
-        return uid >> 16
 
     def _spawn_entity(self, etype: int, x: int, y: int):
         if self.num_entities >= MAX_ENTITIES:
@@ -769,10 +760,3 @@ class DoomService:
         if self._game is None:
             raise RuntimeError("no game running")
         return self._game.tick(cmd)
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> bool | None:
-        self.stop()
-        return False

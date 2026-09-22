@@ -86,8 +86,8 @@ class ArmService:
     Exposed to Lua as ``services.get('arm')`` with methods:
       get_state(), state(), health(), telemetry(), move(kind, duration),
       posture(name, duration), actuator(finger, joint, side, activation),
-      pose(spec), emotion(spec), summary(), moves(), postures(),
-      volition(enabled), set_decide(fn), dispatch(args).
+      pose(spec), emotion(spec), summary(), moves(),
+      volition(enabled), set_decide(fn).
 
     Error contract per method: move/posture/actuator/pose/emotion validate
     their arguments and raise (Lua sees the error via pcall); get_state,
@@ -225,9 +225,6 @@ class ArmService:
         cross the Lua boundary as tables."""
         return ", ".join(MOVES)
 
-    def postures(self):
-        return ", ".join(POSTURES)
-
     def summary(self):
         """Return a human-readable hand state string (safe for Lua display)."""
         try:
@@ -279,40 +276,6 @@ class ArmService:
                 result = self._decide_fn(inputs)
             return result if isinstance(result, str) and result else None
         return self._decide(mood, stress, arousal, chaos, insane)
-
-    def dispatch(self, args):
-        """Text command dispatcher used by TUI/web slash command."""
-        verb = (args[0] if args else "state").lower()
-        if verb == "state" or verb == "":
-            return self.summary()
-        if verb == "posture":
-            return f"hand: posture '{self.posture(args[1] if len(args) > 1 else 'open', float(args[2]) if len(args) > 2 else 4.0)['posture']}' set"
-        if verb == "actuator":
-            if len(args) < 5:
-                return "usage: /hand actuator <finger> <joint> <flexor|extensor> <activation> [dur]"
-            self.actuator(args[1], args[2], args[3], float(args[4]), float(args[5]) if len(args) > 5 else 4.0)
-            return f"hand: {args[1]}/{args[2]} {args[3]} = {args[4]}"
-        if verb == "goal":
-            return f"hand: goal '{self.move(args[1] if len(args) > 1 else 'reach', float(args[2]) if len(args) > 2 else 4.0)['goal']}' set"
-        if verb == "volition":
-            if len(args) > 1:
-                on = args[1] in ("on", "true", "1")
-            else:
-                with self._lock:
-                    on = not self._volition  # bare "/hand volition" toggles
-            self.volition(on)
-            return f"hand: volition {'enabled' if on else 'disabled'}"
-        if verb == "emotion":
-            spec = {}
-            if len(args) > 1:
-                spec["stress"] = float(args[1])
-            if len(args) > 2:
-                spec["arousal"] = float(args[2])
-            if len(args) > 3:
-                spec["mood"] = args[3]
-            self.emotion(spec)
-            return "hand: emotion updated"
-        return "usage: /hand [state|posture <name> [dur]|actuator f j side act [dur]|goal <kind> [dur]|volition [on|off]|emotion s a mood]"
 
     # -- HTTP helpers ----------------------------------------------------------
     def _request(self, method, path, body=None):

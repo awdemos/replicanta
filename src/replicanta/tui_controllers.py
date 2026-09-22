@@ -390,25 +390,6 @@ class DoomController:
         self._app = app
         self._text = ""
 
-    def toggle(self):
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None:
-            return
-        active = self._app.query_one(TabbedContent).active
-        if active != "doom-pane":
-            self._app.action_show_tab("doom-pane")
-            # If no game is running, start one immediately when opening the pane.
-            if not svc.running():
-                self.command(["start"])
-            # Once the game is started, kick the entity into auto-play.
-            if svc.running():
-                self._app.set_timer(0.3, self.take_turn)
-            return
-        # Already on the DOOM pane: toggling again stops the game and leaves the pane.
-        if svc.running():
-            self.command(["stop"])
-
     def key_command(self, cmd):
         loader = getattr(self._app.org, "module_loader", None)
         svc = loader.registry.get("doom") if loader is not None else None

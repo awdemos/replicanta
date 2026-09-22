@@ -34,8 +34,6 @@ _EMPTY = {"version": 0, "entries": [], "pending": None}
 
 _CONTROL = ("the weather is nice", "what do you think", "hello there")
 
-KINDS = ("pattern", "seed", "harsh_term", "kind_term")
-
 # Approved patterns run against every chat message on the (single-threaded)
 # server, so a pathological regex is a denial of service. Keep them small and
 # reject nested quantifiers — `(a+)+`-style ambiguity is the classic

@@ -1,8 +1,8 @@
 """Pure UI helpers for the organism TUI and web front-ends: slash-command
-metadata, the dispatch registry, tab completion, activity sparkline, help
-text, and the shared /voice and /auto-apply command behaviors each frontend
-renders for itself. No textual imports — unit testable without a terminal.
-Sentiment scorers live in sentiment.py."""
+metadata, the dispatch registry, tab completion, help text, and the shared
+/voice and /auto-apply command behaviors each frontend renders for itself.
+No textual imports — unit testable without a terminal. Sentiment scorers
+live in sentiment.py."""
 
 from pathlib import Path
 
@@ -513,8 +513,6 @@ COMMAND_HANDLERS = {
 }
 
 
-_SPARK_BARS = "▁▂▃▄▅▆▇█"
-
 CHAT_HISTORY_LIMIT = 50
 
 
@@ -574,16 +572,6 @@ def history_browse(history, index, draft, current, delta):
             return -1, draft, draft
         index = target
     return index, draft, history[index]
-
-
-def sparkline(values):
-    """One-line histogram of recent activity (belief counts)."""
-    if not values:
-        return ""
-    lo, hi = min(values), max(values)
-    if hi == lo:
-        return _SPARK_BARS[0] * len(values)
-    return "".join(_SPARK_BARS[int((v - lo) / (hi - lo) * (len(_SPARK_BARS) - 1) + 0.5)] for v in values)
 
 
 def help_text():

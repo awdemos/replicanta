@@ -2,8 +2,6 @@
 
 import re
 
-LEARN_GOAL_PREFIXES = ("learn", "know", "understand")
-
 # cycles without progress before a goal is considered stalled
 STALLED_CYCLES = 10
 
@@ -16,10 +14,6 @@ def default_strategy(goal_text):
 def _target_count(text):
     nums = [int(n) for n in re.findall(r"\d+", text)]
     return nums[-1] if nums else 5
-
-
-def _is_learn_goal(text):
-    return any(text.lower().startswith(p) for p in LEARN_GOAL_PREFIXES)
 
 
 def update_progress(goal, cycle, current):

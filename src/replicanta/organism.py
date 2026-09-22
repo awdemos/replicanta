@@ -1256,7 +1256,6 @@ class Organism:
         self.dir_path = dir_path
         self.store = BeliefStore(dir_path)
         self.mind = Mind(dir_path / "organism.scl")
-        self.store.mind = self.mind
         self.window = AttentionWindow(self.store.beliefs())
         self.meter = StressMeter(self.store)
         self.questioner = SelfQuestioner(self.store, self.mind, dir_path, stress=self.meter)
@@ -1523,22 +1522,6 @@ class Organism:
             self.store.dirty = True
             nudged = True
         return nudged
-
-    def harvest_threads(self):
-        """Collect any completed background threads and apply their results.
-
-        Returns a list of event dicts for the front-end.
-        """
-        if not self.thread_pool:
-            return []
-        events = []
-        for thread_id, result, error in self.thread_pool.harvest():
-            self.store.finish_thread(thread_id, result=result, error=error)
-            if error:
-                events.append({"kind": "thread_failed", "id": thread_id})
-            else:
-                events.append({"kind": "thread_done", "id": thread_id})
-        return events
 
     # -- goals ---------------------------------------------------------------
     def add_goal(self, text):

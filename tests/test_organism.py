@@ -353,9 +353,6 @@ def test_belief_store_derived_flags(tmp_path):
     store.add(("self", "is_a", "organism"), 0.9)
     store.add(("self", "mood", "calm"), 0.9)
     store.save()
-    mind = Mind(tmp_path / "organism.scl")
-    mind.rebuild()
-    store.mind = mind
     assert store.derived()["needs_user"] is True
     assert store.derived()["contradictions"] == []
     store.add(("user", "name", "sam"), 0.9)
