@@ -12,6 +12,7 @@ import logging
 import re
 from datetime import UTC, datetime
 
+from rich.text import Text
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
@@ -440,6 +441,28 @@ class MudController:
             self._app._mud_turn()
 
 
+def doom_frame_renderable(svc, running):
+    """The pane renderable for the current game frame: the ANSI-colored
+    frame when the module offers one — Text.from_ansi turns the game's
+    truecolor SGR into styled text; without those colors the gradient
+    characters are unreadable soup — else the plain frame. Empty string
+    when there is nothing to show."""
+    if running:
+        ansi_fn = getattr(svc, "frame_ansi", None)
+        if callable(ansi_fn):
+            try:
+                text = str(ansi_fn() or "")
+                if text:
+                    return Text.from_ansi(text)
+            except Exception as exc:  # noqa: BLE001 — a bad frame must not kill the tick
+                logger.warning("doom ansi frame failed: %s", exc)
+        frame_fn = getattr(svc, "frame", None)
+        if callable(frame_fn):
+            with contextlib.suppress(Exception):
+                return str(frame_fn() or "")
+    return ""
+
+
 class DoomController:
     """Owns doom-ascii play: /doom dispatch, the DOOM overlay rendering, the
     entity's auto-play turn loop, and the arrow/space key commands. The
@@ -561,23 +584,17 @@ class DoomController:
         if args and args[0] == "stop":
             self.cancel_auto()
         # Render into the DOOM overlay instead of the chat log.
-        # Prefer the live screen capture; the dispatch result is the
-        # one-line status when no frame is available. When the overlay is
-        # not up yet (it mounts asynchronously), DoomScreen.on_mount
-        # repaints via refresh(force=True).
-        text = ""
-        frame_fn = getattr(svc, "frame", None)
-        if callable(frame_fn):
-            with contextlib.suppress(Exception):
-                text = str(frame_fn() or "")
-        if not text:
-            text = str(result or "")
-        lines = text.splitlines()
-        if lines:
-            self._text = "\n".join(lines)
+        # Prefer the live colored frame (a Rich renderable — str() would
+        # strip its styles); the dispatch result is the one-line status
+        # when no frame is available. When the overlay is not up yet (it
+        # mounts asynchronously), DoomScreen.on_mount repaints via
+        # refresh(force=True).
+        renderable = doom_frame_renderable(svc, svc.running()) or str(result or "")
+        if renderable:
+            self._text = renderable
             doom = self._pane()
             if doom is not None:
-                doom.update(self._text)
+                doom.update(renderable)
         # Raise the DOOM overlay when a game starts or renders (idempotent).
         if args and args[0] in ("start", "status"):
             from replicanta.tui import DoomScreen
@@ -614,24 +631,18 @@ class DoomController:
             running = False
         if not running and not force:
             return
-        text = ""
-        frame_fn = getattr(svc, "frame", None)
-        if running and callable(frame_fn):
+        renderable = doom_frame_renderable(svc, running)
+        if not renderable:
             try:
-                text = str(frame_fn() or "")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("doom frame failed: %s", exc)
-        if not text:
-            try:
-                text = svc.status()
+                renderable = str(svc.status())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("doom refresh failed: %s", exc)
                 return
-        if text != self._text or force:
-            self._text = text
+        if renderable != self._text or force:
+            self._text = renderable
             doom = self._pane()
             if doom is not None:
-                doom.update(self._text)
+                doom.update(renderable)
 
     def set_thought(self, text):
         """Append entity reasoning to the overlay's thought stream."""

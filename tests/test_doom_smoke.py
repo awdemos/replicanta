@@ -92,6 +92,57 @@ def test_doom_command_observes_frame(doom_app):
     asyncio.run(check())
 
 
+def test_doom_frame_renderable_prefers_ansi_styles():
+    """Unit: the pane renderable must stay a styled Rich Text — a str()
+    conversion anywhere in the controller flattens the truecolor styles
+    into uncolored soup (the 'distorted raw ascii' regression)."""
+    from rich.text import Text
+
+    from replicanta.tui_controllers import doom_frame_renderable
+
+    class FakeSvc:
+        def frame_ansi(self):
+            return "\x1b[38;2;255;0;0mAB\x1b[0m"
+
+        def frame(self):
+            return "plain"
+
+    renderable = doom_frame_renderable(FakeSvc(), running=True)
+    assert isinstance(renderable, Text)
+    assert renderable.plain == "AB"
+    assert any(s.style for s in renderable.spans)
+    # no game -> nothing to paint
+    assert doom_frame_renderable(FakeSvc(), running=False) == ""
+
+    class PlainOnly:
+        def frame(self):
+            return "plain"
+
+    # no ansi API -> plain string fallback
+    assert doom_frame_renderable(PlainOnly(), running=True) == "plain"
+
+
+def test_doom_pane_receives_colored_frame(doom_app):
+    """End-to-end through the Lua module and the controller: the #doom
+    Static must hold a Text whose spans carry the game's truecolor styles."""
+    from rich.text import Text
+
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            doom = await _start_doom(app, pilot)
+
+            def colored():
+                content = doom._Static__content
+                return isinstance(content, Text) and any(s.style for s in content.spans)
+
+            await wait_until(colored, message="styled frame to reach the pane")
+            assert "DOOM-ASCII STUB" in doom._Static__content.plain
+
+    asyncio.run(check())
+
+
 def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
     """Regression: /doom stop must kill the game process and silence the
     auto-play loop — no pending turn timers, no new game re-armed."""

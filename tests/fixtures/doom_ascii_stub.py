@@ -3,7 +3,9 @@
 
 Speaks the same wire protocol: termios on fd 0 (must be a tty), keystrokes
 read from fd 2, frames written to stdout as cursor-home + 25 rows of 80
-chars + SGR reset. Reacts to keys so tests can assert cause and effect:
+chars + SGR reset. The title is wrapped in truecolor SGR so tests can
+assert colors survive to the pane. Reacts to keys so tests can assert
+cause and effect:
 space -> HIT marker, e -> OPEN marker, x -> clean exit. Game args (-iwad,
 -scaling, -skill) are accepted and ignored except -skill, which is echoed
 into the scene. Exits after --frames N frames if given.
@@ -123,9 +125,14 @@ def main() -> int:
 
 
 def scene(args: argparse.Namespace, frame_no: int, last_key: str, hit_ttl: int, open_ttl: int) -> str:
+    import re
+
+    def visible_len(s):
+        return len(re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", s))
+
     lines = []
     inner = [
-        f"DOOM-ASCII STUB skill={args.skill} frame={frame_no:04d} key={last_key}",
+        f"\x1b[38;2;255;0;0mDOOM-ASCII STUB\x1b[0m skill={args.skill} frame={frame_no:04d} key={last_key}",
         "",
         "   @",
         "  ###",
@@ -136,7 +143,8 @@ def scene(args: argparse.Namespace, frame_no: int, last_key: str, hit_ttl: int, 
         inner.append("OPEN! door slides")
     lines.append("#" * COLS)
     for text in inner:
-        lines.append("#" + text[: COLS - 2].ljust(COLS - 2) + "#")
+        pad = " " * max(0, COLS - 2 - visible_len(text))
+        lines.append("#" + text + pad + "#")
     while len(lines) < ROWS - 1:
         lines.append("#" + " " * (COLS - 2) + "#")
     lines.append("#" * COLS)
