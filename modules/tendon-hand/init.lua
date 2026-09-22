@@ -18,6 +18,19 @@
 -- arm service (src/replicanta/tendon_hand.py), the HTTP client of the
 -- tendon bridge server (robot-hand/bridge/server.py, 127.0.0.1:8765).
 --
+-- Vocabulary contract: the arm service owns the whitelists and exposes them
+-- as CSV — moves() (everything), goals(), postures(). Known goals go to
+-- /goal; posture-only names (e.g. "open") go to /posture. Unknown names are
+-- rejected here without any network call. When the service predates
+-- goals()/postures(), every known move is treated as both (goal first,
+-- posture fallback), the historical behavior.
+--
+-- Error contract: the service raises ValueError ("unknown move ...") for
+-- whitelist misses and BridgeError ("bridge: ...") for bridge/network
+-- failures; pcall hands both across as message strings, so failures are
+-- classified on the "bridge:" prefix. A bridge failure is reported as
+-- unreachable — never as an unknown move — and is never retried here.
+--
 -- Volition: a POLICY table inside init() maps mood/stress/arousal/chaos to
 -- moves (fist under stress, wave when calm, release when tired, ...). The
 -- Python loop owns timing only; Lua owns the choice, installed through
@@ -60,11 +73,21 @@ function init(ctx)
     if ok then return v end
     return nil
   end
+  -- Numeric guard: a missing/garbled field must read as 0.0, never as nil
+  -- (nil > 0.78 would raise inside the policy every tick and leave the hand
+  -- frozen in the default posture).
+  local function num(inputs, key)
+    return tonumber(field(inputs, key)) or 0.0
+  end
+  local function truthy(inputs, key)
+    local v = field(inputs, key)
+    return v ~= nil and v ~= false
+  end
   local POLICY = {
-    { when = function(i) return field(i, "insane") or field(i, "stress") > 0.78 or field(i, "chaos") > 0.85 end, move = "fist" },
-    { when = function(i) return field(i, "stress") > 0.55 or field(i, "arousal") > 0.75 end, move = "grasp" },
-    { when = function(i) return field(i, "mood") == "curious" or field(i, "mood") == "interested" or field(i, "arousal") > 0.5 end, move = "reach" },
-    { when = function(i) return (field(i, "mood") == "calm" or field(i, "mood") == "content") and field(i, "stress") < 0.25 end, move = "wave" },
+    { when = function(i) return truthy(i, "insane") or num(i, "stress") > 0.78 or num(i, "chaos") > 0.85 end, move = "fist" },
+    { when = function(i) return num(i, "stress") > 0.55 or num(i, "arousal") > 0.75 end, move = "grasp" },
+    { when = function(i) return field(i, "mood") == "curious" or field(i, "mood") == "interested" or num(i, "arousal") > 0.5 end, move = "reach" },
+    { when = function(i) return (field(i, "mood") == "calm" or field(i, "mood") == "content") and num(i, "stress") < 0.25 end, move = "wave" },
     { when = function(i) return field(i, "mood") == "tired" or field(i, "mood") == "sleepy" end, move = "release" },
   }
   pcall(function()
@@ -97,6 +120,35 @@ function init(ctx)
     }
   end
   local MOVES_CSV = table.concat(MOVES, ", ")
+
+  -- Goal vs posture split, straight from the service's whitelists. Older
+  -- doubles that only offer moves() get the compat view: every known name
+  -- is both, so a goal attempt may fall back to posture (and only there —
+  -- a bridge failure must never trigger a second, doomed network call).
+  local GOAL_SET, POSTURE_SET = {}, {}
+  local ok_goals, goals_csv = pcall(function() return arm:goals() end)
+  local ok_post, post_csv = pcall(function() return arm:postures() end)
+  if ok_goals and ok_post and type(goals_csv) == "string" and type(post_csv) == "string"
+      and goals_csv ~= "" and post_csv ~= "" then
+    for name in string.gmatch(goals_csv, "[^,]+") do
+      GOAL_SET[(string.gsub(name, "^%s*(.-)%s*$", "%1"))] = true
+    end
+    for name in string.gmatch(post_csv, "[^,]+") do
+      POSTURE_SET[(string.gsub(name, "^%s*(.-)%s*$", "%1"))] = true
+    end
+  else
+    for _, m in ipairs(MOVES) do
+      GOAL_SET[m] = true
+      POSTURE_SET[m] = true
+    end
+  end
+
+  -- The service raises ValueError("unknown ...") for whitelist misses and
+  -- BridgeError("bridge: ...") for bridge/network failures; lupa hands both
+  -- to pcall as message strings, so classify on the "bridge:" prefix.
+  local function is_bridge_err(err)
+    return string.find(tostring(err), "bridge:", 1, true) ~= nil
+  end
 
   -- Reversal verbs say "go back to neutral" no matter what finger or move
   -- the rest of the phrase names ("retract the middle finger" -> release).
@@ -151,41 +203,64 @@ function init(ctx)
   -- ------------------------------------------------------------ public API
   local hand = {}
 
-  -- Dispatch a move by name or natural phrase. Goals and postures share
-  -- whitelists in the arm service; try goal first, fall back to posture
-  -- (which adds "open"). Returns true when the bridge accepted the move.
+  -- Dispatch a move by name or natural phrase. The vocabulary lookup above
+  -- keeps unknown names off the wire entirely; known goals post once to
+  -- /goal, posture-only names once to /posture, and a goal miss that is a
+  -- valid posture gets exactly one posture fallback. Bridge failures are
+  -- reported as unreachable, never as "unknown move". Returns true when the
+  -- bridge accepted the move.
   function hand.move(name, dur)
     if name == nil then return false end
     dur = tonumber(dur) or 4.0
     local phrase = normalize(name)
     if phrase == "" then return false end
-    -- fall back to the first token so the feedback line names what the
-    -- organism tried when it invents an unknown move, e.g. "cartwheel"
-    local move = resolve_move(phrase) or string.match(phrase, "^([%a_]+)")
-    local ok = pcall(function() return arm:move(move, dur) end)
-    if not ok then
-      ok = pcall(function() return arm:posture(move, dur) end)
+    local move = resolve_move(phrase)
+    if move == nil then
+      -- name the first word of what the organism tried so the feedback
+      -- line lets it self-correct on the next turn (e.g. "cartwheel")
+      local tried = string.match(phrase, "^([%a_]+)") or phrase
+      ctx.log("hand: unknown move '" .. tried .. "' — moves: " .. MOVES_CSV)
+      if events ~= nil then events:emit("hand_error", tried) end
+      return false
+    end
+    local ok, err
+    if GOAL_SET[move] then
+      ok, err = pcall(function() return arm:move(move, dur) end)
+      -- only a whitelist miss (not a bridge failure) may fall back
+      if not ok and POSTURE_SET[move] and not is_bridge_err(err) then
+        ok, err = pcall(function() return arm:posture(move, dur) end)
+      end
+    elseif POSTURE_SET[move] then
+      ok, err = pcall(function() return arm:posture(move, dur) end)
     end
     if ok then
       ctx.log("hand: '" .. move .. "' sent to the bridge (" .. dur .. "s)")
       if events ~= nil then events:emit("hand_goal", move) end
-    else
-      -- the organism sees system lines in later context, so the move list
-      -- here lets it self-correct on the next turn
-      ctx.log("hand: unknown move '" .. move .. "' — moves: " .. MOVES_CSV)
-      if events ~= nil then events:emit("hand_error", move) end
+      return true
     end
-    return ok
+    if is_bridge_err(err) then
+      ctx.log("hand: bridge unreachable, move '" .. move .. "' not sent: " .. tostring(err))
+    else
+      -- the service rejected a name we believed valid; refresh feedback
+      ctx.log("hand: unknown move '" .. move .. "' — moves: " .. MOVES_CSV)
+    end
+    if events ~= nil then events:emit("hand_error", move) end
+    return false
   end
 
   function hand.posture(name, dur)
     dur = tonumber(dur) or 4.0
-    local ok, err = pcall(function() return arm:posture(normalize(name), dur) end)
+    local phrase = normalize(name)
+    local ok, err = pcall(function() return arm:posture(phrase, dur) end)
     if not ok then
-      ctx.log("hand: posture failed: " .. tostring(err))
+      if is_bridge_err(err) then
+        ctx.log("hand: bridge unreachable, posture not sent: " .. tostring(err))
+      else
+        ctx.log("hand: posture failed: " .. tostring(err))
+      end
       return false
     end
-    ctx.log("hand: posture '" .. normalize(name) .. "' for " .. dur .. "s")
+    ctx.log("hand: posture '" .. phrase .. "' for " .. dur .. "s")
     return true
   end
 
@@ -273,7 +348,6 @@ function init(ctx)
   if hooks ~= nil then
     hooks:on("utterance", function(text)
       if text == nil then return end
-      ctx.log("tendon-hand: utterance received")
       -- One move per reply: a bridge goal preempts whatever is running, so a
       -- second call in the same reply would just stomp the first (and extra
       -- calls are usually lines parroted from earlier turns).

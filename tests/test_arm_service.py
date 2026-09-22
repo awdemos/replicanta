@@ -1,6 +1,8 @@
 """Service-level tests for the ArmService capability bridge."""
 
-from replicanta.tendon_hand import ArmService
+import pytest
+
+from replicanta.tendon_hand import ArmService, BridgeError, GOALS, POSTURES
 
 
 def _stub_request(service, payloads):
@@ -169,3 +171,119 @@ def test_volition_loop_survives_raising_policy():
     arm.set_decide(boom)
     arm._volition_loop()  # must return without propagating the policy error
     assert arm._alive is False  # proves the loop reached and ran the tick
+
+
+def test_volition_loop_survives_non_numeric_store_values():
+    """Regression: a string/None store value used to raise inside the loop
+    body and kill the volition thread for the whole session."""
+
+    class _WeirdStore:
+        def belief_value(self, _obj, _attr, default):
+            return "calm"
+
+        stress = "high"
+        arousal = "hot"
+        chaos = None
+        insane = "yes"
+
+    org = type("Org", (), {"store": _WeirdStore()})()
+    arm = ArmService(organism=org)
+    arm._request = lambda *a, **k: {}
+
+    def decide(_inputs):
+        arm._alive = False  # one tick, then let the loop exit
+        return "wave"
+
+    arm.set_decide(decide)
+    arm._volition = True  # without starting real threads, as below
+    arm._volition_loop()  # must not raise despite the weird store values
+    assert arm._last_volition > 0.0  # cadence advanced: the tick ran
+    assert arm._last_move == "wave"  # and the move actually dispatched
+
+
+def test_volition_thread_stays_alive_with_bad_store_values():
+    """End-to-end: with the real background thread, malformed store values
+    must not let the volition thread die."""
+    import time as _time
+
+    class _WeirdStore:
+        def belief_value(self, _obj, _attr, default):
+            return "calm"
+
+        stress = "high"
+        arousal = "hot"
+        chaos = None
+        insane = False
+
+    org = type("Org", (), {"store": _WeirdStore()})()
+    arm = ArmService(organism=org)
+    arm._request = lambda *a, **k: {}
+    arm.volition(True)  # starts the real threads
+    _time.sleep(1.5)  # several ticks at 0.5 s
+    assert arm._vol_thread is not None and arm._vol_thread.is_alive()
+    arm.stop()
+
+
+def test_goals_and_postures_csvs():
+    arm = ArmService()
+    assert set(arm.goals().split(", ")) == set(GOALS)
+    assert set(arm.postures().split(", ")) == set(POSTURES)
+
+
+def test_bridge_error_distinguished_from_validation():
+    """Whitelist misses keep raising plain ValueError; bridge/network
+    failures raise BridgeError with the "bridge:" prefix Lua keys on."""
+    arm = ArmService()
+
+    def down(method, path, data, headers):
+        raise ConnectionResetError("reset")
+
+    arm._roundtrip = down
+    with pytest.raises(BridgeError) as info:
+        arm.move("wave", 2.0)
+    assert str(info.value).startswith("bridge:")
+    with pytest.raises(ValueError, match="unknown move"):
+        arm.move("cartwheel", 2.0)  # validated before any network I/O
+
+
+def test_move_retries_once_on_connection_refused():
+    """A bridge mid-restart costs one bounded retry, then success."""
+    arm = ArmService()
+    calls = []
+
+    def flaky(method, path, data, headers):
+        calls.append(path)
+        if len(calls) == 1:
+            raise ConnectionRefusedError("restarting")
+        return {"ok": True}
+
+    arm._roundtrip = flaky
+    result = arm.move("wave", 2.0)
+    assert result["goal"] == "wave"
+    assert calls == ["/goal", "/goal"]
+
+
+def test_move_fails_fast_on_timeout():
+    """A hung bridge must not be retried: fail after a single attempt."""
+    arm = ArmService()
+    calls = []
+
+    def hung(method, path, data, headers):
+        calls.append(path)
+        raise TimeoutError("hung")
+
+    arm._roundtrip = hung
+    with pytest.raises(BridgeError, match="bridge:"):
+        arm.move("wave", 2.0)
+    assert calls == ["/goal"]
+
+
+def test_stopped_service_rejects_moves():
+    arm = ArmService()
+    arm.stop()
+    with pytest.raises(RuntimeError, match="stopped"):
+        arm.move("wave", 1.0)
+    with pytest.raises(RuntimeError, match="stopped"):
+        arm.posture("open", 1.0)
+    with pytest.raises(RuntimeError, match="stopped"):
+        arm.emotion({"stress": 0.5})

@@ -80,6 +80,12 @@ class LuaHost:
         ModuleLoader._register_builtin_services), so ``services.get`` and
         ``ctx.events`` see the same objects.
         """
+        # The new loader brings a fresh registry; retire the previous one's
+        # services (arm SSE/volition threads) or the old ArmService keeps
+        # driving the hand with a stale Lua policy after every reload.
+        old_registry = self.registry
+        if old_registry is not None:
+            old_registry.shutdown()
         self.loader = ModuleLoader(
             self.modules_dir,
             organism=self.organism,

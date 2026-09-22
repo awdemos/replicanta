@@ -20,6 +20,21 @@ log = logging.getLogger(__name__)
 # capability bridges (fly_brain) can share it.
 _DictProxy = lua_sandbox.DictProxy
 
+# Connection-level errors worth one idempotent retry (the bridge may be
+# mid-restart). Timeouts and HTTP errors fail fast: the bridge accepted the
+# connection, so repeating would only double the stall.
+_RETRYABLE_ERRORS = (ConnectionRefusedError, ConnectionResetError, BrokenPipeError)
+
+
+class BridgeError(RuntimeError):
+    """The tendon bridge is unreachable or returned an error.
+
+    move/posture/actuator/pose/emotion raise this for every bridge/network
+    failure and plain ValueError for whitelist misses; Lua tells them apart
+    by the ``bridge:`` message prefix.
+    """
+
+
 GOALS = (
     "reach",
     "grasp",
@@ -80,6 +95,14 @@ def _clamp(x, lo=0.0, hi=1.0):
     return max(lo, min(hi, float(x)))
 
 
+def _to_float(value, default=0.0):
+    """Best-effort float coercion; unreadable store values read as default."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class ArmService:
     """Client for the tendon-hand bridge with optional volitional control.
 
@@ -90,7 +113,11 @@ class ArmService:
       volition(enabled), set_decide(fn).
 
     Error contract per method: move/posture/actuator/pose/emotion validate
-    their arguments and raise (Lua sees the error via pcall); get_state,
+    their arguments and raise (Lua sees the error via pcall). Whitelist
+    misses raise ValueError ("unknown move/posture ..."); bridge and network
+    failures raise BridgeError with a "bridge:" message prefix, so Lua can
+    tell a vocabulary miss from an unreachable bridge. After stop() (module
+    reload retires the service) every move raises RuntimeError. get_state,
     state, and health never raise on bridge failures — they return a
     DictProxy carrying ``connected=false`` and an ``error`` field instead.
 
@@ -117,6 +144,8 @@ class ArmService:
         self._explicit_hold_until = 0.0
         self._telemetry_log = []  # recent (time, key, value) tuples
         self._alive = True
+        self._stopped = False  # stop() has retired this service
+        self._stop_event = threading.Event()  # interrupts the loop sleeps
         # Threads start lazily on first real use: ModuleLoader constructs an
         # ArmService per organism, and eager start would spawn SSE/volition
         # loops (and live bridge connections) for organisms that never move.
@@ -125,12 +154,16 @@ class ArmService:
 
     def _ensure_started(self):
         with self._lock:
-            if self._thread is not None:
+            if self._thread is not None or not self._alive:
                 return
             self._thread = threading.Thread(target=self._sse_loop, daemon=True)
             self._thread.start()
             self._vol_thread = threading.Thread(target=self._volition_loop, daemon=True)
             self._vol_thread.start()
+
+    def _ensure_usable(self):
+        if self._stopped:
+            raise RuntimeError("arm service stopped")
 
     # -- public API used by Lua ------------------------------------------------
     def get_state(self):
@@ -167,6 +200,7 @@ class ArmService:
             return list(self._telemetry_log)
 
     def move(self, kind, duration_s=4.0, _volitional=False):
+        self._ensure_usable()
         kind = str(kind).lower()
         if kind not in GOALS:
             raise ValueError(f"unknown move {kind!r}; try {GOALS}")
@@ -177,6 +211,7 @@ class ArmService:
         return {"ok": True, "goal": kind, "duration_s": duration_s}
 
     def posture(self, name, duration_s=4.0):
+        self._ensure_usable()
         name = str(name).lower()
         if name not in POSTURES:
             raise ValueError(f"unknown posture {name!r}; try {POSTURES}")
@@ -187,6 +222,7 @@ class ArmService:
 
     def actuator(self, finger, joint, side, activation, duration_s=4.0):
         """Direct per-tendon drive: side = flexor|extensor, activation 0..1."""
+        self._ensure_usable()
         self._post(
             "/actuator",
             {
@@ -200,6 +236,7 @@ class ArmService:
         return {"ok": True}
 
     def pose(self, spec):
+        self._ensure_usable()
         spec = lua_sandbox.to_py(spec)
         if not isinstance(spec, dict):
             raise TypeError("pose spec must be a table")
@@ -208,6 +245,7 @@ class ArmService:
         return {"ok": True}
 
     def emotion(self, spec):
+        self._ensure_usable()
         spec = lua_sandbox.to_py(spec)
         if not isinstance(spec, dict):
             raise TypeError("emotion spec must be a table")
@@ -225,20 +263,43 @@ class ArmService:
         cross the Lua boundary as tables."""
         return ", ".join(MOVES)
 
+    def goals(self):
+        """Comma-separated goal whitelist (mirrors the bridge's /goal kinds)."""
+        return ", ".join(GOALS)
+
+    def postures(self):
+        """Comma-separated posture whitelist (mirrors the bridge's /posture)."""
+        return ", ".join(POSTURES)
+
     def summary(self):
         """Return a human-readable hand state string (safe for Lua display)."""
         try:
             s = self._get_json("/arm")
         except Exception as exc:  # noqa: BLE001
             return f"hand bridge offline: {exc}"
-        emo = s.get("emotion", {})
+        if not isinstance(s, dict):
+            return "hand bridge offline: malformed state"
+        emo = s.get("emotion")
+        if not isinstance(emo, dict):
+            emo = {}
         lines = [
             "hand bridge: live",
             f"goal: {s.get('goal') or 'idle'}  mood: {emo.get('mood', '?')}",
-            f"stress: {int(emo.get('stress', 0) * 100)}%  arousal: {int(emo.get('arousal', 0) * 100)}%",
+            (
+                f"stress: {int(_clamp(_to_float(emo.get('stress', 0.0))) * 100)}%"
+                f"  arousal: {int(_clamp(_to_float(emo.get('arousal', 0.0))) * 100)}%"
+            ),
         ]
-        for f, fd in s.get("fingers", {}).items():
-            tensions = [j.get("flex_force", 0.0) for j in fd.get("joints", {}).values()]
+        fingers = s.get("fingers")
+        if not isinstance(fingers, dict):
+            fingers = {}
+        for f, fd in fingers.items():
+            if not isinstance(fd, dict):
+                continue
+            joints = fd.get("joints")
+            if not isinstance(joints, dict):
+                continue
+            tensions = [j.get("flex_force", 0.0) for j in joints.values() if isinstance(j, dict)]
             if tensions:
                 lines.append(f"{f} tension: {int(sum(tensions) / len(tensions))}N")
         return "\n".join(lines)
@@ -278,20 +339,35 @@ class ArmService:
         return self._decide(mood, stress, arousal, chaos, insane)
 
     # -- HTTP helpers ----------------------------------------------------------
-    def _request(self, method, path, body=None):
-        self._ensure_started()
-        conn = HTTPConnection(self._host, self._port, timeout=5)
-        headers = {"Content-Type": "application/json"} if body else {}
-        data = json.dumps(body).encode() if body else None
+    def _roundtrip(self, method, path, data, headers):
+        """One HTTP attempt against the bridge; raises on any failure."""
+        conn = HTTPConnection(self._host, self._port, timeout=3)
         try:
             conn.request(method, path, data, headers)
             resp = conn.getresponse()
             raw = resp.read()
-            if resp.status >= 400:
-                raise HTTPException(f"{resp.status} {raw.decode()[:200]}")
-            return json.loads(raw.decode()) if raw else {}
         finally:
             conn.close()
+        if resp.status >= 400:
+            raise HTTPException(f"{resp.status} {raw.decode()[:200]}")
+        return json.loads(raw.decode()) if raw else {}
+
+    def _request(self, method, path, body=None):
+        self._ensure_started()
+        data = json.dumps(body).encode() if body else None
+        headers = {"Content-Type": "application/json"} if body else {}
+        attempts = 2 if method == "POST" else 1
+        for attempt in range(attempts):
+            try:
+                return self._roundtrip(method, path, data, headers)
+            except _RETRYABLE_ERRORS as exc:
+                if attempt + 1 < attempts:
+                    time.sleep(0.2)
+                    continue
+                raise BridgeError(f"bridge: cannot reach {self._host}:{self._port}: {exc}") from exc
+            except (OSError, HTTPException, json.JSONDecodeError) as exc:
+                raise BridgeError(f"bridge: {exc}") from exc
+        raise AssertionError("unreachable")
 
     def _get_json(self, path):
         return self._request("GET", path)
@@ -330,7 +406,8 @@ class ArmService:
             finally:
                 with contextlib.suppress(Exception):
                     conn.close()
-            time.sleep(2.0)
+            # interruptible backoff: stop() wakes this immediately
+            self._stop_event.wait(2.0)
 
     def _record_telemetry(self, state):
         now = time.time()
@@ -355,39 +432,47 @@ class ArmService:
     # -- volitional control -----------------------------------------------------
     def _volition_loop(self):
         while self._alive:
-            time.sleep(0.5)
-            with self._lock:
-                if not self._volition:
-                    continue
-            if self.organism is None:
-                continue
+            # interruptible tick sleep: stop() wakes this immediately
+            self._stop_event.wait(0.5)
+            if not self._alive:
+                break
             try:
-                s = self.organism.store
-                mood = s.belief_value("self", "mood", "calm")
-                stress = getattr(s, "stress", 0.0)
-                arousal = getattr(s, "arousal", 0.0)
-                chaos = getattr(s, "chaos", 0.0)
-                insane = getattr(s, "insane", False)
+                self._volition_pass()
+            except Exception as exc:  # noqa: BLE001 — the loop must never die
+                log.debug("volition loop error: %s", exc)
+
+    def _volition_pass(self):
+        with self._lock:
+            if not self._volition:
+                return
+        if self.organism is None:
+            return
+        s = self.organism.store
+        mood = s.belief_value("self", "mood", "calm")
+        # coerce + clamp: a malformed store value must never kill the loop
+        # (a raw string arousal used to raise TypeError and end volition for
+        # the whole session) nor invert the cadence into a move-spam loop
+        stress = _clamp(_to_float(getattr(s, "stress", 0.0)))
+        arousal = _clamp(_to_float(getattr(s, "arousal", 0.0)))
+        chaos = _clamp(_to_float(getattr(s, "chaos", 0.0)))
+        insane = bool(getattr(s, "insane", False))
+        now = time.time()
+        # avoid spamming the hand; decisions every 8-16 s depending on arousal
+        interval = 16.0 - 8.0 * arousal
+        with self._lock:
+            if now - self._last_volition < interval:
+                return
+        # don't stomp an explicit move that is still playing out
+        if now < self._explicit_hold_until:
+            return
+        kind = self._volition_tick(mood, stress, arousal, chaos, insane, now)
+        if kind and kind != self._last_move:
+            try:
+                self.move(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
+                self._last_move = kind
+                log.debug("volition chose move %s (mood=%s stress=%.2f)", kind, mood, stress)
             except Exception as exc:  # noqa: BLE001
-                log.debug("volition read error: %s", exc)
-                continue
-            now = time.time()
-            # avoid spamming the hand; decisions every 8-16 s depending on arousal
-            interval = 16.0 - 8.0 * arousal
-            with self._lock:
-                if now - self._last_volition < interval:
-                    continue
-            # don't stomp an explicit move that is still playing out
-            if now < self._explicit_hold_until:
-                continue
-            kind = self._volition_tick(mood, stress, arousal, chaos, insane, now)
-            if kind and kind != self._last_move:
-                try:
-                    self.move(kind, duration_s=4.0 + arousal * 4.0, _volitional=True)
-                    self._last_move = kind
-                    log.debug("volition chose move %s (mood=%s stress=%.2f)", kind, mood, stress)
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("volition move error: %s", exc)
+                log.debug("volition move error: %s", exc)
 
     def _volition_tick(self, mood, stress, arousal, chaos, insane, now):
         """Run one volition decision; never raises.
@@ -418,4 +503,16 @@ class ArmService:
         return "point"
 
     def stop(self):
+        """Retire this service: stop the SSE/volition threads and refuse
+        further moves (stale Lua closures get a clean, catchable error).
+
+        ModuleLoader calls this when reloading modules replaces the registry,
+        so a replaced ArmService can't keep driving the hand with a stale
+        volition policy.
+        """
+        self._stopped = True
         self._alive = False
+        self._stop_event.set()
+        for thread in (self._thread, self._vol_thread):
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2.0)

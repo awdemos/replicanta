@@ -33,6 +33,12 @@ class _Arm:
     def moves(self):
         return "middle_finger, thumbs_up, reach, grasp, release, point, wave, fist, ripple, pinch, shaka, rock, spock, open, ok"
 
+    def goals(self):
+        return ", ".join(GOALS)
+
+    def postures(self):
+        return ", ".join(POSTURES)
+
 
 class _Services:
     def __init__(self, d):
@@ -346,3 +352,148 @@ def test_module_inits_when_ctx_lacks_events():
     assert hand is not None
     assert hand["move"]("wave", 2) is True
     assert arm.calls == [("goal", "wave", 2.0)]
+
+
+def _load_module_with(arm):
+    """init.lua around a caller-provided arm service; returns (hooks, logs,
+    events, services) for firing utterance hooks and reading feedback."""
+    hooks, logs = _Hooks(), []
+    events = _Events()
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _Ctx(services, logs, events)
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+    return hooks, logs, events, services
+
+
+def test_reload_stops_replaced_arm_service(tmp_path):
+    """Regression: reloading modules used to orphan the old ArmService's
+    SSE/volition threads, and the zombie kept driving the hand with its
+    stale Lua policy. Reload must retire the old service."""
+    import shutil
+
+    from replicanta.modules import ModuleLoader
+    from replicanta.tendon_hand import ArmService
+
+    src = Path(__file__).resolve().parent.parent / "modules"
+    shutil.copytree(src, tmp_path / "modules")
+    loader = ModuleLoader(
+        tmp_path / "modules",
+        organism=None,
+        modules_config={"enabled": ["base", "tendon-hand"]},
+    )
+    loader.load_all()
+    arm1 = loader.registry.get("arm")
+    assert isinstance(arm1, ArmService)
+
+    def fake_request(method, path, body=None):
+        arm1._ensure_started()  # what the real _request does before I/O
+        return {}
+
+    arm1._request = fake_request
+    arm1.move("wave", 1.0)  # starts the SSE + volition threads
+    assert arm1._thread is not None and arm1._vol_thread is not None
+
+    loader.load_all()  # reload replaces the services
+    arm2 = loader.registry.get("arm")
+    assert arm2 is not arm1
+    assert arm1._alive is False  # retired: the zombie can no longer move
+    assert not arm1._thread.is_alive()
+    assert not arm1._vol_thread.is_alive()
+
+
+def test_hosted_reload_stops_replaced_arm_service(tmp_path):
+    """Regression: LuaHost.load_modules swaps in a whole new ModuleLoader,
+    so loader-level shutdown never saw the old registry — the old ArmService
+    kept its threads and kept moving the hand after every /modules save."""
+    import shutil
+
+    from replicanta.lua_host import LuaHost
+    from replicanta.tendon_hand import ArmService
+
+    src = Path(__file__).resolve().parent.parent / "modules"
+    shutil.copytree(src, tmp_path / "modules")
+    host = LuaHost(modules_dir=tmp_path / "modules", organism=None)
+    host.load_modules(modules_config={"enabled": ["base", "tendon-hand"]})
+    arm1 = host.registry.get("arm")
+    assert isinstance(arm1, ArmService)
+
+    arm1._request = lambda *a, **k: arm1._ensure_started() or {}
+    arm1.move("wave", 1.0)  # starts the SSE + volition threads
+    assert arm1._thread is not None and arm1._vol_thread is not None
+
+    host.reload_modules(modules_config={"enabled": ["base", "tendon-hand"]})
+    arm2 = host.registry.get("arm")
+    assert arm2 is not arm1
+    assert arm1._alive is False
+    assert not arm1._thread.is_alive()
+    assert not arm1._vol_thread.is_alive()
+
+
+def test_bridge_down_reports_unreachable_not_unknown():
+    """A dead bridge must read as 'bridge unreachable', never 'unknown
+    move', and must not trigger the posture fallback (bounded retry at the
+    service layer only)."""
+    from replicanta.tendon_hand import ArmService
+
+    arm = ArmService()
+    calls = []
+
+    def down(method, path, data, headers):
+        calls.append(path)
+        raise ConnectionRefusedError("no bridge")
+
+    arm._roundtrip = down
+    hooks, logs, events, _ = _load_module_with(arm)
+    for fn in hooks.handlers.get("utterance", []):
+        fn('hand.move("wave")')
+
+    assert all(p == "/goal" for p in calls)  # no /posture fallback storm
+    assert len(calls) <= 2  # the service's single bounded retry
+    assert any("bridge unreachable" in line for line in logs)
+    assert not any("unknown move" in line for line in logs)
+    assert ("hand_error", "wave") in events.emitted
+
+
+def test_unknown_move_never_touches_the_network():
+    """Invented moves are rejected from the mirrored vocabulary alone."""
+    from replicanta.tendon_hand import ArmService
+
+    arm = ArmService()
+    calls = []
+    arm._roundtrip = lambda method, path, data, headers: calls.append(path) or {}
+    _hooks, logs, events, services = _load_module_with(arm)
+    hand = services.get("hand")
+    assert hand["move"]("cartwheel", 2) is False
+    assert calls == []
+    assert any("unknown move 'cartwheel'" in line for line in logs)
+    assert ("hand_error", "cartwheel") in events.emitted
+
+
+def test_numeric_directive_does_not_crash(rig):
+    """Regression: a name with no leading word made move nil, and the
+    feedback log line raised inside the utterance handler."""
+    calls, logs = rig.fire('hand.move("3fast")')
+    assert calls == []
+    assert any("unknown move" in line for line in logs)
+
+
+def test_policy_survives_partial_inputs():
+    """Missing/garbled volition fields must read as 0.0/false, never raise
+    inside the policy (which would freeze the hand's self-direction)."""
+    arm, hooks, logs = _Arm(), _Hooks(), []
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _Ctx(services, logs, _Events())
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+    decide = arm.decide
+    # partial dict: only mood present
+    assert decide({"mood": "calm"}) == "wave"
+    assert decide({"mood": "tired"}) == "release"
+    # totally empty dict: every numeric rule falls through to the default
+    assert decide({}) == "point"
+    # garbage values coerce to 0.0 instead of raising
+    assert decide({"stress": "high", "mood": "calm"}) == "wave"
+    assert decide({"stress": 0.9}) == "fist"
