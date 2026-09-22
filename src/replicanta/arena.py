@@ -62,6 +62,11 @@ ROGUE_THOUGHT = (
 TEMP_MIN = 0.7  # lower bound for the per-round temperature jitter
 TEMP_MAX = 0.85  # upper bound
 
+# Doom turns stream reasoning before the command line; an 80-token cap
+# truncated verbose drafts before the command ever arrived, leaving the
+# turn with no move (the model kept 'shooting' into a silent no-op).
+QUICK_TAKE_MAX_TOKENS = 160
+
 
 class NoUsableCandidateError(ValueError):
     """The model responded but every candidate was unusable — a content
@@ -270,7 +275,12 @@ class ThoughtArena:
                     on_token(tok)
 
                 draft = llmclient.generate_stream(
-                    self._proposal(base), model, timeout, temperature=temperature, on_token=_on_token, max_tokens=80
+                    self._proposal(base),
+                    model,
+                    timeout,
+                    temperature=temperature,
+                    on_token=_on_token,
+                    max_tokens=QUICK_TAKE_MAX_TOKENS,
                 )
                 draft = _clean_candidate(draft)
             else:

@@ -634,6 +634,11 @@ def _doom_prompt(snapshot):
     else:
         lines.append("  (no target data)")
     lines.append(f"  shoot would hit right now: {can_shoot}")
+    if can_shoot == "yes":
+        lines.append("  -> command shoot NOW — do not walk or turn first.")
+    else:
+        lines.append("  -> do NOT shoot yet — it would miss. Get the enemy")
+        lines.append("     'ahead' first: a/d turn toward it, w advances.")
     lines += [
         "",
         "Now go — reason out loud, then command.",

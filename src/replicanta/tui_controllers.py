@@ -9,6 +9,7 @@ monkeypatching and organism swaps keep working."""
 
 import contextlib
 import logging
+import re
 from datetime import UTC, datetime
 
 from textual.widgets import Static, TabbedContent
@@ -41,28 +42,32 @@ def doom_player_command(text):
     return None
 
 
+_COMMAND_CALL_RE = re.compile(r"doom\.command\(([^)]*)\)", re.IGNORECASE)
+
+
 def extract_doom_command(reply):
-    """Look for a line that looks like doom.command(...) and return the inner arg.
-    Also tolerate a bare move word as a fallback for sloppy model output."""
+    """Look for a doom.command(...) call anywhere in a line and return the
+    inner arg. Also tolerate a bare move word as a fallback for sloppy
+    model output."""
     if not reply:
         return None
-    valid = {"w", "a", "s", "d", "q", "e", "shoot", "use"}
+    valid = {"w", "a", "s", "d", "q", "e", "shoot", "fire", "use"}
     for line in reply.strip().splitlines():
         line = line.strip()
-        if line.startswith("doom.command("):
-            if line.endswith(")"):
-                inner = line[len("doom.command(") : -1].strip()
-                inner = inner.strip('"').strip("'")
-                if inner in valid:
-                    return inner
-            continue
-        # Fallback: a line that is just one of the valid moves.
-        lowered = line.lower()
+        # The model often buries the call in prose ('The command is:
+        # doom.command("shoot")') or appends punctuation after it — search
+        # anywhere in the line instead of anchoring to its start.
+        m = _COMMAND_CALL_RE.search(line)
+        if m is not None:
+            inner = m.group(1).strip().strip('"').strip("'").lower()
+            if inner in valid:
+                return inner
+            continue  # a command call with an invalid arg is not a move
+        # Fallback: a line that is just one of the valid moves, maybe with
+        # trailing punctuation.
+        lowered = line.lower().rstrip(".!,")
         if lowered in valid:
             return lowered
-        # 'shoot' may appear as a single word anywhere.
-        if lowered == "shoot":
-            return "shoot"
     return None
 
 

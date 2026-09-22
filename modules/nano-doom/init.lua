@@ -116,7 +116,13 @@ function init(ctx)
           api.start(map_arg)
           break
         end
-        local cmd_arg = string.match(ln, "^%s*doom%.command%s*%(%s*[\"'](.-)[\"']%s*%)%s*$")
+        -- search anywhere in the line: the model buries the call in prose
+        -- ('The command is: doom.command("shoot")') or punctuates after it
+        local cmd_arg = string.match(ln, "doom%.command%s*%(%s*[\"'](.-)[\"']%s*%)")
+        if cmd_arg == nil then
+          -- tolerate quote-less model output: doom.command(shoot)
+          cmd_arg = string.match(ln, "doom%.command%s*%(%s*([%w%-_]+)%s*%)")
+        end
         if cmd_arg ~= nil then
           api.command(cmd_arg)
           break

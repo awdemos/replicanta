@@ -130,3 +130,33 @@ def test_module_utterance_dispatch(tmp_path, caplog):
     hooks = loader.registry.get("hooks")
     hooks.emit("utterance", 'doom.start("box")')
     assert any("nano-doom: started box" in line for line in logs)
+
+
+def _turns_of(doom):
+    import re
+
+    match = re.search(r"turns=(\d+)", doom.status())
+    return int(match.group(1))
+
+
+def test_module_utterance_command_variants(tmp_path):
+    """The hook must tolerate the sloppy doom.command lines a small model
+    actually writes: trailing punctuation, inline comments, missing quotes.
+    Strict anchoring used to drop these silently — the 'shoot always
+    fails' symptom."""
+    loader = _load_nano_doom(tmp_path, [])
+    hooks = loader.registry.get("hooks")
+    commands = loader.registry.get("commands")
+    doom = loader.registry.get("doom")
+    commands.dispatch("/doom", ["start"])
+    for variant in (
+        'doom.command("d")',
+        'doom.command("d").',
+        'doom.command("d") -- turning right',
+        "doom.command(d)",
+        'doom.command( "shoot" ) with trailing prose',
+        'The command is: doom.command("shoot")',
+    ):
+        before = _turns_of(doom)
+        hooks.emit("utterance", variant)
+        assert _turns_of(doom) > before, f"dropped: {variant!r}"
