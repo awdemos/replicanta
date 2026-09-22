@@ -54,6 +54,39 @@ def test_spawn_pty_mode_writes_reach_the_child():
     bridge.kill(pid)
 
 
+def test_write_taps_option_spaces_repeats_from_a_thread():
+    """taps/spacing: the payload lands N times, spacing seconds apart,
+    without blocking the caller — doom-ascii needs this because one read
+    registers a key for only ~42ms (a single tap is an invisible step)."""
+    import sys
+
+    reader = [
+        sys.executable,
+        "-c",
+        (
+            "import sys,time\n"
+            "while True:\n"
+            " b=sys.stdin.buffer.read(1)\n"
+            " if not b:\n"
+            "  break\n"
+            " print(time.monotonic(),flush=True)"
+        ),
+    ]
+    got = []
+    bridge = capbridges.ProcessBridge()
+    pid = bridge.spawn(reader, {"on_data": got.append})
+    time.sleep(0.3)  # child starts reading
+    started = time.monotonic()
+    bridge.write(pid, "x", {"taps": 4, "spacing": 0.08})
+    assert _wait_for(lambda: len("".join(got).splitlines()) >= 4, timeout=5.0)
+    elapsed = time.monotonic() - started
+    stamps = [float(line) for line in "".join(got).splitlines()[:4]]
+    assert len(stamps) == 4
+    assert stamps[-1] - stamps[0] >= 0.2  # ~3 x 0.08s of spacing
+    assert elapsed >= 0.2  # the caller was NOT blocked meanwhile
+    bridge.kill(pid)
+
+
 def test_spawn_limit_two_per_module():
     bridge = capbridges.ProcessBridge()
     p1 = bridge.spawn([STUB, "--interval", "0.05"], {})

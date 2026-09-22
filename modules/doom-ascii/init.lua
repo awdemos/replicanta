@@ -83,6 +83,20 @@ function init(ctx)
     ["7"] = "7",
   }
 
+  -- Spaced taps per command. The engine registers a key for only ~42ms per
+  -- read, so one tap moves the player a barely-visible step (forward/back
+  -- felt broken to humans while turns, rotating the whole view, read fine).
+  -- Taps arrive ~50ms apart, keeping the key refreshed for a visible step;
+  -- the flush window between reads eats some, which extra taps absorb.
+  local TAPS = {
+    w = 8,
+    s = 8,
+    a = 3,
+    d = 3,
+    q = 6,
+    e = 6,
+  }
+
   local game = {
     proc = nil,
     token = 0,
@@ -350,7 +364,7 @@ function init(ctx)
     if seq == nil then
       error("unknown doom command '" .. cmd .. "'")
     end
-    ctx.process.write(game.proc, seq)
+    ctx.process.write(game.proc, seq, { taps = TAPS[cmd] or 1, spacing = 0.05 })
     if events ~= nil then
       events:emit("doom_tick", api.frame())
     end

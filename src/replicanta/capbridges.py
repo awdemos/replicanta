@@ -30,6 +30,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -274,9 +275,34 @@ class ProcessBridge:
             raise ValueError(str(exc)) from exc
         return pid
 
-    def write(self, pid, data) -> None:
+    def write(self, pid, data, opts=None) -> None:
+        """Write to a child's stdin. opts may carry taps/spacing (numbers):
+        the payload is written that many times, spacing seconds apart, from
+        a bridge thread. doom-ascii's input is a 42ms-held timestamp per
+        read, so a single tap moves the player barely a step; spaced taps
+        keep the key refreshed for a visible, human-scale movement (and
+        never block the caller — the UI thread invokes this)."""
         child = self._child(pid)
-        child.write(str(data))
+        payload = str(data)
+        taps = int(_opt(opts, "taps", 1) or 1)
+        spacing = float(_opt(opts, "spacing", 0.05) or 0.05)
+        if taps <= 1:
+            child.write(payload)
+            return
+
+        def tapper():
+            for _ in range(taps):
+                try:
+                    if not child.running():
+                        return
+                    child.write(payload)
+                except Exception as exc:  # noqa: BLE001 — a dead child mid-tap is normal
+                    self._emit(f"process tap failed: {exc}")
+                    return
+                if spacing > 0:
+                    time.sleep(spacing)
+
+        threading.Thread(target=tapper, daemon=True, name="capbridge-tapper").start()
 
     def kill(self, pid) -> None:
         child = self._child(pid)
