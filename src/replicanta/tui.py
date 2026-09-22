@@ -2017,7 +2017,6 @@ class OrganismApp(App):
             ("ctrl+p", " palette "),
             ("F1", " help "),
             ("F2-F8", " tabs "),
-            ("ctrl+m", " mouse "),
             ("ctrl+q", " quit"),
         ]
 
@@ -2037,7 +2036,7 @@ class OrganismApp(App):
         segs = list(hints)
         keys = build(segs)
         while len(segs) > 2 and len(f"{counters}   {keys.plain}") > width:
-            segs.pop(-2)  # left of quit: mouse, then tabs, then help
+            segs.pop(-2)  # left of quit: tabs, then help
             keys = build(segs)
         text = f"{counters}   {keys.plain}"
         self._bottombar_text = text
