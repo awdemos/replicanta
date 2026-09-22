@@ -340,6 +340,19 @@ def render_bar_chart_svg(records, value_key, label_key, title="chart", caption="
 # -----------------------------------------------------------------------------
 
 
+# Label column cap: keeps the "│" separator at a fixed column (and the bar
+# on the same line) no matter how long a label — often an entity name — is.
+_LABEL_CAP = 24
+
+
+def _clip_label(label):
+    """One-line label no wider than _LABEL_CAP, ellipsis-truncated."""
+    label = " ".join(str(label).split())
+    if len(label) <= _LABEL_CAP:
+        return label
+    return label[: _LABEL_CAP - 1].rstrip() + "…"
+
+
 def render_text_bars(records, value_key, label_key, width=40, max_rows=18, caption=""):
     """Return a Rich-ready multi-line text chart for the TUI.
 
@@ -349,7 +362,7 @@ def render_text_bars(records, value_key, label_key, width=40, max_rows=18, capti
         return "(no data)" + (f"\n{caption}" if caption else "")
 
     records = records[:max_rows]
-    labels = [str(r.get(label_key, "?")) for r in records]
+    labels = [_clip_label(r.get(label_key, "?")) for r in records]
     values = [float(r.get(value_key, 0) or 0) for r in records]
     max_v = max(values) if values else 1
     max_label = max(len(label) for label in labels)

@@ -71,6 +71,24 @@ def test_render_text_bars():
     assert "█" in text
 
 
+def test_render_text_bars_separator_column_stable_with_long_names():
+    """A long entity name must not shove the │ separator rightward without
+    bound (or push the bar off the line): clipped labels cap the separator
+    column, and every row's bar stays on the separator's line."""
+    long = rdd.render_text_bars(
+        [{"key": "fern", "count": 3}, {"key": "an entity with an absurdly long name", "count": 1}],
+        "count",
+        "key",
+        width=10,
+    )
+    lines = long.splitlines()
+    sep_at = [line.index("│") for line in lines]
+    assert sep_at[0] == sep_at[1]
+    assert sep_at[0] <= rdd._LABEL_CAP + 1  # label column capped, then a space
+    for line in lines:
+        assert "█" in line
+
+
 def test_fmt_number():
     assert rdd._fmt_number(1234) == "1.2K"
     assert rdd._fmt_number(1_500_000) == "1.5M"
