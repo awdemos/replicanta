@@ -350,7 +350,7 @@ def voice_command(args):
                 message = (
                     "spoken voice on, but the piper/soundcard packages are "
                     "missing — staying mute; install the 'voice' extra "
-                    '(pip install "replicanta[voice]")'
+                    "(uv pip install -e '.[voice]')"
                 )
             return (message, True)
         if speech.enabled:
