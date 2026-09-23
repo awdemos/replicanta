@@ -79,12 +79,11 @@ def _opt(opts, key, default=None):
 class _Child:
     """One spawned process: reader thread -> on_data, watcher -> on_exit."""
 
-    def __init__(self, argv, pty, on_data, on_exit, on_gone, emit, owner=None):
+    def __init__(self, argv, pty, on_data, on_exit, emit, owner=None):
         self.argv = argv
         self.pty = pty
         self._on_data = on_data
         self._on_exit = on_exit
-        self._on_gone = on_gone
         self._emit = emit
         self.owner = owner  # registry tag: scopes shutdown_all(owner=...)
         self._proc: subprocess.Popen | None = None
@@ -288,7 +287,7 @@ class ProcessBridge:
         pty = bool(_opt(opts, "pty"))
         on_data = _opt(opts, "on_data")
         on_exit = _opt(opts, "on_exit")
-        child = _Child(args, pty, on_data, on_exit, self._drop, self._emit, owner=self._owner)
+        child = _Child(args, pty, on_data, on_exit, self._emit, owner=self._owner)
         # Register before the threads start: a fast-dying child's on_exit
         # callback must already see the process through output()/kill().
         with self._lock:

@@ -8,7 +8,6 @@ terminal-friendly colored bars so they look good inside the TUI.
 This module intentionally avoids pandas/numpy/matplotlib — it only uses the
 standard library."""
 
-from collections import Counter
 from dataclasses import dataclass, field
 
 
@@ -150,10 +149,6 @@ class Dataset:
     def count(self):
         """Action: execute and return the record count."""
         return len(self._execute())
-
-    def counts_by(self, key_fn):
-        """Action: execute and return a Counter of key frequencies."""
-        return Counter(key_fn(r) for r in self._execute())
 
 
 # -----------------------------------------------------------------------------

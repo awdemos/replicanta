@@ -84,8 +84,7 @@ logger = logging.getLogger(__name__)
 # move" bug). The name is truncated at render and the outer columns are
 # pinned to fixed widths so the center column never drifts.
 TOPBAR_NAME_BUDGET = 18  # visible chars of the organism name (last is "…")
-TOPBAR_LEFT_WIDTH = 50
-TOPBAR_RIGHT_WIDTH = 32
+# the zone widths themselves live in the #topbar-* CSS rules
 
 # Sidebar rows: the panel is 24 wide with 0 1 ListItem padding, so a label
 # never gets more than 22 cells; anything longer would wrap the row onto a
@@ -194,7 +193,7 @@ class CommandPalette(Screen):
 
     def _refresh_palette(self, query):
         results = self.query_one("#palette-results", ListView)
-        self._clear_await = results.clear()  # AwaitRemove; completes on the next tick
+        results.clear()  # AwaitRemove completes on the next tick
         items = tui_commands.filter_commands(query)
         meta = self.query_one("#palette-meta", Static)
         if not items:
@@ -873,8 +872,6 @@ class OrganismApp(App):
 
     CSS = """
     #topbar { height: 1; background: $surface; color: $text; }
-    # cell widths must stay in sync with TOPBAR_LEFT_WIDTH /
-    # TOPBAR_RIGHT_WIDTH below
     #topbar-left { width: 50; padding: 0 1; }
     #topbar-center { width: 1fr; border-left: solid $primary; padding: 0 1; }
     #topbar-right { width: 32; border-left: solid $primary; padding: 0 1; }
@@ -994,7 +991,6 @@ class OrganismApp(App):
         self._pending_visible = False
         self._busy_frame = 0
         self._typing_timer = None
-        self._typing_last = 0.0
         self.listener = listen.Listener()
         self.camera = camera.Camera()
         # per-subsystem behavior owners (tui_controllers.py): the app keeps
@@ -1005,7 +1001,6 @@ class OrganismApp(App):
         self._brain_running = False  # cached fly-brain state for the activity line
         self._mind_text = ""
         self._memory_text = ""
-        self._visual_text = ""
         self._topbar_text = ""
         self._rendered_topbar_text = None
         # inline DOOM pane (wide terminals): visible flag + typing⇄playing
@@ -1879,21 +1874,6 @@ class OrganismApp(App):
     def action_look(self):
         self._look_now()
 
-    def action_sleep_wake(self):
-        """Toggle between wake and sleep states."""
-        if self.org.lifecycle.state == "wake":
-            self.dispatch_command("/sleep")
-        else:
-            self.dispatch_command("/wake")
-
-    def action_voice(self):
-        """Toggle spoken voice output."""
-        self.dispatch_command("/voice")
-
-    def action_mud(self):
-        """Toggle the MUD mini-game."""
-        self._mud.command([])
-
     # -- sight (camera) ------------------------------------------------------
     def _look_now(self):
         """Grab one camera frame and have a local vision model put it into
@@ -2190,7 +2170,6 @@ class OrganismApp(App):
     def _touch_typing(self):
         """Record typing activity with debouncing; nudges near-boundary sleep."""
         now = time.monotonic()
-        self._typing_last = now
         self.set_activity("listening…")
         if self._typing_timer is not None:
             self._typing_timer.stop()
@@ -2826,13 +2805,11 @@ class OrganismApp(App):
             if log:
                 self._append_log(f"visualize failed: {exc}", STYLE_WARN)
             return
-        header = f"{result.kind} — {result.caption}"
         if log:
             self._append_log(f"visual state: {result.kind}", STYLE_DIM, stamp=True)
             self._append_log(f"saved: {result.path}", STYLE_DIM)
             for line in result.text_chart.splitlines():
                 self._append_log(line, STYLE_DIM)
-        self._visual_text = f"{header}\n\n{result.text_chart}"
         self._visual_kind = result.kind
         self._visual_sig = self._visual_signature()
 

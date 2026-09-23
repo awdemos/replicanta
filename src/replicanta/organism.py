@@ -916,10 +916,6 @@ class ChaosKnob:
         """Clamp and store a new chaos value."""
         self.value = max(0.0, min(1.0, float(value)))
 
-    def roll(self, rng):
-        """True with probability = chaos."""
-        return rng.random() < self.value
-
 
 class StressMeter:
     """Tracks the organism's stress (0.0-1.0, baseline 0.05), held in

@@ -164,12 +164,10 @@ _INTENT_PATTERNS = [
 # -- self-statements (the entity's own replies) --------------------------------
 # The speech->state loop: what the entity says about itself becomes mind
 # state. Regex/tier only — this runs inline on every reply, so it must stay
-# cheap and make no LLM call. Everything it produces stays BELOW the user
-# auto-commit threshold (LEARN_CONF): a passing self-statement becomes a
-# low-confidence self-model insight, an intention becomes a goal candidate,
-# a denial of a held belief raises a said-vs-held flag.
-
-SELF_STATE_CONF = 0.6  # below LEARN_CONF: never auto-commits like user facts
+# cheap and make no LLM call. A passing self-statement becomes a
+# low-confidence self-model insight (organism.record_self_model uses 0.7,
+# below the user auto-commit threshold LEARN_CONF), an intention becomes a
+# goal candidate, and a denial of a held belief raises a said-vs-held flag.
 
 _SELF_STATEMENT_RE = re.compile(
     r"\bi (?:think|believe|feel|decided|decide|know|learned|noticed|realized|realised) "
@@ -491,8 +489,8 @@ def analyze_self_reply(text):
 
     Returns {"statements": [str], "identity": str|None, "goals": [str],
     "denials": [{"kind": str, "surface": str, "value": str|None}]} — all
-    attributed to the organism itself, all at SELF_STATE_CONF (below the user
-    auto-commit threshold). Used by voice.respond so a reply updates the mind
+    attributed to the organism itself; insights are recorded below the user
+    auto-commit threshold. Used by voice.respond so a reply updates the mind
     that produced it.
     """
     result = {"statements": [], "identity": None, "goals": [], "denials": []}

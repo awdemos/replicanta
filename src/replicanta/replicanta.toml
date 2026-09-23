@@ -1,2 +1,17 @@
 [persona]
 active = "software-engineer"
+
+[git]
+enabled = false
+dirty_many_at = 15
+unpushed_many_at = 5
+behind_many_at = 20
+dirty_weight = 0.05
+dirty_many_weight = 0.08
+unpushed_weight = 0.05
+unpushed_many_weight = 0.08
+behind_weight = 0.05
+behind_many_weight = 0.1
+
+[modules]
+enabled = ["base", "creative-writer", "fly-brain", "nano-doom", "socratic-philosopher", "software-engineer", "visual-state"]

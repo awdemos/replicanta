@@ -13,8 +13,6 @@ import os
 import shutil
 from pathlib import Path
 
-SHAREWARE_WAD_SIZE = 4_196_020  # doom1.wad v1.9, bytes
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 

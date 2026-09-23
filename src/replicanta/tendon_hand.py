@@ -127,7 +127,7 @@ class ArmService:
     hand without human input.
     """
 
-    def __init__(self, organism=None, bridge_url="http://127.0.0.1:8765", tick_hz=2.0, lua_lock=None):
+    def __init__(self, organism=None, bridge_url="http://127.0.0.1:8765", lua_lock=None):
         self.organism = organism
         self._url = urlparse(bridge_url)
         self._host = self._url.hostname or "127.0.0.1"
