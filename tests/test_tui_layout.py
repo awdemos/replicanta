@@ -197,7 +197,79 @@ def test_menu_for_awake_organism_has_no_swap_option(nursery_app):
             assert isinstance(app.screen, OrganismMenuScreen)
             menu = app.screen.query_one(OptionList)
             ids = [option.id for option in menu.options]
-            assert ids == ["rename", "group", "cancel"]
+            assert ids == ["rename", "group", "delete", "cancel"]
+            # the awake organism can't be deleted: the app sits in its dir
+            delete_option = next(o for o in menu.options if o.id == "delete")
+            assert delete_option.disabled
+
+    asyncio.run(check())
+
+
+def test_menu_for_sleeping_organism_offers_enabled_delete(nursery_app):
+    from textual.widgets import OptionList
+
+    app = nursery_app
+    _make_fern(app)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._open_org_menu("fern")
+            await pilot.pause()
+            menu = app.screen.query_one(OptionList)
+            delete_option = next(o for o in menu.options if o.id == "delete")
+            assert not delete_option.disabled
+
+    asyncio.run(check())
+
+
+def test_delete_flow_asks_then_removes_organism(nursery_app):
+    from replicanta import nursery as nursery_mod
+
+    from replicanta.tui import ConfirmScreen
+
+    app = nursery_app
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "dreamers")
+    nursery_mod.assign(app.root, "fern", "dreamers")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._open_org_menu("fern")
+            await pilot.pause()
+            app.screen.dismiss(("delete", "fern"))
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmScreen)  # deletion confirms
+            app.screen.dismiss(False)  # no → organism stays
+            await pilot.pause()
+            assert "fern" in nursery_mod.list_organisms(app.root)
+            app._open_org_menu("fern")
+            await pilot.pause()
+            app.screen.dismiss(("delete", "fern"))
+            await pilot.pause()
+            app.screen.dismiss(True)  # yes → gone from disk, groups, sidebar
+            await pilot.pause()
+            assert "fern" not in nursery_mod.list_organisms(app.root)
+            assert nursery_mod.load_groups(app.root) == {"dreamers": []}
+            lv = app.query_one("#sidebar-list", ListView)
+            labels = [renderable_text(item.children[0]) for item in lv.children]
+            assert not any("fern" in label for label in labels)
+
+    asyncio.run(check())
+
+
+def test_delete_awake_organism_is_refused(nursery_app):
+    from replicanta import nursery as nursery_mod
+
+    from replicanta.tui import ConfirmScreen
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._confirm_delete("default")
+            await pilot.pause()
+            assert not isinstance(app.screen, ConfirmScreen)
+            assert "default" in nursery_mod.list_organisms(app.root)
 
     asyncio.run(check())
 

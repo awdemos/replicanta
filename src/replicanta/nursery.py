@@ -119,6 +119,26 @@ def current(root: str | Path) -> str:
     return name or DEFAULT_NAME
 
 
+def delete(root: str | Path, name: str) -> None:
+    """Delete an organism permanently: remove its directory (its whole
+    body — genome, state, artifacts) and any group membership. The
+    nursery's `current` pointer is left alone; the TUI only offers the
+    delete on sleeping organisms, so it always stays valid. ValueError
+    on an unknown name."""
+    _validate(name)
+    if name not in list_organisms(root):
+        raise ValueError(f"no organism named {name!r}")
+    shutil.rmtree(_nursery(root) / name)
+    groups = load_groups(root)
+    remapped = False
+    for members in groups.values():
+        if name in members:
+            members.remove(name)
+            remapped = True
+    if remapped:
+        save_groups(root, groups)
+
+
 def set_current(root: str | Path, name: str) -> None:
     atomic_write_text(Path(root) / CURRENT_FILE, name + "\n")
 

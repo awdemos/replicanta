@@ -193,6 +193,38 @@ def test_rename_case_change_removes_stale_tmp(tmp_path):
     assert nursery.list_organisms(root) == ["FERN"]
 
 
+# -- delete -------------------------------------------------------------------
+
+
+def test_delete_removes_directory_and_membership(tmp_path):
+    root = _root_with(_root(tmp_path), "fern", "willow")
+    nursery.create_group(root, "a")
+    nursery.assign(root, "fern", "a")
+    nursery.delete(root, "fern")
+    assert nursery.list_organisms(root) == ["willow"]
+    assert not (root / "organisms" / "fern").exists()
+    assert nursery.load_groups(root) == {"a": []}
+    # deleting the last member leaves the group itself intact
+    nursery.delete(root, "willow")
+    assert nursery.load_groups(root) == {"a": []}
+
+
+def test_delete_leaves_current_pointer_and_others_untouched(tmp_path):
+    root = _root_with(_root(tmp_path), "fern", "willow")
+    nursery.set_current(root, "willow")
+    nursery.delete(root, "fern")
+    assert nursery.current(root) == "willow"
+
+
+def test_delete_rejects_unknown_and_invalid_names(tmp_path):
+    root = _root(tmp_path)
+    nursery.create(root, "fern", root / "organism.scl")
+    with pytest.raises(ValueError, match="no organism named"):
+        nursery.delete(root, "willow")
+    with pytest.raises(ValueError, match="invalid organism name"):
+        nursery.delete(root, "a/b")
+
+
 # -- nursery groups -----------------------------------------------------------
 
 

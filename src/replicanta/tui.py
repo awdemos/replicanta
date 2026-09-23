@@ -247,8 +247,8 @@ class CommandPalette(Screen):
 
 
 class OrganismMenuScreen(ModalScreen):
-    """Left-click dropdown on a sidebar organism: swap / rename / cancel.
-    Dismisses with (action, name) or None."""
+    """Left-click dropdown on a sidebar organism: swap / rename /
+    move-to-group / delete / cancel. Dismisses with (action, name) or None."""
 
     BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
 
@@ -259,12 +259,23 @@ class OrganismMenuScreen(ModalScreen):
         self._is_current = is_current
 
     def compose(self) -> ComposeResult:
-        """Build swap / rename / move-to-group / cancel options."""
+        """Build swap / rename / move-to-group / delete / cancel options."""
         options = []
         if not self._is_current:
             options.append(Option(f"swap to {self._name}", id="swap"))
         options.append(Option(f"rename {self._name}", id="rename"))
         options.append(Option(f"move {self._name} to group…", id="group"))
+        # Permanent deletion of the awake organism is refused: the app is
+        # sitting inside its directory. Swap to another one first.
+        options.append(
+            Option(
+                f"delete {self._name} (permanent)"
+                if not self._is_current
+                else f"delete (swap away from {self._name} first)",
+                id="delete",
+                disabled=self._is_current,
+            )
+        )
         options.append(Option("cancel", id="cancel"))
         yield OptionList(*options, id="org-menu")
 
@@ -311,6 +322,45 @@ class RenameScreen(NamePromptScreen):
     def __init__(self, name):
         """Create a rename prompt for the named organism."""
         super().__init__(f"new name for {name} (letters, digits, - and _)")
+
+
+class ConfirmScreen(ModalScreen):
+    """Yes/no confirmation for destructive actions. Dismisses with True
+    only on an explicit yes (button or y); everything else is False."""
+
+    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss_no", "close")]
+
+    CSS = """
+    ConfirmScreen { align: center middle; }
+    #confirm-box { width: 60; height: auto; border: round $error; padding: 1 2; background: $surface; }
+    """
+
+    def __init__(self, title, detail=""):
+        super().__init__()
+        self._title = title
+        self._detail = detail
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Static(self._title, classes="title")
+            if self._detail:
+                yield Static(self._detail)
+            yield Horizontal(
+                Button("Yes, delete", id="confirm-yes", variant="error"),
+                Button("No", id="confirm-no"),
+            )
+
+    def on_button_pressed(self, event):
+        self.dismiss(event.button.id == "confirm-yes")
+
+    def on_key(self, event):
+        if event.key == "y":
+            self.dismiss(True)
+        elif event.key == "n":
+            self.dismiss(False)
+
+    def action_dismiss_no(self):
+        self.dismiss(False)
 
 
 class GroupMenuScreen(ModalScreen):
@@ -1480,8 +1530,38 @@ class OrganismApp(App):
                 self._prompt_rename(org_name)
             elif action == "group":
                 self._pick_group_for(org_name)
+            elif action == "delete":
+                self._confirm_delete(org_name)
 
         self.push_screen(OrganismMenuScreen(name, name == self.org.dir_path.name), on_choice)
+
+    def _confirm_delete(self, name):
+        """Deleting is permanent (the directory is its whole body), so ask
+        once; the menu refuses to offer this on the awake organism."""
+        if name == self.org.dir_path.name:
+            self.notify(f"swap away from {name} before deleting it", severity="warning", timeout=4)
+            return
+
+        def on_answer(yes):
+            if yes:
+                self._delete_org(name)
+
+        self.push_screen(
+            ConfirmScreen(
+                f"Delete {name}?",
+                "Its genome, memory, and artifacts are removed forever. Groups keep their other members.",
+            ),
+            on_answer,
+        )
+
+    def _delete_org(self, name):
+        try:
+            nursery.delete(self.root, name)
+        except ValueError as exc:
+            self.notify(str(exc), severity="error", timeout=4)
+            return
+        self._refresh_sidebar()
+        self.notify(f"deleted {name} (permanent)", timeout=3)
 
     def _prompt_rename(self, name):
         def on_name(new_name):
