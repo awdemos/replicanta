@@ -290,6 +290,50 @@ def test_main_screen_typing_w_stays_in_chat(doom_app):
     asyncio.run(check())
 
 
+def test_overlay_chat_input_roundtrip(doom_app):
+    """The overlay must show its own chat line (the main input is hidden
+    beneath the full-screen overlay). Game keys play by default; Tab enters
+    typing mode (letters reach the Input, not the game); Enter routes the
+    line as a move, echoes it in the thought stream, and returns focus to
+    the game."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(90, 24)) as pilot:
+            await _start_doom(app, pilot)
+            svc = app.org.module_loader.registry.get("doom")
+            await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            overlay_input = app.screen.query_one("#doom-chat", Input)
+            # the game keys own the keyboard until Tab: no auto-focus
+            assert app.focused is not overlay_input
+            got = []
+            real_key = app._doom.key_command
+            app._doom.key_command = lambda cmd: (got.append(cmd), real_key(cmd))[1]
+            real_cmd = app._doom.command
+            sent = []
+            app._doom.command = lambda args: (sent.append(list(args)), real_cmd(args))[1]
+            try:
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.focused is overlay_input  # typing mode
+                await pilot.press("w")
+                await pilot.pause()
+                assert overlay_input.value == "w"  # typed, not played
+                assert got == []
+                await pilot.press("enter")
+                await pilot.pause()
+                assert ["w"] in sent  # submitted line moved the player
+                assert overlay_input.value == ""
+                assert app.focused is not overlay_input  # back to game keys
+            finally:
+                app._doom.key_command = real_key
+                app._doom.command = real_cmd
+            thoughts = app.screen.query_one("#doom-thoughts", Static)
+            assert "you › w" in str(thoughts._Static__content)
+
+    asyncio.run(check())
+
+
 def test_typed_movement_words_reach_the_game(doom_app):
     """Typing 'w' in chat during a game must move the player (the module
     contract promises movement lines); single-letter moves were rejected

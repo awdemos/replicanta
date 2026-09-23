@@ -449,13 +449,16 @@ class BeingScreen(Screen):
 
 class DoomScreen(Screen):
     """Full-screen DOOM overlay: the entity's thought stream above the
-    80-column ASCII frame. Escape closes the overlay; the game keeps
-    running (wasd/qe/arrows/space play, /doom stop ends it).
+    80-column ASCII frame, with its own chat line at the bottom (the main
+    screen's input can't be seen while this overlay is up). Escape closes
+    the overlay; the game keeps running (wasd/qe/arrows/space play,
+    /doom stop ends it).
 
     The movement keys are bound HERE, not on the app: app-level w/s would
     swallow everyday typing on the main screen, while screen-level bindings
-    only exist while this overlay is on top (and it has no input widget to
-    conflict with)."""
+    only exist while this overlay is on top. The chat Input starts
+    UNFOCUSED so the game keys play; Tab focuses it for typing, and Enter
+    returns focus to the game."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "dismiss", "close"),
@@ -467,6 +470,12 @@ class DoomScreen(Screen):
         Binding("e", "press_key('e')", "strafe right", show=False),
     ]
 
+    # Never auto-focus the chat input when the overlay opens: the game keys
+    # must play immediately; Tab enters typing mode explicitly.
+    AUTO_FOCUS: ClassVar[str] = ""
+
+    HINT = "esc closes — wasd/qe/arrows move — space shoots — tab types — /doom stop ends"
+
     CSS = """
     DoomScreen { background: $surface; }
     #doom-hint { height: 1; padding: 0 1; color: $text-muted; }
@@ -475,15 +484,19 @@ class DoomScreen(Screen):
     # be exactly 80 or Rich wraps the art mid-line and the picture shreds.
     #doom { padding: 0 1; width: 82; min-width: 82; }
     #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
+    #doom-chat {
+        height: 3;
+        border: none;
+        border-top: solid $surface-lighten-2;
+        padding: 0 1;
+    }
+    #doom-chat:focus { border-top: solid $accent; }
     """
 
     def compose(self) -> ComposeResult:
-        """Build the hint line and the scrollable frame container."""
+        """Build the hint line, the scrollable frame, and the chat input."""
         with Vertical(id="doom-box"):
-            yield Label(
-                "esc closes — wasd/qe/arrows move — space shoots — /doom stop ends",
-                id="doom-hint",
-            )
+            yield Label(self.HINT, id="doom-hint")
             # The container must never take focus: when the frame is taller
             # than the terminal (scaling 2) a focused ScrollableContainer
             # eats up/down for scrolling and the player can't walk — the
@@ -498,6 +511,7 @@ class DoomScreen(Screen):
                     id="doom",
                     markup=False,
                 )
+            yield Input(placeholder="tab — type here · enter — send", id="doom-chat")
 
     def on_mount(self):
         """Paint the current frame immediately: the controller pushed this
@@ -508,12 +522,29 @@ class DoomScreen(Screen):
         """Overlay movement keys (w/a/s/d/q/e bindings above)."""
         self.app._doom.key_command(key)
 
+    def focus_game(self):
+        """Return focus to the screen after a send so the game keys work."""
+        self.app.set_focus(None)
+
     def show_key(self, label: str) -> None:
         """Echo the last manual key in the hint line: walking into a wall
         leaves the frame unchanged, and without this the keypress looks
         dropped."""
         hint = self.query_one("#doom-hint", Label)
-        hint.update(f"esc closes — wasd/qe/arrows move — space shoots — you: {label}")
+        hint.update(f"{self.HINT} — you: {label}")
+
+    def show_user_line(self, text: str) -> None:
+        """Echo a submitted chat line into the thought stream — the main
+        chat log sits on the screen beneath this overlay, unseen."""
+        thoughts = self.query_one("#doom-thoughts", Static)
+        current = str(getattr(thoughts, "_Static__content", "") or "")
+        if current.startswith("> "):
+            current = ""
+        stamped = "\n".join(
+            f"[{datetime.now(UTC).strftime('%H:%M:%S')}] you › {line}" for line in text.splitlines() if line.strip()
+        )
+        lines = (current.splitlines() if current else []) + stamped.splitlines()
+        thoughts.update("\n".join(lines[-8:]))
 
     def action_dismiss(self):
         self.app.pop_screen()
@@ -1748,6 +1779,18 @@ class OrganismApp(App):
             event.stop()
             return
         if event.key == "tab":
+            if isinstance(self.screen, DoomScreen):
+                # The overlay has its own chat line: the main input lives on
+                # the screen beneath the overlay and can't be seen while the
+                # game runs. Focus the overlay input for typing; Enter hands
+                # focus back to the game (DoomScreen.focus_game).
+                if self.focused is not self.screen.query_one("#doom-chat", Input):
+                    self.screen.query_one("#doom-chat", Input).focus()
+                else:
+                    self.screen.focus_game()
+                event.prevent_default()
+                event.stop()
+                return
             if self.chat_input is None:
                 return
             if not self.chat_input.has_focus:
@@ -2305,6 +2348,24 @@ class OrganismApp(App):
 
     # -- chat line -------------------------------------------------------
     def on_input_submitted(self, event):
+        if event.input.id == "doom-chat":
+            # The DOOM overlay's own chat line: same routing as the main
+            # input (slash commands, moves, conversation), plus an echo in
+            # the overlay's thought stream, since the main chat log sits on
+            # the screen beneath this one and can't be seen.
+            text = event.value.strip()
+            event.input.value = ""
+            if text:
+                tui_commands.history_push(self._chat_history, text)
+                if isinstance(self.screen, DoomScreen):
+                    self.screen.show_user_line(text)
+                if text.startswith("/"):
+                    self.dispatch_command(text)
+                elif not self._doom.chat_command(text):
+                    self.route_chat_message(text)
+            if isinstance(self.screen, DoomScreen):
+                self.screen.focus_game()
+            return
         if event.input.id != "chat":
             # modal rename/name prompts and the palette input bubble
             # Submitted up to the app too; only the chat line is chat
