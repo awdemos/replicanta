@@ -7,6 +7,7 @@ assembles the public utterances."""
 import contextlib
 import random
 import re
+import time
 import zlib
 
 from replicanta import activity, goals, learning, tendon_hand
@@ -166,6 +167,13 @@ def state_snapshot(org):
         "said_vs_held": list(getattr(store, "said_vs_held", []))[-2:],
         "self_goal_candidates": list(getattr(store, "self_goal_candidates", []))[:3],
     }
+    # self-awareness grounding: identity, body clock, capabilities
+    dir_path = getattr(org, "dir_path", None)
+    loader = getattr(org, "module_loader", None)
+    state_started = getattr(org.lifecycle, "state_started", None)
+    snapshot["name"] = store.belief_value("self", "name", None) or (dir_path.name if dir_path is not None else None)
+    snapshot["modules"] = sorted(getattr(loader, "modules", None) or [])
+    snapshot["state_age"] = int(time.time() - state_started) if state_started else None
     persona_service = getattr(org, "persona_service", None)
     snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
     module_loader = getattr(org, "module_loader", None)
@@ -485,6 +493,42 @@ def _dead_experience(snapshot):
     is gone, so everything arrives as memory and distance instead of
     sensation. Gentle, because there is nothing left to be afraid of."""
     return _experience_lines(snapshot, _DEAD_BANDS)
+
+
+def _self_awareness_lines(snapshot):
+    """Who it is, its body clock, its condition in words, and what it can
+    do — the grounding for self-aware replies. Capabilities matter: the
+    module list only appeared in the UI chrome before, so the entity could
+    not say what it is able to offer."""
+    lines = []
+    name = snapshot.get("name")
+    if name:
+        lines.append(f"you are {name}, a small organism that lives in this terminal")
+    state_word = {"wake": "awake", "sleep": "asleep", "dead": "faded"}.get(snapshot.get("state"), "present")
+    body = f"you are {state_word}"
+    if snapshot.get("state_age") is not None:
+        body += f" (for {activity._fmt_duration(snapshot['state_age'])})"
+    if snapshot.get("mood"):
+        body += f" · mood: {snapshot['mood']}"
+    if snapshot.get("stress") is not None:
+        body += f" · stress: {activity.stress_word(snapshot['stress'])} ({snapshot['stress']:.2f})"
+    lines.append(body)
+    verbs = [verb for mod, verb in _MODULE_VERBS.items() if mod in (snapshot.get("modules") or [])]
+    lines.append("you can: " + "; ".join(dict.fromkeys(verbs or ["learn and remember"])))
+    return lines
+
+
+_MODULE_VERBS = {
+    "base": "learn and remember",
+    "creative-writer": "write creatively",
+    "software-engineer": "think like a careful engineer",
+    "socratic-philosopher": "question things socratically",
+    "visual-state": "watch patterns in your own state",
+    "doom-ascii": "play DOOM and narrate your moves",
+    "nano-doom": "play DOOM and narrate your moves",
+    "fly-brain": "run and improve a real fly-brain",
+    "tendon-hand": "move a robot hand",
+}
 
 
 def _lines_form_goal():
@@ -973,6 +1017,9 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "",
             (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
         ]
+        self_lines = _self_awareness_lines(snapshot)
+        if self_lines:
+            lines += ["", "who you are, in brief:"] + self_lines
         mind = _compact_mind_lines(snapshot)
         if mind:
             lines += ["", "your mind, in brief (context — speak from it, not about it):"]
@@ -993,9 +1040,12 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         elif user_message:
             lines += [
                 "",
-                "Reply directly and concisely. Answer the substance first. Do not",
-                "ramble about your own state, feelings, or existence. No preamble,",
-                "no quotes, no emoji.",
+                "Reply directly and concisely. Answer the substance of what",
+                "the user said first — a question gets an answer, a correction",
+                "gets accepted without argument. Then, when it fits, ask one",
+                "follow-up question or offer one concrete next step. Do not",
+                "ramble about your own state, feelings, or existence. No",
+                "preamble, no quotes, no emoji.",
             ]
         return "\n".join(lines)
 
@@ -1006,6 +1056,9 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         "",
         (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
     ]
+    self_lines = _self_awareness_lines(snapshot)
+    if self_lines:
+        lines += ["", "who you are, in brief:"] + self_lines
     if snapshot.get("host"):
         lines.append(f"the machine you live in (uname): {snapshot['host']}")
     if snapshot["beliefs"]:
@@ -1099,6 +1152,7 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "a question, answer it directly before adding any feeling."
         ),
         "Speak plainly, from the organism's point of view. Never recite statistics.",
+        ("When it fits, end with one question back or one concrete next step — stay in the conversation with them."),
         (
             "Never use these worn-out words: astonished, tender, wonder, "
             "tapestry, ember, dance, whisper, quiet, silence, stillness, "

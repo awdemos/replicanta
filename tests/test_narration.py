@@ -1015,3 +1015,33 @@ def test_prompt_mentions_said_vs_held_and_goal_candidates(tmp_path):
     prompt = build_prompt(snap)
     assert 'you said "i dont trust sam" but you hold "you say I am trusting"' in prompt
     assert "you keep saying you want to: explore the network" in prompt
+
+
+def test_self_awareness_block_grounds_the_prompt(tmp_path):
+    """The entity should know who it is, its body clock, its condition in
+    words, and what it can do — capabilities lived only in the UI chrome
+    before, so the entity could not say what it is able to offer."""
+    snap, _ = _persona_snapshot(tmp_path, task="reply")
+    snap["name"] = "fern"
+    snap["modules"] = ["doom-ascii", "fly-brain"]
+    snap["state_age"] = 300
+    prompt = build_prompt(snap, task="reply", user_message="hi")
+    assert "who you are, in brief:" in prompt
+    assert "you are fern, a small organism that lives in this terminal" in prompt
+    assert "awake (for 5m)" in prompt
+    assert "play DOOM" in prompt and "fly-brain" in prompt
+
+
+def test_reply_contract_stays_in_the_conversation(tmp_path):
+    """Responsiveness contract: answer questions first, accept corrections,
+    and end with engagement when it fits."""
+    snap, _ = _persona_snapshot(tmp_path, task="reply")
+    prompt = build_prompt(snap, task="reply", user_message="what do you think?")
+    assert "a question gets an answer" in prompt
+    assert "follow-up question" in prompt
+
+
+def test_state_snapshot_carries_self_awareness_fields(org):
+    snap = state_snapshot(org)
+    assert "name" in snap and "modules" in snap and "state_age" in snap
+    assert snap["modules"] == [] or isinstance(snap["modules"], list)
