@@ -730,9 +730,39 @@ def _lines_mud_decision():
     ]
 
 
+_DOOM_EXAMPLES = [
+    (
+        "The corridor ahead is clear and nothing has fired at me yet. I will advance and keep watching the status bar.",
+        'doom.command("w")',
+    ),
+    (
+        (
+            "The screen has not changed since my last move — I have been "
+            "pushing into a wall. I will turn to scout the room."
+        ),
+        'doom.command("a")',
+    ),
+    (
+        "A demon is visible ahead and in range. Better to fire before it closes the distance.",
+        'doom.command("shoot")',
+    ),
+    (
+        (
+            "Something is firing from the side while I face the corridor. I "
+            "will sidestep off the line of fire before advancing."
+        ),
+        'doom.command("q")',
+    ),
+]
+
+
 def _doom_prompt(snapshot):
     """Standalone DOOM directive used as a fast-path in build_prompt."""
     frame = snapshot.get("doom_frame", "")
+    # Rotate the worked example: a single w-only example anchors small
+    # models on "w" every turn (observed: entities that only ever walk
+    # forward into walls).
+    example = random.choice(_DOOM_EXAMPLES)
     lines = [
         "",
         "### DOOM — YOU ARE PLAYING RIGHT NOW",
@@ -748,12 +778,17 @@ def _doom_prompt(snapshot):
         "is parsed and executed by the game.",
         "",
         "Example:",
-        "The demon is close and roughly ahead. I should close the gap",
-        "before it fires, then I'll be in range to shoot.",
-        'doom.command("w")',
+        example[0],
+        example[1],
         "",
         "Valid commands: w (forward), s (back), a (turn left), d (turn",
         "right), q (strafe left), e (strafe right), shoot, use, 1-7 weapon.",
+        "Output exactly one command from that list — never invent shorthand",
+        "or new commands.",
+        "",
+        "If the screen did not change after your last move, you are pushing",
+        "into a wall — turn (a or d) or strafe (q or e) instead of walking",
+        "forward again.",
         "",
         "Game screen:",
         "```",

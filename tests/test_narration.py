@@ -914,6 +914,28 @@ def test_task_focused_doom_keeps_frame_and_mind(tmp_path):
     assert "has_fur" in prompt  # compact mind block retained
 
 
+def test_doom_prompt_rotates_examples_and_coaches_out_of_wall_loops(tmp_path):
+    """Regression: the prompt had a single worked example — doom.command("w")
+    — and small models imitated it every turn (entities that only ever walk
+    forward into walls). Examples must rotate across the move vocabulary,
+    and the prompt must tell the entity what to do when the screen does
+    not change (turn or strafe, not w again)."""
+    import random as random_mod
+    import re
+
+    from replicanta.narration import _doom_prompt
+
+    random_mod.seed(7)
+    commands = set()
+    for _ in range(40):
+        text = "\n".join(_doom_prompt({"doom_frame": "", "doom_status": "x"}))
+        match = re.search(r'^doom\.command\("([a-z]+)"\)$', text, re.MULTILINE)
+        assert match, text
+        commands.add(match.group(1))
+        assert "pushing" in text and "into a wall" in text
+    assert len(commands) >= 2, f"example never varied: {commands}"
+
+
 def test_doom_fast_path_without_persona_keeps_mind(org):
     snap = state_snapshot(org)
     snap["doom"] = True
