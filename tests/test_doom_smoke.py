@@ -157,9 +157,10 @@ def test_doom_pane_receives_colored_frame(doom_app):
 
 
 def test_manual_keypress_pauses_entity_autoplay(doom_app):
-    """A human arrow key puts the entity's auto-play on cooldown and must
-    not immediately re-arm it — previously every keypress scheduled an
-    entity turn 300ms later, so the game played itself against the human."""
+    """A human key puts auto-play on cooldown: no turn may fire while it
+    lasts, and a retry arms for the cooldown end so play resumes by itself
+    (the original bug re-armed 300ms later and played against the human;
+    the regression after the worker split never re-armed at all)."""
     import time
 
     app = doom_app
@@ -171,15 +172,99 @@ def test_manual_keypress_pauses_entity_autoplay(doom_app):
                 lambda: app.org.module_loader.registry.get("doom").frame_count() > 0,
                 message="stub frames to flow",
             )
+            fired = []
+            app._doom.take_turn = lambda: fired.append(1)
             app._doom.key_command("w")
             assert app._doom._manual_until > time.monotonic()
             app._doom.schedule_turn()
-            assert app._doom.pending_turns() == []  # cooldown: the entity may not move
-            # once the cooldown lapses, auto-play may schedule again
+            await pilot.pause()
+            assert fired == []  # cooldown: the entity may not move
+            assert app._doom.pending_turns(), "a retry must be armed for the cooldown end"
+            # jump past the cooldown: a fresh schedule arms a near turn
             app._doom._manual_until = 0.0
             app._responding = False
+            app._doom.cancel_auto()
             app._doom.schedule_turn()
             assert len(app._doom.pending_turns()) == 1
+            await pilot.pause(0.6)
+            assert fired == [1]  # exactly one turn fired from the arm
+
+    asyncio.run(check())
+
+
+def test_autoplay_turn_chains_to_the_next(doom_app, monkeypatch):
+    """Regression: the turn worker re-armed auto-play BEFORE releasing the
+    in-flight flag, so schedule_turn's responding-guard always fired — the
+    entity moved once and never reevaluated the game. The successor turn
+    must be armed after the flag is free."""
+    from replicanta import voice
+
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            # hermetic: an earlier suite test may have probed the real voice
+            # backend, so patch BEFORE the game starts — otherwise the
+            # start-up stagger turns hold _responding through a real
+            # generation and the cooldown retry below never arms
+            monkeypatch.setattr(voice, "online", lambda: True)
+            monkeypatch.setattr(
+                voice,
+                "doom_move",
+                lambda org, on_token=None: 'doom.command("w")',
+            )
+            await _start_doom(app, pilot)
+            svc = app.org.module_loader.registry.get("doom")
+            await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            app._doom.cancel_auto()
+            app._responding = False
+            app._doom.take_turn()
+            await wait_until(lambda: "key=up" in svc.frame(), message="the turn's move to land")
+            # the chain: a successor turn is armed once this turn completes
+            # (poll: the pending set is momentarily empty between a timer
+            # firing and its successor arming)
+            await wait_until(
+                lambda: bool(app._doom.pending_turns()),
+                message="auto-play to re-arm for the next decision",
+            )
+
+    asyncio.run(check())
+
+
+def test_autoplay_resumes_after_manual_cooldown(doom_app, monkeypatch):
+    """Manual play pauses auto-play, but the pause ends at the cooldown:
+    schedule_turn arms a retry at expiry whose turn actually generates."""
+    import time as time_mod
+
+    from replicanta import voice
+
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            # patch before the game starts — see the chain test for why
+            monkeypatch.setattr(voice, "online", lambda: True)
+            monkeypatch.setattr(
+                voice,
+                "doom_move",
+                lambda org, on_token=None: 'doom.command("w")',
+            )
+            await _start_doom(app, pilot)
+            svc = app.org.module_loader.registry.get("doom")
+            await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            app._doom.cancel_auto()
+            app._responding = False
+            app._doom._manual_until = time_mod.monotonic() + 0.4
+            app._doom.schedule_turn()
+            assert app._doom.pending_turns(), "a retry must be armed for the cooldown end"
+            await wait_until(
+                lambda: "key=up" in svc.frame(),
+                message="auto-play to resume after the cooldown",
+            )
+            await wait_until(
+                lambda: bool(app._doom.pending_turns()),
+                message="the resumed chain to keep re-arming",
+            )
 
     asyncio.run(check())
 

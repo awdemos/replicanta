@@ -986,6 +986,11 @@ class DoomController:
         if svc is None or not self._svc_running(svc):
             return
         if time.monotonic() < self._manual_until:
+            # The human is driving; retry when the cooldown lapses so
+            # auto-play resumes on its own instead of waiting for fresh
+            # input (a keypress cancels the pending retry via cancel_auto).
+            if not self._turn_timers:
+                self._arm_turn(self._manual_until - time.monotonic() + 0.05)
             return  # the human is driving; the entity waits its turn
         self._bind_org()
         # short delay so the UI is readable and human input can interleave
@@ -1006,7 +1011,11 @@ class DoomController:
             return
         if time.monotonic() < self._manual_until:
             # A human keypress landed while this generation was in flight:
-            # the move is stale and would fight the player's input.
+            # the move is stale and would fight the player's input. Retry at
+            # the new cooldown end so the chain survives an extended human
+            # turn (cancel_auto drops the retry on the next keypress).
+            if not self._turn_timers:
+                self._arm_turn(self._manual_until - time.monotonic() + 0.05)
             return
         self._bind_org()
         self._app._responding = True
@@ -1034,7 +1043,6 @@ class DoomController:
                     logger.warning("doom voice probe failed: %s", exc)
                 if voice.online() is not True:
                     self._call_ui(self.set_thought, "inner voice offline — waiting for ollama before playing.")
-                    self._call_ui(self.schedule_turn)
                     return
 
             def on_token(tok):
@@ -1048,7 +1056,6 @@ class DoomController:
 
             reply = voice.doom_move(org, on_token=on_token)
             if reply is None:
-                self._call_ui(self.schedule_turn)
                 return
             # Stale-move backstop: /doom stop, a human keypress, or an
             # organism swap all landed while the generation was in flight.
@@ -1071,11 +1078,18 @@ class DoomController:
                 with contextlib.suppress(Exception):
                     org.store.add(("doom", "last_action", doom_cmd), 0.7)
             self._call_ui(self.set_thought, reply)
-            self._call_ui(self.schedule_turn)
         except Exception:
             logger.exception("DOOM turn failed")
         finally:
+            # Release the in-flight flag BEFORE re-arming: schedule_turn
+            # refuses to run while a generation holds _responding, so
+            # scheduling any earlier kills the chain — the entity would
+            # move once and never reevaluate the game.
             self._call_ui(self._turn_done)
+            # Re-arm unconditionally: schedule_turn re-checks the flag,
+            # session, game state, and the manual cooldown itself, so every
+            # early return above (stop/swap/cooldown) is honored here.
+            self._call_ui(self.schedule_turn)
 
     def _turn_done(self):
         """UI-thread finally: release the in-flight flag, then answer any
