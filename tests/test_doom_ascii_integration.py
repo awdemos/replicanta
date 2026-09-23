@@ -38,9 +38,7 @@ def _wait_for(predicate, timeout=15.0):
 def test_real_game_starts_moves_and_stops(tmp_path):
     target = tmp_path / "modules"
     shutil.copytree(Path(__file__).parent.parent / "modules", target)
-    loader = ModuleLoader(
-        target, organism=None, modules_config={"enabled": ["base", "doom-ascii"]}
-    )
+    loader = ModuleLoader(target, organism=None, modules_config={"enabled": ["base", "doom-ascii"]})
     loader.load_all()
     doom = loader.registry.get("doom")
     assert doom.start() is True
