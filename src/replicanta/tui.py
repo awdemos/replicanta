@@ -60,6 +60,7 @@ from replicanta import (
 )
 from replicanta.organism import Organism
 from replicanta.tui_controllers import (
+    DOOM_GAME_KEYS,
     DoomController,
     MudController,
     VoiceController,
@@ -634,6 +635,10 @@ class DoomScreen(Screen):
 
     def action_dismiss(self):
         self.app.pop_screen()
+        # back on the main screen: a running game returns to the inline
+        # pane when the terminal is wide enough
+        with contextlib.suppress(Exception):
+            self.app._apply_doom_pane()
 
 
 class MudScreen(Screen):
@@ -870,6 +875,13 @@ class OrganismApp(App):
     #content { width: 1fr; height: 1fr; }
     #dreams { height: 1fr; padding: 0 1; }
     #pending { height: auto; max-height: 4; padding: 0 1; color: $success; }
+    #doom-pane { width: 84; min-width: 84; max-width: 84; display: none;
+                 border-left: tall $primary; background: $surface; }
+    #doom-pane-hint { height: 1; padding: 0 1; color: $text-muted; }
+    #doom-pane-thoughts { height: auto; max-height: 6; padding: 0 1;
+                          color: $success; }
+    #doom-pane-scroll { height: 1fr; }
+    #doom-pane-frame { padding: 0 1; width: 82; min-width: 82; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
                        background: $warning-darken-2; color: $text; }
     #mutation-banner > Static { width: 1fr; content-align: left middle; }
@@ -978,6 +990,10 @@ class OrganismApp(App):
         self._visual_text = ""
         self._topbar_text = ""
         self._rendered_topbar_text = None
+        # inline DOOM pane (wide terminals): visible flag + typing⇄playing
+        self._doom_pane_visible = False
+        self._doom_pane_hint_mode = ""
+        self._pane_playing = False
 
     def compose(self) -> ComposeResult:
         """Build the top bar, sidebar, transcript, and chat input — the
@@ -999,6 +1015,17 @@ class OrganismApp(App):
                 dreams.can_focus = False
                 yield dreams
                 yield Static("", id="pending", markup=False)
+            with Vertical(id="doom-pane"):
+                yield Label(self.DOOM_PANE_HINT_TYPING, id="doom-pane-hint")
+                yield Static("", id="doom-pane-thoughts", markup=False)
+                pane_scroll = ScrollableContainer(id="doom-pane-scroll")
+                pane_scroll.can_focus = False
+                with pane_scroll:
+                    yield Static(
+                        "Run /doom start to play DOOM (doom-ascii).",
+                        id="doom-pane-frame",
+                        markup=False,
+                    )
         yield MutationBanner(id="mutation-banner")
         self.chat_input = Input(
             placeholder="talk to me, or /help …  (tab completes)",
@@ -1033,12 +1060,87 @@ class OrganismApp(App):
         resized — narrowing hides the sidebar, widening brings it back,
         all without a restart."""
         self._apply_narrow_mode(event.size.width)
+        self._apply_doom_pane()
 
     def _apply_narrow_mode(self, width):
         """Show/hide the sidebar from the terminal width (see _narrow_mode)."""
         sidebar = self._safe_query("#sidebar", Vertical)
         if sidebar is not None:
             sidebar.styles.display = "none" if _narrow_mode(width) else "block"
+
+    # -- inline DOOM pane (wide terminals) ---------------------------------
+    DOOM_PANE_MIN_WIDTH = 126  # 84-col pane + a usable chat column beside it
+    DOOM_PANE_HINT_TYPING = "tab ⇄ play · wasd/arrows move when playing · /doom view fullscreen · /doom stop ends"
+    DOOM_PANE_HINT_PLAYING = "PLAYING — wasd/qe/arrows/space · esc or tab back to typing"
+
+    def _doom_inline_ok(self):
+        """Wide enough to show the game beside the chat instead of over it."""
+        with contextlib.suppress(Exception):  # screen stack torn down at exit
+            return self.screen.size.width >= self.DOOM_PANE_MIN_WIDTH
+        return False
+
+    def _apply_doom_pane(self):
+        """Pick the game's surface: a wide terminal with the main screen up
+        gets the inline pane (chat stays live); anything else keeps the
+        fullscreen overlay. Idempotent — safe from resize and refresh."""
+        running = self._doom.game_running()
+        if running and self._doom_inline_ok() and len(self.screen_stack) == 1 and self._doom_pane_visible is False:
+            self.show_doom_pane()
+        elif (not running or len(self.screen_stack) > 1) and self._doom_pane_visible:
+            self.hide_doom_pane()
+
+    def show_doom_pane(self):
+        """Reveal the right-hand game pane; the chat log, sidebar, and chat
+        input keep working alongside the game."""
+        pane = self._safe_query("#doom-pane", Vertical)
+        if pane is None or self._doom_pane_visible:
+            return
+        self._doom_pane_visible = True
+        pane.styles.display = "block"
+        self._sync_doom_pane_hint()
+
+    def hide_doom_pane(self):
+        if not self._doom_pane_visible:
+            return
+        self._doom_pane_visible = False
+        self._pane_playing = False
+        pane = self._safe_query("#doom-pane", Vertical)
+        if pane is not None:
+            pane.styles.display = "none"
+
+    def _pane_playing_mode(self):
+        """Playing = the user asked for game keys (Tab or clicking the pane)
+        and the chat input does not hold focus (clicking chat reclaims
+        typing — real focus always wins over the remembered mode)."""
+        return (
+            self._pane_playing
+            and self._doom_pane_visible
+            and self.chat_input is not None
+            and self.app.focused is not self.chat_input
+            and len(self.screen_stack) == 1
+        )
+
+    def _sync_doom_pane_hint(self):
+        """Keep the pane hint honest about typing vs playing mode (follows
+        real focus, so click paths update too)."""
+        if not self._doom_pane_visible:
+            return
+        mode = "playing" if self._pane_playing_mode() else "typing"
+        if mode == self._doom_pane_hint_mode:
+            return
+        self._doom_pane_hint_mode = mode
+        hint = self._safe_query("#doom-pane-hint", Label)
+        if hint is not None:
+            hint.update(self.DOOM_PANE_HINT_PLAYING if mode == "playing" else self.DOOM_PANE_HINT_TYPING)
+
+    def _pane_key_echo(self, label):
+        """Echo a manual game key into the pane hint (a wall bump leaves the
+        frame unchanged; without this the keypress looks dropped)."""
+        if not self._pane_playing_mode():
+            return
+        hint = self._safe_query("#doom-pane-hint", Label)
+        if hint is not None:
+            hint.update(f"{self.DOOM_PANE_HINT_PLAYING} — you: {label}")
 
     def _show_org(self):
         """(Re)render everything that reflects the current organism: chat
@@ -1588,8 +1690,18 @@ class OrganismApp(App):
         """Left-click a neural-memory cell (CELLS section of the being
         overlay) to inspect what kind of object it holds and its metadata.
         Grid geometry: one header line, then CELLS_ROWS lines of
-        2-column-wide cells."""
+        2-column-wide cells. Clicking the DOOM pane enters playing mode
+        (clicking the chat input reclaims typing, as always)."""
         self._last_click_button = event.button
+        if self._doom_pane_visible and len(self.screen_stack) == 1:
+            node = event.widget
+            while node is not None:
+                if getattr(node, "id", None) == "doom-pane":
+                    self._pane_playing = True
+                    self.set_focus(None)
+                    self._sync_doom_pane_hint()
+                    return
+                node = node.parent
         if getattr(event.widget, "id", None) != "cells":
             return
         col = event.x // 2
@@ -1939,6 +2051,17 @@ class OrganismApp(App):
             event.prevent_default()
             event.stop()
             return
+        if self._pane_playing_mode() and event.key in DOOM_GAME_KEYS:
+            # inline pane playing mode: game keys go to the game (the chat
+            # input is unfocused; typing resumes with esc/tab or a click)
+            self._doom.pane_key_command(DOOM_GAME_KEYS[event.key])
+            self._sync_doom_pane_hint()
+            return
+        if event.key == "escape" and self._doom_pane_visible and self._pane_playing and len(self.screen_stack) == 1:
+            # escape leaves playing mode for typing; the game keeps running
+            self.chat_input.focus()
+            self._sync_doom_pane_hint()
+            return
         if event.key == "tab":
             if isinstance(self.screen, DoomScreen):
                 # The overlay has its own chat line: the main input lives on
@@ -1949,6 +2072,19 @@ class OrganismApp(App):
                     self.screen.query_one("#doom-chat", Input).focus()
                 else:
                     self.screen.focus_game()
+                event.prevent_default()
+                event.stop()
+                return
+            if self._doom_pane_visible and self._doom.game_running() and len(self.screen_stack) == 1:
+                # inline pane: Tab cycles typing ⇄ playing, the same
+                # convention as the overlay's chat line
+                if self.app.focused is self.chat_input:
+                    self._pane_playing = True
+                    self.set_focus(None)
+                else:
+                    self._pane_playing = False
+                    self.chat_input.focus()
+                self._sync_doom_pane_hint()
                 event.prevent_default()
                 event.stop()
                 return
@@ -2070,6 +2206,7 @@ class OrganismApp(App):
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
         self._respond_watchdog()
+        self._sync_doom_pane_hint()
         for event in self.org.tick(1.0):
             self._render_event(event)
         if self._busy():

@@ -611,3 +611,100 @@ def test_mud_controller_drops_session_without_saving_on_swap(tmp_path, monkeypat
     controller.game = None
     controller._org = None
     assert controller.route_text("go north") is False
+
+
+def _pane_plain(static):
+    content = static._Static__content
+    return getattr(content, "plain", str(content))
+
+
+async def _start_doom_inline(app, pilot):
+    """Drive '/doom start' on a wide terminal and wait for the inline pane
+    (no fullscreen overlay)."""
+    chat = app.query_one("#chat", Input)
+    chat.focus()
+    chat.value = "/doom start"
+    await pilot.press("enter")
+    await wait_until(lambda: app._doom_pane_visible, message="inline doom pane to appear")
+    return app.query_one("#doom-pane-frame", Static)
+
+
+def test_doom_start_uses_inline_pane_on_wide_terminals(doom_app):
+    """Wide terminals: the game renders in a right-hand pane — the chat
+    log, sidebar, and chat input stay live and the chat input keeps focus.
+    No fullscreen takeover, no esc-to-return."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(160, 40)) as pilot:
+            chat = app.query_one("#chat", Input)
+            chat.focus()
+            chat.value = "/doom start"
+            await pilot.press("enter")
+            await wait_until(lambda: app._doom_pane_visible, message="inline pane to appear")
+            assert type(app.screen) is not DoomScreen  # main screen stays up
+            assert app.focused is chat  # typing remains the default mode
+            frame = app.query_one("#doom-pane-frame", Static)
+            await wait_until(
+                lambda: len(_pane_plain(frame).splitlines()) > 5,
+                message="doom frame to render into the pane",
+            )
+            assert app._doom.game_running()
+
+    asyncio.run(check())
+
+
+def test_doom_pane_tab_cycles_typing_and_playing(doom_app):
+    """Tab on the main screen cycles typing ⇄ playing, the same convention
+    as the overlay's chat line: playing mode routes game keys to the game,
+    typing mode returns them to the chat input."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(160, 40)) as pilot:
+            await _start_doom_inline(app, pilot)
+            chat = app.query_one("#chat", Input)
+            got = []
+            real = app._doom.pane_key_command
+            app._doom.pane_key_command = lambda cmd: (got.append(cmd), real(cmd))[1]
+            try:
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.focused is not chat  # playing mode
+                await pilot.press("w")
+                await pilot.pause()
+                assert got == ["w"]  # played, not typed
+                assert chat.value == ""
+                await pilot.press("tab")
+                await pilot.pause()
+                assert app.focused is chat  # back to typing
+                await pilot.press("w")
+                await pilot.pause()
+                assert chat.value == "w"  # typed, not played
+                assert got == ["w"]
+            finally:
+                app._doom.pane_key_command = real
+
+    asyncio.run(check())
+
+
+def test_doom_view_always_opens_the_fullscreen_overlay(doom_app):
+    """`/doom view` opens the fullscreen overlay even on wide terminals —
+    the pane is the default, the overlay stays available on demand."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(160, 40)) as pilot:
+            chat = app.query_one("#chat", Input)
+            chat.focus()
+            chat.value = "/doom view"
+            await pilot.press("enter")
+            await wait_until(
+                lambda: type(app.screen) is DoomScreen,
+                message="fullscreen overlay to open",
+            )
+            await pilot.press("escape")
+            await pilot.pause()
+            assert len(app.screen_stack) == 1
+
+    asyncio.run(check())

@@ -73,6 +73,22 @@ DOOM_KEY_LABELS = {
     "shoot": "shoot",
 }
 
+# Keys that drive the player from the inline pane's playing mode (and the
+# overlay's arrows/space). Plain letters map to the module's move words.
+DOOM_GAME_KEYS = {
+    "w": "w",
+    "a": "a",
+    "s": "s",
+    "d": "d",
+    "q": "q",
+    "e": "e",
+    "up": "w",
+    "down": "s",
+    "left": "a",
+    "right": "d",
+    "space": "shoot",
+}
+
 
 def extract_doom_command(reply):
     """Look for a doom.command(...) call anywhere in a line and return the
@@ -627,9 +643,10 @@ class DoomController:
         return [timer for timer in self._turn_timers if timer is not None]
 
     def _pane(self):
-        """The active DoomScreen's art Static, or None when the overlay is
-        not the current screen (the game still runs; it just has no
-        surface to render onto) or the screen stack is already torn down."""
+        """The art Static of whichever surface is live — the fullscreen
+        DoomScreen's or the main screen's inline pane — or None when
+        neither is up (the game still runs; it just has no surface) or
+        the screen stack is already torn down."""
         from replicanta.tui import DoomScreen
 
         with contextlib.suppress(Exception):  # ScreenStackError on teardown
@@ -637,10 +654,13 @@ class DoomController:
             if type(screen) is DoomScreen:
                 with contextlib.suppress(NoMatches):
                     return screen.query_one("#doom", Static)
+            if len(self._app.screen_stack) == 1:
+                with contextlib.suppress(NoMatches):
+                    return screen.query_one("#doom-pane-frame", Static)
         return None
 
     def _thoughts(self):
-        """The active DoomScreen's thought-stream Static, or None."""
+        """The thought-stream Static of whichever surface is live, or None."""
         from replicanta.tui import DoomScreen
 
         with contextlib.suppress(Exception):  # ScreenStackError on teardown
@@ -648,6 +668,9 @@ class DoomController:
             if type(screen) is DoomScreen:
                 with contextlib.suppress(NoMatches):
                     return screen.query_one("#doom-thoughts", Static)
+            if len(self._app.screen_stack) == 1:
+                with contextlib.suppress(NoMatches):
+                    return screen.query_one("#doom-pane-thoughts", Static)
         return None
 
     def start_repaint(self):
@@ -686,13 +709,38 @@ class DoomController:
             pane.styles.width = width
             pane.styles.min_width = width
 
-    def _sync_viewport(self, svc):
-        """Tell the module the terminal width so it can pick the scaling
-        (160-col detail vs 80-col fit) for the NEXT spawn."""
+    def _sync_viewport(self, svc, inline=False):
+        """Tell the module the frame width so it can pick the scaling for
+        the NEXT spawn: the inline pane gets crisp 80-column art; the
+        fullscreen overlay uses the terminal width (160-col detail when
+        it fits)."""
         with contextlib.suppress(Exception):
-            svc.set_viewport(self._app.screen.size.width)
+            svc.set_viewport(84 if inline else self._app.screen.size.width)
+
+    def game_running(self):
+        """True when a doom-ascii process is live for the current organism."""
+        svc = self._svc()
+        return self._svc_running(svc) if svc is not None else False
 
     def key_command(self, cmd):
+        """Overlay game keys (DoomScreen bindings): arrows/space/wasd only
+        mean game moves while the overlay is up; everywhere else they keep
+        their normal meanings (chat history)."""
+        from replicanta.tui import DoomScreen
+
+        if not isinstance(self._app.screen, DoomScreen):
+            return
+        self._play_key(cmd)
+
+    def pane_key_command(self, cmd):
+        """Inline-pane game keys (main screen playing mode): same dispatch
+        as the overlay path — human takeover arms the entity cooldown, a
+        dead session re-binds, and the key echoes into the pane hint."""
+        if not getattr(self._app, "_doom_pane_visible", False):
+            return
+        self._play_key(cmd)
+
+    def _play_key(self, cmd):
         svc = self._svc()
         if svc is None:
             return
@@ -704,12 +752,6 @@ class DoomController:
             svc = self._svc()
             if svc is None:
                 return
-        # When the DOOM overlay is up, arrow/space keys drive the game;
-        # everywhere else they keep their normal meanings (chat history).
-        from replicanta.tui import DoomScreen
-
-        if not isinstance(self._app.screen, DoomScreen):
-            return
         # If no game is running, start one automatically on the first keypress.
         if not self._svc_running(svc):
             if cmd == "stop":
@@ -732,17 +774,20 @@ class DoomController:
             self._echo_key(cmd)
 
     def _echo_key(self, cmd):
-        """Surface the manual keypress on the overlay hint line (no-op when
-        the overlay is closed or the key has no label)."""
-        from replicanta.tui import DoomScreen
-
-        if not isinstance(self._app.screen, DoomScreen):
-            return
+        """Surface the manual keypress: overlay hint when the overlay is
+        up, pane hint when the inline pane is playing (a wall bump leaves
+        the frame unchanged — without this the keypress looks dropped)."""
         label = DOOM_KEY_LABELS.get(cmd)
         if label is None:
             return
-        with contextlib.suppress(Exception):
-            self._app.screen.show_key(label)
+        from replicanta.tui import DoomScreen
+
+        if isinstance(self._app.screen, DoomScreen):
+            with contextlib.suppress(Exception):
+                self._app.screen.show_key(label)
+        elif getattr(self._app, "_doom_pane_visible", False):
+            with contextlib.suppress(Exception):
+                self._app._pane_key_echo(label)
 
     def _arm_turn(self, delay):
         """Arm an auto-play turn timer, tracking the handle controller-side
@@ -798,8 +843,8 @@ class DoomController:
             logger.warning("doom thought mirror failed", exc_info=True)
 
     def command(self, args):
-        """Dispatch /doom subcommands: bare = status, start/stop, or direct
-        movement/shoot while a game is running."""
+        """Dispatch /doom subcommands: bare = status, start/stop, view, or
+        direct movement/shoot while a game is running."""
         loader = getattr(self._app.org, "module_loader", None)
         if loader is None:
             self._app._append_log("module loader unavailable", STYLE_WARN)
@@ -808,11 +853,23 @@ class DoomController:
         if svc is None:
             self._app._append_log("doom-ascii module not loaded (enable it via /modules)", STYLE_WARN)
             return
+        if args and args[0] == "view":
+            # explicit fullscreen, whatever the terminal width
+            from replicanta.tui import DoomScreen
+
+            if not isinstance(self._app.screen, DoomScreen):
+                self._app.push_screen(DoomScreen())
+            apply_pane = getattr(self._app, "_apply_doom_pane", None)
+            if apply_pane is not None:
+                with contextlib.suppress(Exception):
+                    apply_pane()
+            return
         commands = loader.registry.get("commands")
         if commands is None:
             self._app._append_log("command service unavailable", STYLE_WARN)
             return
-        self._sync_viewport(svc)
+        inline_ok = getattr(self._app, "_doom_inline_ok", None)
+        self._sync_viewport(svc, inline=bool(inline_ok and inline_ok()))
         try:
             result = commands.dispatch("/doom", args if args else [])
         except Exception as exc:  # noqa: BLE001
@@ -845,8 +902,14 @@ class DoomController:
             if doom is not None:
                 doom.update(renderable)
                 self._fit_pane_width(doom, renderable)
-        # Raise the DOOM overlay when a game starts or renders (idempotent).
-        if args and args[0] in ("start", "status"):
+        # Pick the game's surface: the inline pane on wide terminals (chat
+        # stays live), the fullscreen overlay on narrow ones. `/doom view`
+        # always opens the overlay.
+        apply_pane = getattr(self._app, "_apply_doom_pane", None)
+        if apply_pane is not None:
+            with contextlib.suppress(Exception):
+                apply_pane()
+        if args and args[0] in ("start", "status") and not getattr(self._app, "_doom_pane_visible", False):
             from replicanta.tui import DoomScreen
 
             if not isinstance(self._app.screen, DoomScreen):
