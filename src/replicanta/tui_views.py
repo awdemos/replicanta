@@ -74,7 +74,9 @@ def empty_inner():
 
 
 def chat_card(who, text, timestamp=None, border_style=None):
-    """A consistent panel card for chat utterances."""
+    """A consistent panel card for chat utterances. The border uses the
+    heavy solid box — light '│' rules read as raw pipe characters and
+    break the card metaphor when entity text wraps."""
     border_style = border_style or (STYLE_USER if who == "you" else STYLE_ORG)
     title = f"{who} · {timestamp}" if timestamp else who
     return Panel(
@@ -83,6 +85,7 @@ def chat_card(who, text, timestamp=None, border_style=None):
         title_align="left",
         border_style=border_style,
         padding=(0, 1),
+        box=box.HEAVY,
     )
 
 
