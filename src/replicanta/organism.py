@@ -484,7 +484,11 @@ class BeliefStore:
         """Record an intention the entity stated in its own reply. Repeat
         statements of the same intention raise its count; kept small and
         persisted so _goals_tick can promote one that keeps recurring."""
-        text = str(text).strip()[:80]
+        text = " ".join(str(text).split())
+        if len(text) > 80:
+            # cut at a word boundary — a mid-word slice reads as gibberish
+            # in the prompt ("...asking for more details. What do")
+            text = text[:80].rsplit(" ", 1)[0].rstrip(",;:.!?") + "…"
         if len(text) < 3:
             return None
         with self._lock:

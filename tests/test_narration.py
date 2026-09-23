@@ -885,8 +885,22 @@ def test_task_focused_keeps_a_compact_mind_block(tmp_path):
     assert "Persona:" in prompt
     # …but the organism mind is not wiped: top beliefs + goal slot survive
     assert "has_fur" in prompt
-    assert "who you are right now" in prompt
+    assert "speak from it, not about it" in prompt
     assert "fix my bug" in prompt
+
+
+def test_task_focused_prompt_does_not_confuse(tmp_path):
+    """The default prompt must not lie about capabilities, must not
+    contradict itself about inner state, and must end on the user's
+    message + reply contract (not a module ad)."""
+    snap, _ = _persona_snapshot(tmp_path, task="reply")
+    prompt = build_prompt(snap, task="reply", user_message="hi")
+    assert "run shell commands" not in prompt  # the entity cannot; promising it reads as confusion
+    assert "not your own existence or inner state" not in prompt  # contradicted the mind block
+    assert "This overrides everything else" not in prompt
+    # the prompt ends with how to reply, not with a module capability block
+    tail = prompt.rstrip().splitlines()[-1]
+    assert "no quotes" in tail or "doom.command" in tail
 
 
 def test_task_focused_doom_keeps_frame_and_mind(tmp_path):

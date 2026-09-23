@@ -657,7 +657,12 @@ def _self_statement_lines(snapshot):
     candidates = snapshot.get("self_goal_candidates") or []
     if candidates:
         top = max(candidates, key=lambda c: (c.get("count", 1), c.get("cycle", 0)))
-        lines.append(f"you keep saying you want to: {top['text']}")
+        # candidates persisted before the word-boundary truncation can be
+        # mid-word cuts ("...more details. What do") — re-cut cleanly
+        text = " ".join(str(top["text"]).split())
+        if len(text) > 77:
+            text = text[:77].rsplit(" ", 1)[0].rstrip(",;:.!?") + "…"
+        lines.append(f"you keep saying you want to: {text}")
     return lines
 
 
@@ -669,7 +674,7 @@ def _compact_mind_lines(snapshot):
     lines = []
     beliefs = snapshot.get("beliefs") or []
     if beliefs:
-        lines.append("your mind right now:")
+        lines.append("what you hold:")
         lines.extend(f"- {b}" for b in beliefs[:3])
     if all(k in snapshot for k in ("arousal", "coherence", "incoherence", "mood")):
         felt = _felt_experience(snapshot)
@@ -732,14 +737,15 @@ def _doom_prompt(snapshot):
         "",
         "### DOOM — YOU ARE PLAYING RIGHT NOW",
         "",
-        "This overrides everything else.",
+        "A game is running: your reply must end with exactly one",
+        "doom.command(...) line. If the user spoke, answer them inside your",
+        "reasoning; the command line comes last. No move lists, no",
+        "questions, no emojis.",
         "The game screen is rendered below as ASCII art — walls, demons,",
         "your status bar. Reason out loud in 2-4 short sentences about what",
         "you see and what to do, so the user can follow your reasoning as it",
-        "streams. Then on the very next line output exactly one",
-        "doom.command(...) line. No move lists, no questions, no emojis.",
-        "Your prose is streamed to the user live; the command line is parsed",
-        "and executed by the game.",
+        "streams. Your prose is streamed to the user live; the command line",
+        "is parsed and executed by the game.",
         "",
         "Example:",
         "The demon is close and roughly ahead. I should close the gap",
@@ -755,7 +761,7 @@ def _doom_prompt(snapshot):
     if frame:
         lines.extend(frame.splitlines())
     else:
-        lines.append("(no game running — output doom.start() to begin)")
+        lines.append("(no game running — tell the user to run /doom start)")
     lines += [
         "```",
         "",
@@ -883,11 +889,13 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     elif task_focused:
         # Task mode: persona drives identity and style; the organism mind
         # stays present in compact form below (an overlay, not a wipe).
+        # No invented capabilities — the entity cannot run shell commands,
+        # and promising tools it lacks reads as confusion.
         intro = [
-            "You are an AI assistant running in a terminal on the user's",
-            "machine. You can run shell commands and inspect the system",
-            "when asked. Focus on the user's request, not your own",
-            "existence or inner state.",
+            "You are an AI assistant in a terminal, speaking as a small",
+            "persistent organism with memory, beliefs, and moods (summarized",
+            "below). Focus on the user's request — the inner state is",
+            "context for HOW you speak, not the topic.",
             "",
             "Persona:",
             snapshot["persona"],
@@ -925,13 +933,19 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
         ]
         mind = _compact_mind_lines(snapshot)
         if mind:
-            lines += ["", "who you are right now (context, not a story):"]
+            lines += ["", "your mind, in brief (context — speak from it, not about it):"]
             lines.extend(mind)
         if snapshot.get("chat"):
             lines += ["", "recent conversation:"]
             lines.extend(f"- {c}" for c in snapshot["chat"])
         if user_message:
             lines += ["", f"The user just said: {user_message}"]
+        # module capability blocks come BEFORE the reply contract, so the
+        # prompt ends on the user's message and how to answer it — ending
+        # on a module ad primes the model to lead with that module
+        lines += _hand_lines(snapshot)
+        lines += _brain_lines(snapshot)
+        lines += _doom_lines(snapshot)
         if task in _TASK_LINES:
             lines += [""] + _TASK_LINES[task]()
         elif user_message:
@@ -941,9 +955,6 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
                 "ramble about your own state, feelings, or existence. No preamble,",
                 "no quotes, no emoji.",
             ]
-        lines += _hand_lines(snapshot)
-        lines += _brain_lines(snapshot)
-        lines += _doom_lines(snapshot)
         return "\n".join(lines)
 
     # Original organism mode: rich inner-life context.

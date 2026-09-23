@@ -2066,3 +2066,19 @@ def test_recovery_boot_seeds_the_store_from_the_genome(tmp_path):
     org.load()
     assert org.store.load_error
     assert ("self", "mood", "calm") in org.store.beliefs()
+
+
+def test_self_goal_candidate_truncates_at_word_boundary(store):
+    """A long stated intention must be cut at a word boundary — a mid-word
+    slice ('...asking for more details. What do') reads as gibberish in
+    the prompt."""
+    long_intention = (
+        "start by understanding my current context and asking for more details about what the user wants me to do next"
+    )
+    cand = store.add_self_goal_candidate(long_intention)
+    assert cand is not None
+    assert len(cand["text"]) <= 81
+    assert cand["text"].endswith("…")
+    assert "What do" not in cand["text"]  # no dangling mid-word cut
+    words = cand["text"].rstrip("…").split()
+    assert " ".join(words) in long_intention  # a clean prefix, word for word
