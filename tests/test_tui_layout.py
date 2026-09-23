@@ -1158,6 +1158,7 @@ def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
     """The 80-column game frame must never wrap: on narrow terminals the
     overlay scrolls horizontally instead of shredding the ASCII art."""
     from textual.containers import ScrollableContainer
+    from textual.widgets import Static as TStatic
 
     from replicanta.tui import DoomScreen
 
@@ -1167,7 +1168,7 @@ def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
         async with app.run_test(size=(60, 24)) as pilot:
             app.push_screen(DoomScreen())
             await pilot.pause()
-            doom = app.screen.query_one("#doom", Static)
+            doom = app.screen.query_one("#doom", TStatic)
             await pilot.pause()
             # 82 outer - 2 padding = exactly the 80-column frame: any
             # narrower content region wraps the art mid-line.
@@ -1175,10 +1176,32 @@ def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
             assert doom.region.width == 82
             assert doom.content_region.width == 80
             assert isinstance(doom.parent, ScrollableContainer)
+            # the entity's voice is a fixed-height hero box pinned above
+            # the frame: entity text trims to it instead of growing the
+            # layout and pushing the game view out of sight
+            thoughts = app.screen.query_one("#doom-thoughts", TStatic)
+            assert thoughts.styles.height is not None and thoughts.styles.height.value == 6
+            assert thoughts.border_title == "the entity"
             # esc closes the overlay; the (non-)game is untouched
             await pilot.press("escape")
             await pilot.pause()
             assert type(app.screen).__name__ == "Screen"
+
+    asyncio.run(check())
+
+
+def test_doom_pane_thought_box_is_fixed_height(nursery_app):
+    """The inline pane's hero box shares the overlay's contract: fixed
+    height, titled border, trimmed stream — the frame can never move."""
+    from textual.widgets import Static as TStatic
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test(size=(160, 40)):
+            thoughts = app.query_one("#doom-pane-thoughts", TStatic)
+            assert thoughts.styles.height is not None and thoughts.styles.height.value == 6
+            assert thoughts.border_title == "the entity"
 
     asyncio.run(check())
 

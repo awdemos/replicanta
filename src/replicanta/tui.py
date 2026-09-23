@@ -62,6 +62,7 @@ from replicanta import (
 from replicanta.organism import Organism
 from replicanta.tui_controllers import (
     DOOM_GAME_KEYS,
+    DOOM_THOUGHT_BOX_LINES,
     DoomController,
     MudController,
     VoiceController,
@@ -571,7 +572,11 @@ class DoomScreen(Screen):
     # 82 = 80-column frame + 1 col padding each side: the content width must
     # be exactly 80 or Rich wraps the art mid-line and the picture shreds.
     #doom { padding: 0 1; width: 82; min-width: 82; }
-    #doom-thoughts { padding: 1 2; height: auto; max-height: 10; color: $success; }
+    #doom-thoughts {
+        height: 6; margin: 0 1;
+        border: round $success; padding: 0 1;
+        color: $success;
+    }
     #doom-chat {
         height: 3;
         border: none;
@@ -582,9 +587,16 @@ class DoomScreen(Screen):
     """
 
     def compose(self) -> ComposeResult:
-        """Build the hint line, the scrollable frame, and the chat input."""
+        """Build the hint line, the pinned thought box, the scrollable
+        frame, and the chat input."""
         with Vertical(id="doom-box"):
             yield Label(self.HINT, id="doom-hint")
+            # The entity's voice: a fixed-height hero box pinned above the
+            # frame. The controller trims the stream to the box, so game
+            # text can never push the game view down out of sight.
+            thoughts = Static("", id="doom-thoughts", markup=False)
+            thoughts.border_title = "the entity"
+            yield thoughts
             # The container must never take focus: when the frame is taller
             # than the terminal (scaling 2) a focused ScrollableContainer
             # eats up/down for scrolling and the player can't walk — the
@@ -593,7 +605,6 @@ class DoomScreen(Screen):
             scroll = ScrollableContainer(id="doom-scroll")
             scroll.can_focus = False
             with scroll:
-                yield Static("", id="doom-thoughts", markup=False)
                 yield Static(
                     "Run /doom start to play DOOM (doom-ascii).",
                     id="doom",
@@ -622,8 +633,8 @@ class DoomScreen(Screen):
         hint.update(f"{self.HINT} — you: {label}")
 
     def show_user_line(self, text: str) -> None:
-        """Echo a submitted chat line into the thought stream — the main
-        chat log sits on the screen beneath this overlay, unseen."""
+        """Echo a submitted chat line into the hero box — the main chat
+        log sits on the screen beneath this overlay, unseen."""
         thoughts = self.query_one("#doom-thoughts", Static)
         current = str(getattr(thoughts, "_Static__content", "") or "")
         if current.startswith("> "):
@@ -632,7 +643,7 @@ class DoomScreen(Screen):
             f"[{datetime.now(UTC).strftime('%H:%M:%S')}] you › {line}" for line in text.splitlines() if line.strip()
         )
         lines = (current.splitlines() if current else []) + stamped.splitlines()
-        thoughts.update("\n".join(lines[-8:]))
+        thoughts.update("\n".join(lines[-DOOM_THOUGHT_BOX_LINES:]))
 
     def action_dismiss(self):
         self.app.pop_screen()
@@ -879,8 +890,11 @@ class OrganismApp(App):
     #doom-pane { width: 84; min-width: 84; max-width: 84; display: none;
                  border-left: tall $primary; background: $surface; }
     #doom-pane-hint { height: 1; padding: 0 1; color: $text-muted; }
-    #doom-pane-thoughts { height: auto; max-height: 6; padding: 0 1;
-                          color: $success; }
+    #doom-pane-thoughts {
+        height: 6; margin: 0 1;
+        border: round $success; padding: 0 1;
+        color: $success;
+    }
     #doom-pane-scroll { height: 1fr; }
     #doom-pane-frame { padding: 0 1; width: 82; min-width: 82; }
     #mutation-banner { height: auto; display: none; padding: 0 1;
@@ -1017,7 +1031,12 @@ class OrganismApp(App):
                 yield Static("", id="pending", markup=False)
             with Vertical(id="doom-pane"):
                 yield Label(self.DOOM_PANE_HINT_TYPING, id="doom-pane-hint")
-                yield Static("", id="doom-pane-thoughts", markup=False)
+                # The entity's voice: a fixed-height hero box pinned above
+                # the frame, trimmed to the box by the controller — game
+                # text can never push the frame down out of sight.
+                pane_thoughts = Static("", id="doom-pane-thoughts", markup=False)
+                pane_thoughts.border_title = "the entity"
+                yield pane_thoughts
                 pane_scroll = ScrollableContainer(id="doom-pane-scroll")
                 pane_scroll.can_focus = False
                 with pane_scroll:

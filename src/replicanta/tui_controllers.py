@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 MUD_TURN_DELAY = 4.0  # seconds between dungeon moves
 MANUAL_PLAY_COOLDOWN = 30.0  # entity auto-play stays silent this long after human input
 DOOM_REPAINT_INTERVAL = 0.1  # overlay frame rate while a game runs (the 1s tick feels frozen)
+# The thought hero box is height 6 (border included) on every surface; the
+# stream is trimmed to these lines so entity text can never grow the box
+# and push the game frame out of view.
+DOOM_THOUGHT_BOX_LINES = 4
 
 
 def doom_player_command(text):
@@ -968,8 +972,9 @@ class DoomController:
             f"[{datetime.now(UTC).strftime('%H:%M:%S')}] > {line}" for line in text.splitlines() if line.strip()
         )
         lines = (current.splitlines() if current else []) + stamped.splitlines()
-        # Keep the last ~8 entries so the stream stays readable.
-        trimmed = "\n".join(lines[-8:])
+        # Trim to the hero box (height 6 incl. border): a fixed capacity
+        # is what guarantees entity text can never push the frame down.
+        trimmed = "\n".join(lines[-DOOM_THOUGHT_BOX_LINES:])
         thoughts.update(trimmed)
         # Also update the pending token area so the streaming reasoning is visible.
         pending = self._app._safe_query("#pending", Static)
