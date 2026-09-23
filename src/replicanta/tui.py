@@ -450,9 +450,22 @@ class BeingScreen(Screen):
 class DoomScreen(Screen):
     """Full-screen DOOM overlay: the entity's thought stream above the
     80-column ASCII frame. Escape closes the overlay; the game keeps
-    running (arrows/space play, /doom stop ends it)."""
+    running (wasd/qe/arrows/space play, /doom stop ends it).
 
-    BINDINGS: ClassVar[list[Binding]] = [Binding("escape", "dismiss", "close")]
+    The movement keys are bound HERE, not on the app: app-level w/s would
+    swallow everyday typing on the main screen, while screen-level bindings
+    only exist while this overlay is on top (and it has no input widget to
+    conflict with)."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "dismiss", "close"),
+        Binding("w", "press_key('w')", "forward", show=False),
+        Binding("s", "press_key('s')", "back", show=False),
+        Binding("a", "press_key('a')", "turn left", show=False),
+        Binding("d", "press_key('d')", "turn right", show=False),
+        Binding("q", "press_key('q')", "strafe left", show=False),
+        Binding("e", "press_key('e')", "strafe right", show=False),
+    ]
 
     CSS = """
     DoomScreen { background: $surface; }
@@ -468,7 +481,7 @@ class DoomScreen(Screen):
         """Build the hint line and the scrollable frame container."""
         with Vertical(id="doom-box"):
             yield Label(
-                "esc closes — arrows/space play — /doom stop ends the game",
+                "esc closes — wasd/qe/arrows move — space shoots — /doom stop ends",
                 id="doom-hint",
             )
             # The container must never take focus: when the frame is taller
@@ -490,6 +503,17 @@ class DoomScreen(Screen):
         """Paint the current frame immediately: the controller pushed this
         screen asynchronously, after it had already computed the frame."""
         self.app._doom.refresh(force=True)
+
+    def action_press_key(self, key: str) -> None:
+        """Overlay movement keys (w/a/s/d/q/e bindings above)."""
+        self.app._doom.key_command(key)
+
+    def show_key(self, label: str) -> None:
+        """Echo the last manual key in the hint line: walking into a wall
+        leaves the frame unchanged, and without this the keypress looks
+        dropped."""
+        hint = self.query_one("#doom-hint", Label)
+        hint.update(f"esc closes — wasd/qe/arrows move — space shoots — you: {label}")
 
     def action_dismiss(self):
         self.app.pop_screen()

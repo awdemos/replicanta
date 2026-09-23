@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input, Static
+from textual.widgets import Input, Label, Static
 
 from conftest import neuter_background_loops, wait_until
 from replicanta import nursery as nursery_mod
@@ -243,6 +243,49 @@ def test_overlay_arrows_reach_the_game_even_when_the_frame_overflows(doom_app):
             finally:
                 app._doom.key_command = real
             assert sorted(got) == ["a", "d", "s", "shoot", "w"], got
+
+    asyncio.run(check())
+
+
+def test_overlay_wasd_qe_bound_on_the_overlay_only(doom_app):
+    """Regression: w/s/q/e did nothing on the overlay (only arrows/space had
+    bindings, and app-level w/s would swallow chat typing) — the movement
+    keys live on DoomScreen itself, and each press echoes into the hint."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(90, 16)) as pilot:
+            await _start_doom(app, pilot)
+            got = []
+            real = app._doom.key_command
+            app._doom.key_command = lambda cmd: (got.append(cmd), real(cmd))[1]
+            try:
+                for key in ("w", "s", "a", "d", "q", "e"):
+                    await pilot.press(key)
+                    await pilot.pause()
+            finally:
+                app._doom.key_command = real
+            assert sorted(got) == ["a", "d", "e", "q", "s", "w"], got
+            hint = app.screen.query_one("#doom-hint", Label)
+            assert "you: strafe right" in str(hint._Static__content)
+
+    asyncio.run(check())
+
+
+def test_main_screen_typing_w_stays_in_chat(doom_app):
+    """Guard: the overlay's w/s bindings must not leak to the main screen —
+    typing a sentence with w in the chat line must reach the Input, not the
+    doom game."""
+    app = doom_app
+
+    async def check():
+        async with app.run_test(size=(90, 16)) as pilot:
+            chat = app.query_one("#chat", Input)
+            chat.focus()
+            await pilot.press("w")
+            await pilot.pause()
+            assert chat.value == "w"
+            assert app._doom._manual_until == 0.0  # no game, no cooldown armed
 
     asyncio.run(check())
 

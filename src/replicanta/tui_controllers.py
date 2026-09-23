@@ -63,6 +63,16 @@ def doom_player_command(text):
 
 _COMMAND_CALL_RE = re.compile(r"doom\.command\(([^)]*)\)", re.IGNORECASE)
 
+DOOM_KEY_LABELS = {
+    "w": "forward",
+    "s": "back",
+    "a": "turn left",
+    "d": "turn right",
+    "q": "strafe left",
+    "e": "strafe right",
+    "shoot": "shoot",
+}
+
 
 def extract_doom_command(reply):
     """Look for a doom.command(...) call anywhere in a line and return the
@@ -590,6 +600,20 @@ class DoomController:
             svc.yield_to_human(MANUAL_PLAY_COOLDOWN)
         if cmd != "start":
             self.command([cmd])
+            self._echo_key(cmd)
+
+    def _echo_key(self, cmd):
+        """Surface the manual keypress on the overlay hint line (no-op when
+        the overlay is closed or the key has no label)."""
+        from replicanta.tui import DoomScreen
+
+        if not isinstance(self._app.screen, DoomScreen):
+            return
+        label = DOOM_KEY_LABELS.get(cmd)
+        if label is None:
+            return
+        with contextlib.suppress(Exception):
+            self._app.screen.show_key(label)
 
     def _turn_timers(self):
         """Timers armed for the entity's auto-play turn. App.set_timer wraps
