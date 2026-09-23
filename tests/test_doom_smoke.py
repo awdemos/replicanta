@@ -793,3 +793,41 @@ def test_doom_view_always_opens_the_fullscreen_overlay(doom_app):
             assert len(app.screen_stack) == 1
 
     asyncio.run(check())
+
+
+def test_all_directions_move_the_player(doom_app, monkeypatch):
+    """Every move the entity can emit must reach the engine: forward, back,
+    both turns, both strafes, and fire each produce the stub's distinct
+    marker. Regression net for the KEYMAP/tap wiring across all directions."""
+    from replicanta import voice
+
+    app = doom_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            # voice offline: auto-play must not interleave its own moves
+            monkeypatch.setattr(voice, "online", lambda: False)
+            await _start_doom(app, pilot)
+            svc = app.org.module_loader.registry.get("doom")
+            await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            app._doom.cancel_auto()
+            app._responding = False
+            hooks = app.org.module_loader.registry.get("hooks")
+            moves = [
+                ("w", "key=up"),
+                ("s", "key=down"),
+                ("a", "key=left"),
+                ("d", "key=right"),
+                ("q", "key=strafe-left"),
+                ("e", "key=strafe-right"),
+                ("shoot", "HIT!"),
+            ]
+            for word, marker in moves:
+                hooks.emit("utterance", f'doom.command("{word}")')
+                await wait_until(
+                    lambda m=marker: m in svc.frame(),
+                    message=f"{word} to reach the engine ({marker})",
+                )
+                await pilot.pause(0.1)
+
+    asyncio.run(check())
