@@ -1,6 +1,7 @@
 """Lua module loader and service registry for Replicanta plugins."""
 
 import logging
+import os
 import re
 import time
 import tomllib
@@ -450,6 +451,7 @@ class ModuleLoader:
             "arm",
             tendon_hand.ArmService(
                 self.organism,
+                bridge_url=os.environ.get("REPLICANTA_TENDON_BRIDGE", "http://127.0.0.1:8765"),
                 lua_lock=(self._host.lock if self._host is not None else None),
             ),
         )

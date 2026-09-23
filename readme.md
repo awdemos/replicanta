@@ -63,8 +63,10 @@ For the web interface: `.venv/bin/replicanta --web`
 - **Lua hooks** — write `scripts/*.lua` to react to birth, cycles, learning,
   utterances, and fades.
 - **Fly brain** — ask the organism to evolve its own reservoir computer: the
-  larval *Drosophila* connectome from `rsi-wetware-rs`. Say
-  `brain.optimize("digits")` or use `/brain status|optimize|adapt|bank`.
+  complete larval *Drosophila* connectome from `rsi-wetware-rs`
+  (https://github.com/awdemos/rsi-wetware-rs). Say `brain.run("digits")`,
+  `brain.optimize("digits")`, `brain.train("digits")`, or use
+  `/brain status|run|train|optimize|adapt|bank|info|last|help`.
 
 ## Installation
 

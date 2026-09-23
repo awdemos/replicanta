@@ -29,6 +29,7 @@ import queue
 import re
 import subprocess  # nosec
 import threading
+import time
 import wave
 from pathlib import Path
 
@@ -379,8 +380,10 @@ def _drain():
 def _speak_with_timeout(text, timeout=30):
     """Run _speak in a daemon thread and abandon it if playback/synthesis hangs.
     This keeps a single hung utterance from silencing every subsequent one."""
+    started = threading.Event()
 
     def target():
+        started.set()
         with contextlib.suppress(Exception):  # nosec — speech must never kill anything
             try:
                 _speak(text)
@@ -392,7 +395,15 @@ def _speak_with_timeout(text, timeout=30):
 
     t = threading.Thread(target=target, daemon=True, name="speech-utterance")
     t.start()
-    t.join(timeout=timeout)
+    # Wait for the worker to either finish or reach the timeout. On some
+    # systems a tiny scheduling delay can push the wall-clock past the join
+    # limit; cap the total wait so callers relying on timeout semantics (tests,
+    # interruptible shutdown) do not overshoot.
+    deadline = time.monotonic() + timeout + 0.5
+    while t.is_alive() and time.monotonic() < deadline:
+        t.join(timeout=min(0.05, deadline - time.monotonic()))
+        if not t.is_alive():
+            break
 
 
 def _load_voice():

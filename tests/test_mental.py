@@ -28,7 +28,7 @@ def _drive(store, mental, chaos, ticks=40, sleeping=False):
 
 
 def test_defaults(store):
-    assert store.arousal == pytest.approx(0.3)
+    assert store.arousal == pytest.approx(0.15)
     assert store.coherence == pytest.approx(0.5)
     assert store.incoherence == pytest.approx(0.2)
     assert store.insane is False

@@ -14,4 +14,4 @@ behind_weight = 0.05
 behind_many_weight = 0.1
 
 [modules]
-enabled = ["base", "creative-writer", "fly-brain", "nano-doom", "socratic-philosopher", "software-engineer", "visual-state"]
+enabled = ["base", "creative-writer", "fly-brain", "nano-doom", "socratic-philosopher", "software-engineer", "tendon-hand", "visual-state"]

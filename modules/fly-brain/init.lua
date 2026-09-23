@@ -2,6 +2,10 @@
 --
 -- The organism can evolve, adapt, and interrogate a real larval Drosophila
 -- connectome (the rsi-wetware-rs reservoir computer) through this module.
+-- Provenance: the external CLI is https://github.com/awdemos/rsi-wetware-rs,
+-- a Rust implementation of the L1–L5 recursive-self-improvement loop that
+-- uses the complete larval fruit-fly connectome (Winding et al., Science 2023)
+-- as a fixed biological reservoir. This Lua module only spawns/parses it.
 -- The module owns all behavior: it spawns the wetware CLI via
 -- ctx.process (plain pipes, stderr merged), parses reports with ctx.json,
 -- summarizes them, and remembers outcomes in the organism's store.
@@ -12,12 +16,15 @@
 --   brain.run("digits")        -> run the connectome harness (async)
 --   brain.run("digits", true)  -> same, blocking; returns the report table
 --   brain.optimize("digits")   -> alias for brain.run (older prompts)
+--   brain.train("digits")      -> alias for brain.run (natural name)
 --   brain.adapt()              -> L4 drift-rehearsal demo (async)
 --   brain.bank()               -> experience bank, as text
+--   brain.info()               -> connectome stats
 --   brain.last()               -> last finished run {ok, text, report}, or nil
 --   brain.status()             -> binary/running/last-run summary
 --   brain.running()            -> true while a run is in flight
 --   brain.available()          -> true when the wetware CLI resolves
+--   brain.help()               -> one-line command help
 --
 -- How the organism calls it: the LLM cannot execute Lua, so it writes the
 -- call as text on its own line — brain.optimize("digits") — and the
@@ -54,6 +61,11 @@ function init(ctx)
   local DEFAULT_TIMEOUT = 1800.0
   local QUICK_TIMEOUT = 120.0
 
+  -- Cache the binary path for the lifetime of the module. Discovery via
+  -- externals is cheap, but it can still be called on every volition tick
+  -- if another module polls brain.available(); caching removes that work.
+  local cached_bin = nil
+
   local state = {
     running = false,
     kind = nil,
@@ -61,14 +73,18 @@ function init(ctx)
   }
 
   local function binary()
+    if cached_bin ~= nil then
+      return cached_bin
+    end
     if externals == nil then
       return nil
     end
     local ok, path = pcall(function()
       return externals:wetware_binary()
     end)
-    if ok then
-      return path
+    if ok and path ~= nil then
+      cached_bin = path
+      return cached_bin
     end
     return nil
   end
@@ -98,27 +114,55 @@ function init(ctx)
   end
 
   -- ------------------------------------------------------------ summaries
+  -- The real wetware CLI can return different shapes across versions and
+  -- subcommands (digits, timeseries, adapt, optimize). All summaries read
+  -- defensively: missing or non-numeric fields are skipped, never errors.
   local function is_number(v)
     return type(v) == "number"
   end
 
+  local function get_num(report, key)
+    local v
+    local ok = pcall(function()
+      v = report[key]
+    end)
+    if not ok then
+      return nil
+    end
+    return is_number(v) and v or nil
+  end
+
   local function summarize_run(report)
     local parts = { "fly brain: " .. tostring(report.task or "?") .. " done" }
-    local test = report.test
-    local default = report.default_test
-    local improvement = report.improvement
-    if is_number(test) then
+    -- Newer wetware "run" returns accuracy; older "optimize" returns test.
+    local accuracy = get_num(report, "accuracy")
+    local test = get_num(report, "test")
+    local default = get_num(report, "default_test")
+    local improvement = get_num(report, "improvement")
+    local baseline = get_num(report, "baseline_accuracy")
+    if accuracy ~= nil then
+      local score = string.format("accuracy %.4f", accuracy)
+      if baseline ~= nil then
+        score = score .. string.format(" (baseline %.4f)", baseline)
+      end
+      parts[#parts + 1] = score
+    end
+    if test ~= nil then
       local score = string.format("test %.4f", test)
-      if is_number(default) then
+      if default ~= nil then
         score = score .. string.format(" (default %.4f)", default)
       end
-      if is_number(improvement) then
+      if improvement ~= nil then
         score = score .. string.format(", improvement %+.4f", improvement)
       end
       parts[#parts + 1] = score
     end
-    if type(report.bank_entries) == "number" then
-      parts[#parts + 1] = string.format("bank %d entries", report.bank_entries)
+    local bank_entries
+    pcall(function()
+      bank_entries = report.bank_entries
+    end)
+    if type(bank_entries) == "number" then
+      parts[#parts + 1] = string.format("bank %d entries", bank_entries)
     end
     return table.concat(parts, "; ")
   end
@@ -163,8 +207,29 @@ function init(ctx)
   end
 
   local function parse_output(text)
+    -- Some wetware subcommands emit human-readable progress lines (and
+    -- "bank" emits a human-readable listing) before or instead of JSON.
+    -- Find the final JSON object by locating the last line that starts
+    -- with "{" and ends with "}".
+    local last_json = nil
+    for raw_line in string.gmatch(text, "[^\n]+") do
+      local line = raw_line:gsub("^%s+", ""):gsub("%s+$", "")
+      if string.sub(line, 1, 1) == "{" and string.sub(line, -1) == "}" then
+        last_json = line
+      end
+    end
+    -- If there is no braced line, the whole output may be JSON preceded by
+    -- stderr-style progress lines that start with "[". Try to find any
+    -- braced block anywhere in the text.
+    if last_json == nil then
+      local json_start = text:find("{")
+      if json_start ~= nil then
+        last_json = text:sub(json_start)
+      end
+    end
+    local payload = last_json or text
     local ok, report = pcall(function()
-      return json.parse(text)
+      return json.parse(payload)
     end)
     if not ok then
       error("wetware returned unparsable output: " .. text:sub(1, 200))
@@ -285,22 +350,67 @@ function init(ctx)
     return table.concat(lines, "\n")
   end
 
+  function brain.help()
+    return table.concat({
+      "fly brain commands:",
+      "  /brain status            show binary/running/last-run state",
+      "  /brain run [digits]      run the connectome harness (async)",
+      "  /brain train [digits]    alias for run",
+      "  /brain optimize [digits] alias for run (legacy name)",
+      "  /brain adapt             drift-adaptation rehearsal (async)",
+      "  /brain bank              show the inherited experience bank",
+      "  /brain last              show the last finished run",
+      "  /brain help              show this list",
+    }, "\n")
+  end
+
+  function brain.info()
+    local report = run_sync({ "info" }, QUICK_TIMEOUT)
+    local lines = { "fly brain info:" }
+    for _, key in ipairs({ "source", "neurons", "connections", "density", "mean_synapses_per_connection" }) do
+      if report[key] ~= nil then
+        lines[#lines + 1] = tostring(key) .. ": " .. tostring(report[key])
+      end
+    end
+    if #lines == 1 then
+      return "fly brain: info returned no recognizable fields"
+    end
+    return table.concat(lines, "\n")
+  end
+
   function brain.last()
     return state.last
   end
 
   function brain.bank()
-    local report = run_sync({ "bank" }, QUICK_TIMEOUT)
-    local lines = {}
-    for _, key in ipairs({ "policy", "entries" }) do
-      if report[key] ~= nil then
-        lines[#lines + 1] = tostring(key) .. ": " .. tostring(report[key])
-      end
+    -- The wetware CLI prints a human-readable bank listing on stdout and
+    -- exits 0; there is no JSON. Return the raw text so the user/entity can
+    -- read it. Strip trailing whitespace for tidy logs.
+    local bin = require_binary()
+    local argv = { bin, "bank" }
+    local pid = proc.spawn(argv, {})
+    local ok_wait, code = pcall(function()
+      return proc.wait(pid, QUICK_TIMEOUT)
+    end)
+    local out = ""
+    pcall(function()
+      out = proc.output(pid)
+    end)
+    pcall(function()
+      proc.kill(pid)
+    end)
+    if not ok_wait then
+      error("wetware bank timed out: " .. tostring(code))
     end
-    if #lines == 0 then
+    if code ~= 0 then
+      error(string.format("wetware bank exited %d: %s", code, tail(out)))
+    end
+    out = tostring(out or "")
+    out = out:gsub("%s+$", "")
+    if out == "" then
       return "fly brain: experience bank is empty"
     end
-    return table.concat(lines, "\n")
+    return "fly brain bank:\n" .. out
   end
 
   function brain.run(task, wait, sample)
@@ -324,9 +434,12 @@ function init(ctx)
     return run_async("run", args)
   end
 
-  -- Alias kept for prompts written against the older RSI-loop wording; the
-  -- wetware CLI no longer has autonomy levels or a separate optimize loop.
+  -- Aliases kept for prompts written against older wording or natural names.
   function brain.optimize(task, wait, sample)
+    return brain.run(task, wait, sample)
+  end
+
+  function brain.train(task, wait, sample)
     return brain.run(task, wait, sample)
   end
 
@@ -409,7 +522,7 @@ function init(ctx)
       local parts = {svc_call.parse(low)}
       local method = parts[2]
       if parts[1] == "brain" and method ~= nil then
-        if method ~= "run" and method ~= "optimize" and method ~= "adapt" and method ~= "bank" then
+        if method ~= "run" and method ~= "optimize" and method ~= "train" and method ~= "adapt" and method ~= "bank" then
           return false
         end
         if not actuation_enabled() then
@@ -442,6 +555,8 @@ function init(ctx)
       or string.match(low, "^%s*brain%.optimize%s*[\"'](.-)[\"']")
       or string.match(low, "^%s*brain%.run%s*%(%s*[\"'](.-)[\"']%s*%)")
       or string.match(low, "^%s*brain%.run%s*[\"'](.-)[\"']")
+      or string.match(low, "^%s*brain%.train%s*%(%s*[\"'](.-)[\"']%s*%)")
+      or string.match(low, "^%s*brain%.train%s*[\"'](.-)[\"']")
     if task ~= nil then
       if not actuation_enabled() then
         ctx.log("actuation disabled — skipping brain.run")
@@ -472,7 +587,7 @@ function init(ctx)
     end)
   end
 
-  -- /brain | bank | last | run <task> | optimize <task> | adapt
+  -- /brain | bank | last | run <task> | train <task> | optimize <task> | adapt
   if commands ~= nil then
     commands:register("/brain", function(args)
       local function normalize(name)
@@ -484,6 +599,14 @@ function init(ctx)
       local verb = normalize(args[1] or "status")
       if verb == "status" or verb == "" then
         return brain.status()
+      elseif verb == "help" then
+        return brain.help()
+      elseif verb == "info" then
+        local ok, text = pcall(brain.info)
+        if ok then
+          return text
+        end
+        return "fly brain error: " .. tostring(text)
       elseif verb == "bank" then
         local ok, text = pcall(brain.bank)
         if ok then
@@ -495,7 +618,7 @@ function init(ctx)
           return "fly brain: no finished runs yet"
         end
         return "fly brain last run: " .. state.last.text
-      elseif verb == "run" or verb == "optimize" then
+      elseif verb == "run" or verb == "optimize" or verb == "train" then
         local task = args[2] or "digits"
         local ok, err = pcall(function()
           brain.run(task)
@@ -511,7 +634,7 @@ function init(ctx)
         end
         return "fly brain: run not started (" .. tostring(err) .. ")"
       else
-        return "usage: /brain [status|bank|last|run <task>|optimize <task>|adapt]"
+        return "usage: /brain [status|help|info|bank|last|run <task>|train <task>|optimize <task>|adapt]"
       end
     end)
   end

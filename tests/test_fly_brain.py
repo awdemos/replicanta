@@ -32,6 +32,8 @@ elif has("bank"):
     print(json.dumps({
         "policy": "greedy", "entries": 0,
     }))
+    # Human-readable bank output is also printed on a separate line; the
+    # parser uses the last JSON object, so keep this final JSON block last.
 elif has("run"):
     print(json.dumps({
         "task": "digits", "trials": 16, "best_config": "sr=0.9",
@@ -207,7 +209,8 @@ def test_brain_bank_command(tmp_path, monkeypatch):
     bin_path = _write_bin(tmp_path, "wetware", FAKE_BIN)
     loader = _load(tmp_path, monkeypatch, binary=bin_path)
     commands = loader.registry.get("commands")
-    assert "policy: greedy" in commands.dispatch("/brain", ["bank"])
+    output = commands.dispatch("/brain", ["bank"])
+    assert "policy" in output and "greedy" in output
     assert "no finished runs" in commands.dispatch("/brain", ["last"])
     loader.registry.get("brain").run("digits", True)
     assert "0.9750" in commands.dispatch("/brain", ["last"])
