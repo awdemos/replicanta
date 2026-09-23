@@ -32,6 +32,14 @@ class _FakeOrg:
     def metrics(self):
         return Metrics(self.store)
 
+    def record_self_model(self, insight_text):
+        import re
+
+        value = re.sub(r"[^a-z_ ]", "", insight_text.lower())
+        value = re.sub(r"\s+", "_", value).strip("_")[:40].strip("_")
+        if len(value) >= 2:
+            self.store.add(("self", "insight", value), 0.7)
+
 
 @pytest.fixture
 def org(tmp_path):
@@ -264,3 +272,49 @@ def test_seam_describe_image_and_clean_candidate_delegate(monkeypatch):
     assert voice.describe_image(b"bytes") == "a dark hall"
     monkeypatch.setattr("replicanta.llmclient.clean_candidate", lambda t: t.strip())
     assert voice.clean_candidate("  go north  ") == "go north"
+
+
+# -- speech -> state loop: the entity's own reply updates its mind ----------------
+
+
+def _respond_with(monkeypatch, org, reply):
+    from replicanta import voice
+
+    patch_generate(monkeypatch, lambda *a, **k: reply)
+    return voice.respond(org, "hello", quick=True)
+
+
+def test_reply_self_statement_becomes_self_model_insight(org, monkeypatch):
+    _respond_with(monkeypatch, org, "I decided I don't trust sam anymore.")
+    # below the user auto-commit threshold, attributed to the self model
+    assert org.store.conf(("self", "insight", "i_dont_trust_sam_anymore")) == 0.7
+
+
+def test_reply_intention_becomes_goal_candidate(org, monkeypatch):
+    _respond_with(monkeypatch, org, "I want to explore the network today.")
+    candidates = org.store.self_goal_candidates
+    assert any("explore the network" in c["text"] for c in candidates)
+
+
+def test_reply_denial_of_held_belief_raises_said_vs_held(org, monkeypatch):
+    org.store.add(("self", "trusts_sam", "true"), 0.9)
+    _respond_with(monkeypatch, org, "I decided I don't trust sam anymore.")
+    assert org.store.said_vs_held, "a denial of a held belief must raise the flag"
+    flag = org.store.said_vs_held[-1]
+    assert "sam" in flag["said"]
+    assert "trusts_sam" in flag["held"]
+
+
+def test_plain_reply_extracts_nothing(org, monkeypatch):
+    _respond_with(monkeypatch, org, "the rain sounds nice today.")
+    assert org.store.self_goal_candidates == []
+    assert org.store.said_vs_held == []
+    assert org.store.conf(("self", "insight", "rain")) is None
+
+
+def test_reply_extraction_never_breaks_the_reply_path(org, monkeypatch):
+    """assimilate_own_reply must not raise even on weird replies, and the
+    reply still lands in the chat log."""
+    reply = _respond_with(monkeypatch, org, "I want to !!! 12345")
+    assert reply == "I want to !!! 12345"
+    assert org.store.chat_log[-1] == ["org", reply]

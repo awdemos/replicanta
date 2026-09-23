@@ -5,7 +5,7 @@ narration.py's prompts and fallbacks. This module is the seam that keeps the
 dependency graph acyclic: arena imports narration (prompts), voice imports both,
 narration imports neither."""
 
-from replicanta import extensions, llmclient, narration, telemetry
+from replicanta import extensions, learning, llmclient, narration, telemetry
 from replicanta.arena import ThoughtArena
 from replicanta.narration import dedup_emerge, state_snapshot
 from replicanta.skills import Skill
@@ -88,8 +88,24 @@ def respond(
     )
     if record and reply:
         org.store.record_chat("org", reply)
+    if reply:
+        # the mind loop: what the entity just said about itself becomes
+        # candidate state (self-model insights, goal candidates, said-vs-
+        # held flags) — cheap, regex/tier only, no extra LLM call.
+        learning.assimilate_own_reply(org, reply)
     # Convert empty fallback to None so callers never render a blank reply.
     return reply or None
+
+
+@telemetry.span("voice.think")
+def think(org, model=None, timeout=None, rng=None):
+    """One deliberate idle thought, recorded in the chat log. The shared
+    /think path for front-ends (TUI ctrl+t, web /think) so both speak
+    through the same seam."""
+    thought = narrate(org, model=model, timeout=timeout, rng=rng)
+    if thought:
+        org.store.record_chat("org", thought)
+    return thought
 
 
 # -- skills: reflection loop -------------------------------------------------

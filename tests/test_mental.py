@@ -2,6 +2,9 @@
 the insane flag at extreme stress + incoherence, mood override, TUI/narration
 exposure, and persistence."""
 
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
 import pytest
 
 from replicanta.organism import BeliefStore, MentalState, Organism
@@ -96,13 +99,16 @@ def test_insanity_hysteresis(store):
     store.stress = 0.9
     _drive(store, mental, chaos=0.9)
     assert store.insane is True
-    # stress between RECOVERY_STRESS and INSANE_STRESS: still insane
+    # one metric dipping is not enough: stress below the entry threshold but
+    # incoherence still high -> still insane
     store.stress = 0.7
-    mental.tick(sleeping=False, chaos=0.9, dt=1.0)
+    _drive(store, mental, chaos=0.9, ticks=5)
     assert store.insane is True
-    # stress below RECOVERY_STRESS: recovers
+    # both metrics below recovery: recovery still needs the full exit window
     store.stress = 0.4
-    mental.tick(sleeping=False, chaos=0.9, dt=1.0)
+    _drive(store, mental, chaos=0.9, ticks=5)
+    assert store.insane is True  # within RECOVERY_SECONDS: the flag holds
+    _drive(store, mental, chaos=0.9, ticks=int(MentalState.RECOVERY_SECONDS) + 5)
     assert store.insane is False
 
 
@@ -206,3 +212,77 @@ def test_snapshot_includes_mental_attributes(tmp_path):
     snap = state_snapshot(org)
     for key in ("arousal", "coherence", "incoherence", "insane"):
         assert key in snap
+
+
+# -- insanity tuning: rate-limited bruises, structural consequences ---------------
+
+
+def _quiet_organism(tmp_path, **kwargs):
+    from replicanta.probe import SystemProbe
+
+    org = Organism(
+        tmp_path,
+        probe=SystemProbe(proc=Path("/nonexistent/proc"), sys="/nonexistent/sys"),
+        **kwargs,
+    )
+    org.load()
+    return org
+
+
+def test_sentiment_stress_bumps_are_rate_limited(tmp_path):
+    """A barrage of harsh messages must bruise, not pin the gauge: at most
+    SENTIMENT_BUMP_CAP of stress lands inside the window no matter how many
+    harsh lines arrive."""
+    org = _quiet_organism(tmp_path, wake_seconds=999, sleep_seconds=999)
+    baseline = org.store.stress
+    for _ in range(7):
+        org.hear("you are trash and useless")
+    assert org.store.stress <= baseline + org.SENTIMENT_BUMP_CAP + 1e-9
+    # …but the bruise is real
+    assert org.store.stress > baseline
+
+
+def test_insane_mind_suppresses_goal_formation(tmp_path):
+    org = _quiet_organism(tmp_path)
+    org.store.insane = True
+    events = org.hear("i want to learn about the ocean")
+    assert not [e for e in events if e["kind"] == "goal"]
+    assert org.store.active_goal() is None
+
+
+def test_insane_mind_blurs_memory_importance(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.insane = True
+    store.remember("learned", "something dear")
+    before = store.memory[-1]["importance"]
+    mental = MentalState(store)
+    for _ in range(50):
+        mental.tick(sleeping=False, chaos=0.9, dt=1.0)
+    assert store.memory[-1]["importance"] < before
+
+
+def test_sane_mind_keeps_memory_importance(tmp_path):
+    store = BeliefStore(tmp_path)
+    store.remember("learned", "something dear")
+    before = store.memory[-1]["importance"]
+    mental = MentalState(store)
+    for _ in range(50):
+        mental.tick(sleeping=False, chaos=0.9, dt=1.0)
+    assert store.memory[-1]["importance"] == before
+
+
+def test_wall_clock_restore_advances_sleep_debt(tmp_path):
+    """Booting after time away accrues fatigue at the wake rate and decays
+    stress, reusing the meter rates (Organism._restore_lifecycle)."""
+    org = _quiet_organism(tmp_path, wake_seconds=10 * 3600, sleep_seconds=3600)
+    org.flush(force=True)
+    state_path = org.store.state_path
+    import json as _json
+
+    state = _json.loads(state_path.read_text())
+    state["last_wall"] = (datetime.now(UTC) - timedelta(hours=2)).timestamp()
+    state["lifecycle_started"] = (datetime.now(UTC) - timedelta(hours=2)).timestamp()
+    state_path.write_text(_json.dumps(state))
+
+    fresh = _quiet_organism(tmp_path, wake_seconds=10 * 3600, sleep_seconds=3600)
+    assert fresh.store.fatigue > org.store.fatigue

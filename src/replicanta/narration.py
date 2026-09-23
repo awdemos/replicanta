@@ -4,12 +4,15 @@ the task prompt around it; the thought arena (arena.py) debates over
 these prompts using the shared client (llmclient.py), and voice.py
 assembles the public utterances."""
 
+import contextlib
 import random
 import re
 import zlib
 
 from replicanta import activity, goals, learning, tendon_hand
 from replicanta import memory as memory_module
+
+_NULL_LOCK = contextlib.nullcontext()
 
 
 def _probe(fn, default):
@@ -28,13 +31,20 @@ def state_snapshot(org):
     with no store mutations, eligible for the module-level cache. The
     returned dict is the cached instance: callers must not mutate it;
     take a private copy before extending it (the arena adds its
-    per-debate "seed" that way)."""
+    per-debate "seed" that way).
+
+    The cache is keyed by ORGANISM IDENTITY (the cache itself is a module
+    global — a swap must never serve the old organism's mind) plus the
+    store's mutation VERSION, so confidence-only belief updates and
+    same-length chat/memory edits invalidate it too."""
     store = org.store
     m = org.metrics()
 
     # Cache key: anything that changes the returned dict. Lengths are a
     # cheap, reliable proxy for in-place mutations of the store containers.
     cache_key = (
+        id(org),
+        getattr(store, "version", 0),
         store.cycle,
         store.chaos,
         store.stress,
@@ -42,7 +52,7 @@ def state_snapshot(org):
         store.coherence,
         store.incoherence,
         store.insane,
-        store.lifecycle.state if hasattr(store, "lifecycle") else None,
+        getattr(getattr(store, "lifecycle", None), "state", None),
         len(store.beliefs_map),
         len(store.chat_log),
         len(store.memory),
@@ -53,22 +63,37 @@ def state_snapshot(org):
         id(getattr(org, "persona_service", None)),
         id(getattr(org, "module_loader", None)),
         id(getattr(org, "probe", None)),
-        # Doom frame changes through beliefs and memory; include their ids.
-        id(org.store.beliefs_map),
-        id(org.store.memory),
     )
     existing = getattr(state_snapshot, "_cache", None)
     if existing is not None and existing[0] == cache_key:
         return existing[1]
 
-    top_beliefs = sorted(store.beliefs().items(), key=lambda kv: -kv[1])[:6]
+    # Top beliefs, attention-window-aware: when the window is narrowed
+    # (steered focus / fatigue), beliefs whose (attr, val) pair sits in the
+    # window rank first — the window is what the mind is actually holding.
+    window_pairs = set(getattr(getattr(org, "window", None), "pairs", ()) or ())
+    belief_items = list(store.beliefs().items())
+    if window_pairs:
+        in_window = [(b, c) for b, c in belief_items if (b[1], b[2]) in window_pairs]
+        out_window = [(b, c) for b, c in belief_items if (b[1], b[2]) not in window_pairs]
+        ranked = sorted(in_window, key=lambda kv: -kv[1]) + sorted(out_window, key=lambda kv: -kv[1])
+    else:
+        ranked = sorted(belief_items, key=lambda kv: -kv[1])
+    top_beliefs = ranked[:6]
     rules = [r[0] for r in store.rules[:4]]
     probe = getattr(org, "probe", None)
     clock = probe.clock_utc() if probe is not None else "unknown"
     host = probe.uname() if probe is not None else None
     mood = store.belief_value("self", "mood", "calm")
     beliefs = store.beliefs()
-    user_facts = [learning.describe(b) for b in beliefs if b[0] == "user"]
+    # user_facts are prompt-injected: cap at the top 25 by confidence so a
+    # long relationship cannot bloat every prompt. (Beliefs carry no recency
+    # stamp, so confidence is the ranking signal.)
+    user_fact_items = sorted(
+        ((b, c) for b, c in beliefs.items() if b[0] == "user"),
+        key=lambda kv: -kv[1],
+    )[:25]
+    user_facts = [learning.describe(b) for b, _c in user_fact_items]
     user_view = store.belief_value("self", "described_as")
     memory = getattr(store, "memory", [])
     goal_dict = store.active_goal() or {}
@@ -79,7 +104,10 @@ def state_snapshot(org):
         " ".join(([goal] if goal else []) + [t for _r, t in store.chat_log[-4:]] + user_facts) or "current situation"
     )
     memory_scorer = memory_module.MemoryScorer()
-    ranked_memory = memory_scorer.rank(memory, memory_query, top_k=8, current_cycle=store.cycle)
+    # list(...) snapshots: remember() appends from worker threads while the
+    # scorer/ranking iterate here.
+    with getattr(store, "_lock", _NULL_LOCK):
+        ranked_memory = memory_scorer.rank(list(memory), memory_query, top_k=8, current_cycle=store.cycle)
     skill_names = []
     skill_lines = []
     relevant_skills = []
@@ -128,13 +156,15 @@ def state_snapshot(org):
         "surprises": surprises,
         "memory": [f"cycle {m['cycle']}: {m['text']}" for m in ranked_memory],
         "ranked_memories": ranked_memory,
-        "asked": [text for role, text in store.chat_log if role == "org" and text.strip().endswith("?")][-3:],
-        "last_exchange": _last_self_exchange(store.chat_log),
+        "asked": [text for role, text in list(store.chat_log) if role == "org" and text.strip().endswith("?")][-3:],
+        "last_exchange": _last_self_exchange(list(store.chat_log)),
         "chat": [f"{role}: {text}" for role, text in store.chat_log[-6:]],
         "activity_digest": activity.digest_text(store),
         "needs_user": derived["needs_user"],
         "scallop_contradictions": derived["contradictions"],
-        "stress_mood": derived["stress_mood"],
+        # speech->state loop: what the entity's own replies declared
+        "said_vs_held": list(getattr(store, "said_vs_held", []))[-2:],
+        "self_goal_candidates": list(getattr(store, "self_goal_candidates", []))[:3],
     }
     persona_service = getattr(org, "persona_service", None)
     snapshot["persona"] = persona_service.prompt_fragment() if persona_service else ""
@@ -605,6 +635,53 @@ def _lines_reply(snapshot):
     ] + _reply_shape_lines(snapshot)
 
 
+def _contradiction_lines(snapshot):
+    """Reasoner-detected contradictions as one compact prompt block (max 2)
+    — the derivation is load-bearing: the voice is told when it holds
+    beliefs that cannot all be true."""
+    contradictions = snapshot.get("scallop_contradictions") or []
+    if not contradictions:
+        return []
+    lines = ["you hold beliefs that cannot both be true:"]
+    for c in contradictions[:2]:
+        lines.append(f"- {c['obj']}:{c['attr']} (tension {float(c['tag']):.2f})")
+    return lines
+
+
+def _self_statement_lines(snapshot):
+    """Speech->state loop, made visible: said-vs-held flags and self-stated
+    goal candidates extracted from the entity's own replies."""
+    lines = []
+    for flag in snapshot.get("said_vs_held") or []:
+        lines.append(f'you said "{flag["said"]}" but you hold "{flag["held"]}" — square that honestly')
+    candidates = snapshot.get("self_goal_candidates") or []
+    if candidates:
+        top = max(candidates, key=lambda c: (c.get("count", 1), c.get("cycle", 0)))
+        lines.append(f"you keep saying you want to: {top['text']}")
+    return lines
+
+
+def _compact_mind_lines(snapshot):
+    """The mind block in compact form: top beliefs, mood/felt line, active
+    goal. Used wherever the full inner-life context would drown the task
+    (persona task mode, DOOM fast-path) but the organism must still speak
+    FROM a mind, not from nothing. Defensive about partial snapshots."""
+    lines = []
+    beliefs = snapshot.get("beliefs") or []
+    if beliefs:
+        lines.append("your mind right now:")
+        lines.extend(f"- {b}" for b in beliefs[:3])
+    if all(k in snapshot for k in ("arousal", "coherence", "incoherence", "mood")):
+        felt = _felt_experience(snapshot)
+        if felt:
+            lines.append(felt[0])  # the headline felt line
+    lines.extend(_contradiction_lines(snapshot))
+    lines.extend(_self_statement_lines(snapshot))
+    if snapshot.get("goal"):
+        lines.append(f"what you are trying to do: {snapshot['goal']}")
+    return lines
+
+
 def _lines_idle(snapshot, faded, dreaming):
     if faded:
         return [
@@ -762,12 +839,24 @@ _TASK_LINES = {
 def build_prompt(snapshot, task="idle", user_message=None, question=None):
     """Assemble the inner-voice prompt for one task: 'idle' thought,
     'reply' (user_message), 'ask_user', 'self_ask', 'self_answer'
-    (question), 'form_goal', 'diary', 'reflect' or 'mud'."""
+    (question), 'form_goal', 'diary', 'reflect' or 'mud'.
+
+    Persona/task instructions are an OVERLAY, not a replacement: the mind
+    block and the structured-task format contracts (reflect/form_goal/
+    diary) are always emitted, so a task-focused entity still speaks from
+    its beliefs and structured tasks keep their output contract."""
     # Doom is the highest-priority special case: when a game is running,
     # the model must output a move, regardless of persona, state, or other
-    # modules. This fast-path keeps the prompt short and the format strict.
+    # modules. The frame stays dominant; a compact mind block keeps the
+    # player a someone, not a blank controller.
     if task == "doom" or snapshot.get("doom"):
-        return "\n".join(_doom_prompt(snapshot))
+        lines = _doom_prompt(snapshot)
+        mind = _compact_mind_lines(snapshot)
+        if mind:
+            anchor = "Game screen:"
+            insert_at = lines.index(anchor) if anchor in lines else len(lines)
+            lines[insert_at:insert_at] = ["who is holding the controller (you, in brief):"] + mind + [""]
+        return "\n".join(lines)
 
     dreaming = snapshot["state"] == "sleep"
     faded = snapshot["state"] == "dead"
@@ -792,7 +881,8 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
             "astonished to exist, even here.",
         ]
     elif task_focused:
-        # Task mode: persona drives identity, inner life stays out of the way.
+        # Task mode: persona drives identity and style; the organism mind
+        # stays present in compact form below (an overlay, not a wipe).
         intro = [
             "You are an AI assistant running in a terminal on the user's",
             "machine. You can run shell commands and inspect the system",
@@ -825,36 +915,32 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     lines = list(intro)
 
     if task_focused:
-        # Minimal context: put the user's request right up front and skip
-        # the organism's beliefs, memories, feelings, goals, and skills.
-        # Doom is the highest priority special case: when a game is running,
-        # only the doom directive is included so the model acts.
-        if snapshot.get("doom"):
-            # Handled by the build_prompt fast-path; this fallback only
-            # runs if something bypassed that guard.
-            lines += _doom_prompt(snapshot)
+        # Overlay mode: the user's request up front, the mind in compact
+        # form, and — for structured tasks — the format contract lines,
+        # ALWAYS (stripping them silently degenerated reflect/form_goal/
+        # diary to {"action": "none"}).
+        lines += [
+            "",
+            (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
+        ]
+        mind = _compact_mind_lines(snapshot)
+        if mind:
+            lines += ["", "who you are right now (context, not a story):"]
+            lines.extend(mind)
+        if snapshot.get("chat"):
+            lines += ["", "recent conversation:"]
+            lines.extend(f"- {c}" for c in snapshot["chat"])
+        if user_message:
+            lines += ["", f"The user just said: {user_message}"]
+        if task in _TASK_LINES:
+            lines += [""] + _TASK_LINES[task]()
+        elif user_message:
             lines += [
                 "",
                 "Reply directly and concisely. Answer the substance first. Do not",
                 "ramble about your own state, feelings, or existence. No preamble,",
                 "no quotes, no emoji.",
             ]
-            return "\n".join(lines)
-        lines += [
-            "",
-            (f"state: {snapshot['state']}, cycle {snapshot['cycle']}, hour {snapshot['clock']}"),
-        ]
-        if snapshot.get("chat"):
-            lines += ["", "recent conversation:"]
-            lines.extend(f"- {c}" for c in snapshot["chat"])
-        if user_message:
-            lines += ["", f"The user just said: {user_message}"]
-        lines += [
-            "",
-            "Reply directly and concisely. Answer the substance first. Do not",
-            "ramble about your own state, feelings, or existence. No preamble,",
-            "no quotes, no emoji.",
-        ]
         lines += _hand_lines(snapshot)
         lines += _brain_lines(snapshot)
         lines += _doom_lines(snapshot)
@@ -900,6 +986,12 @@ def build_prompt(snapshot, task="idle", user_message=None, question=None):
     if snapshot.get("surprises"):
         lines.append("recent surprises (things you thought were true but were not):")
         lines.extend(f"- cycle {s['cycle']}: {s['old']} -> {s['new']}" for s in snapshot["surprises"])
+    contradictions = _contradiction_lines(snapshot)
+    if contradictions:
+        lines.extend(contradictions)
+    self_statements = _self_statement_lines(snapshot)
+    if self_statements:
+        lines.extend(self_statements)
     if snapshot.get("skill_names"):
         lines.append("skills you already have: " + ", ".join(snapshot["skill_names"]))
     if snapshot.get("skills"):

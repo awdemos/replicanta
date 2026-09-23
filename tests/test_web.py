@@ -684,3 +684,58 @@ def test_inner_tab_renders_metric_tables_from_state(live):
     assert 'class="metrics"' in APP_JS
     assert "esc(at[k].total)" in APP_JS
     assert "esc(r[1])" in APP_JS
+
+
+# -- background scheduler + load_error banner --------------------------------
+
+
+def test_scheduler_ticks_the_organism_between_requests(glasshouse):
+    """Web-hosted organisms must live between requests: the daemon scheduler
+    advances fatigue/stress/mood exactly like the TUI's 1s tick."""
+    import time as _time
+
+    glasshouse.start_scheduler(interval=0.05)
+    try:
+        fatigue = glasshouse.org.store.fatigue
+        deadline = _time.monotonic() + 5
+        while glasshouse.org.store.fatigue == fatigue and _time.monotonic() < deadline:
+            _time.sleep(0.02)
+        assert glasshouse.org.store.fatigue > fatigue  # wake accrual ran
+    finally:
+        glasshouse.stop_scheduler()
+
+
+def test_scheduler_reentry_guard(glasshouse):
+    glasshouse.start_scheduler(interval=0.05)
+    try:
+        assert glasshouse._scheduler is not None
+        # a second start is a no-op: same thread object
+        scheduler = glasshouse._scheduler
+        glasshouse.start_scheduler()
+        assert glasshouse._scheduler is scheduler
+    finally:
+        glasshouse.stop_scheduler()
+    assert glasshouse._scheduler is None
+
+
+def test_load_error_banner_renders_once_on_the_shell(live):
+    live.app.org.store.load_error = "state.json was corrupt (boom); preserved as state.json.corrupt-x"
+    with urllib.request.urlopen(live + "/") as response:
+        html = response.read().decode()
+    assert "Recovered from a damaged save" in html
+    assert "state.json was corrupt" in html
+    # cleared after first render: the next GET is quiet
+    assert live.app.org.store.load_error is None
+    with urllib.request.urlopen(live + "/") as response:
+        html = response.read().decode()
+    assert "Recovered from a damaged save" not in html
+
+
+def test_load_error_appears_once_in_state_payload(live):
+    live.app.org.store.load_error = "organism.scl was quarantined"
+    status, _headers, state = request(live, "/api/state")
+    assert status == 200
+    assert state["load_error"] == "organism.scl was quarantined"
+    assert live.app.org.store.load_error is None
+    _status, _headers, state = request(live, "/api/state")
+    assert "load_error" not in state

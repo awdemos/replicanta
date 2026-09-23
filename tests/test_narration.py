@@ -488,7 +488,8 @@ def test_state_snapshot_includes_scallop_derived_flags(org):
     snap = state_snapshot(org)
     assert "needs_user" in snap
     assert "scallop_contradictions" in snap
-    assert "stress_mood" in snap
+    assert "said_vs_held" in snap
+    assert "self_goal_candidates" in snap
 
 
 def test_ask_user_fallback_without_user_facts(org):
@@ -818,3 +819,152 @@ def test_beliefs_prompt_speaks_from_and_revises(org, monkeypatch):
     snap = narration.state_snapshot(org)
     prompt = narration.build_prompt(snap, task="reply", user_message="hi")
     assert "speak from them" in prompt
+
+
+# -- task_focused overlay: persona is an overlay, never a wipe -------------------
+
+
+def _persona_snapshot(tmp_path, task="reflect", persona="You are an engineer."):
+    from replicanta.modules import PersonaService
+
+    svc = PersonaService(BeliefStore(tmp_path))
+    svc.register(
+        {
+            "name": "se",
+            "description": "engineer",
+            "prompt": persona,
+            "beliefs": [],
+        }
+    )
+    svc.activate("se")
+
+    class FakeOrg:
+        def __init__(self):
+            self.store = BeliefStore(tmp_path)
+            self.store.cycle = 3
+            self.store.add(("cat", "has_fur", "true"), 0.9)
+            self.lifecycle = Lifecycle(self.store)
+            self.window = type("W", (), {"pairs": set(), "rationale": ""})()
+            self.last_sight = None
+            self.skills = None
+            self.persona_service = svc
+            self.module_loader = None
+
+        def metrics(self):
+            return Metrics(self.store)
+
+    return state_snapshot(FakeOrg()), FakeOrg
+
+
+def test_task_focused_reflect_keeps_the_format_contract(tmp_path):
+    snap, _ = _persona_snapshot(tmp_path, task="reflect")
+    assert snap["persona"]
+    prompt = build_prompt(snap, task="reflect")
+    # the structured-task contract lines must survive task mode
+    assert "skill: <short name>" in prompt
+    assert "patch-extension" in prompt
+    assert "Answer in EXACTLY one of these four" in prompt
+
+
+def test_task_focused_form_goal_keeps_the_format_contract(tmp_path):
+    snap, _ = _persona_snapshot(tmp_path, task="form_goal")
+    prompt = build_prompt(snap, task="form_goal")
+    assert "State one thing you want to do or understand next" in prompt
+
+
+def test_task_focused_diary_keeps_the_format_contract(tmp_path):
+    snap, _ = _persona_snapshot(tmp_path, task="diary")
+    prompt = build_prompt(snap, task="diary")
+    assert "Write a short diary entry" in prompt
+
+
+def test_task_focused_keeps_a_compact_mind_block(tmp_path):
+    snap, _ = _persona_snapshot(tmp_path, task="reply")
+    prompt = build_prompt(snap, task="reply", user_message="fix my bug")
+    # persona overlay present …
+    assert "Persona:" in prompt
+    # …but the organism mind is not wiped: top beliefs + goal slot survive
+    assert "has_fur" in prompt
+    assert "who you are right now" in prompt
+    assert "fix my bug" in prompt
+
+
+def test_task_focused_doom_keeps_frame_and_mind(tmp_path):
+    snap, _ = _persona_snapshot(tmp_path, task="doom")
+    snap["doom"] = True
+    snap["doom_frame"] = "####\n# @#\n####"
+    snap["doom_status"] = "playing"
+    prompt = build_prompt(snap, task="reply", user_message="go")
+    assert "DOOM — YOU ARE PLAYING RIGHT NOW" in prompt
+    assert "doom.command" in prompt
+    assert "has_fur" in prompt  # compact mind block retained
+
+
+def test_doom_fast_path_without_persona_keeps_mind(org):
+    snap = state_snapshot(org)
+    snap["doom"] = True
+    snap["doom_frame"] = "frame"
+    snap["doom_status"] = "playing"
+    prompt = build_prompt(snap, task="doom")
+    assert "### DOOM" in prompt
+    assert "has_fur" in prompt
+
+
+# -- snapshot cache: organism identity + version ---------------------------------
+
+
+def test_snapshot_cache_is_per_organism(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    org_a = FakeOrg(tmp_path / "a")
+    org_b = FakeOrg(tmp_path / "b")
+    assert state_snapshot(org_a) is not state_snapshot(org_b)
+
+
+def test_snapshot_cache_invalidates_on_confidence_only_change(org):
+    snap1 = state_snapshot(org)
+    v1 = snap1["beliefs"]
+    org.store.add(("cat", "has_fur", "true"), 0.99)  # same belief, higher conf
+    snap2 = state_snapshot(org)
+    assert snap2 is not snap1
+    assert any("0.99" in line for line in snap2["beliefs"])
+    assert v1 is not snap2["beliefs"]
+
+
+# -- prompt content: contradictions, caps, attention window -----------------------
+
+
+def test_prompt_surfaces_scallop_contradictions(org):
+    org.store.beliefs_map[("cat", "color", "red")] = 0.9
+    org.store.beliefs_map[("cat", "color", "blue")] = 0.9
+    snap = state_snapshot(org)
+    prompt = build_prompt(snap)
+    assert "cannot both be true" in prompt
+    assert "cat:color" in prompt
+
+
+def test_user_facts_are_capped_in_the_snapshot(tmp_path):
+    org = FakeOrg(tmp_path)
+    for i in range(30):
+        suffix = chr(ord("a") + i % 26) + chr(ord("a") + i // 26)
+        org.store.add(("user", f"fact_{suffix}", "true"), 0.5 + (i % 5) * 0.1)
+    snap = state_snapshot(org)
+    assert len(snap["user_facts"]) == 25
+
+
+def test_top_beliefs_respect_the_attention_window(tmp_path):
+    org = FakeOrg(tmp_path)
+    org.store.add(("dog", "has_fur", "true"), 0.95)  # higher confidence …
+    org.window.pairs = {("has_paws", "true")}  # …but the window holds paws
+    snap = state_snapshot(org)
+    assert "has_paws" in snap["beliefs"][0]
+
+
+def test_prompt_mentions_said_vs_held_and_goal_candidates(tmp_path):
+    org = FakeOrg(tmp_path)
+    org.store.note_said_vs_held("i dont trust sam", "you say I am trusting")
+    org.store.add_self_goal_candidate("explore the network")
+    snap = state_snapshot(org)
+    prompt = build_prompt(snap)
+    assert 'you said "i dont trust sam" but you hold "you say I am trusting"' in prompt
+    assert "you keep saying you want to: explore the network" in prompt

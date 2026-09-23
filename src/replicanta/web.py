@@ -64,10 +64,60 @@ class Glasshouse:
         self._listener = None
         self._camera = None
         self._last_frame = None
+        # Background ticker state (see start_scheduler): web-hosted
+        # organisms must live between requests — sleep, dream, decay —
+        # just like the TUI's 1s tick gives them.
+        self._scheduler = None
+        self._scheduler_stop = None
+        self._tick_in_flight = False
         # Hosted MUD games: host organism name -> MudGame.
         self._mud_games: dict[str, mud.MudGame] = {}
         # organism name -> host name for games this adapter has joined/started.
         self._mud_member_of: dict[str, str] = {}
+
+    # -- background ticker ------------------------------------------------
+    def start_scheduler(self, interval=1.0):
+        """Start the daemon tick loop that keeps the organism alive between
+        requests (the TUI ticks on its own 1s timer; the web server never
+        did, so nothing slept, decayed, or updated). Reentry-guarded and
+        serialized on self.lock, so a slow tick can never overlap a request
+        or another tick."""
+        if self._scheduler is not None:
+            return
+        stop = threading.Event()
+        self._scheduler_stop = stop
+
+        def loop():
+            while not stop.wait(interval):
+                if self._tick_in_flight:
+                    continue
+                self._tick_in_flight = True
+                try:
+                    with self.lock:
+                        self.org.tick(dt=interval)
+                except Exception:
+                    logger.exception("web scheduler tick failed")
+                finally:
+                    self._tick_in_flight = False
+
+        self._scheduler = threading.Thread(target=loop, daemon=True, name="glasshouse-tick")
+        self._scheduler.start()
+
+    def stop_scheduler(self):
+        stop = self._scheduler_stop
+        if stop is not None:
+            stop.set()
+        self._scheduler = None
+        self._scheduler_stop = None
+
+    def pop_load_error(self):
+        """Return-and-clear the store's load_error: the next GET renders it
+        as a warning banner exactly once."""
+        store = self.org.store
+        error = getattr(store, "load_error", None)
+        if error:
+            store.load_error = None
+        return error
 
     def auth_ok(self, request):
         header = request.headers.get("Authorization", "")
@@ -173,7 +223,7 @@ class Glasshouse:
                         "status": t.status,
                         "created_cycle": t.created_cycle,
                     }
-                    for t in store.threads.values()
+                    for t in list(store.threads.values())
                 ],
                 "thread_results": list(store.thread_results),
                 "chat": [{"role": role, "text": text} for role, text in store.chat_log],
@@ -506,9 +556,8 @@ class Glasshouse:
                 except OSError as exc:
                     messages.append(f"export failed: {exc}")
             elif name == "/think":
-                thought = voice.narrate(self.org)
+                thought = voice.think(self.org)
                 if thought:
-                    self.org.store.record_chat("org", thought)
                     speech.say(thought)
                 messages.append(thought or "nothing to say right now")
             elif name == "/self-talk":
@@ -985,8 +1034,12 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
                     span.set_attribute("http.status_code", HTTPStatus.UNAUTHORIZED)
                     return self._json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                 if path == "/api/state":
+                    payload = self.app.snapshot()
+                    load_error = self.app.pop_load_error()
+                    if load_error:
+                        payload["load_error"] = load_error
                     span.set_attribute("http.status_code", HTTPStatus.OK)
-                    return self._json(HTTPStatus.OK, self.app.snapshot())
+                    return self._json(HTTPStatus.OK, payload)
                 if path == "/api/commands":
                     span.set_attribute("http.status_code", HTTPStatus.OK)
                     return self._json(
@@ -1005,6 +1058,18 @@ class GlasshouseHandler(BaseHTTPRequestHandler):
             }
             if path in assets:
                 kind, body = assets[path]
+                if path == "/":
+                    # A one-time warning banner when a persisted file had to
+                    # be quarantined at boot (corruption must not be silent
+                    # amnesia); cleared on first render.
+                    load_error = self.app.pop_load_error()
+                    if load_error:
+                        banner = (
+                            '<p class="warning" role="alert"><b>Recovered from a damaged save:</b> '
+                            + load_error.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            + "</p>"
+                        )
+                        body = body.replace("</body>", banner + "</body>")
                 span.set_attribute("http.status_code", HTTPStatus.OK)
                 return self._send(HTTPStatus.OK, kind, body.encode())
             span.set_attribute("http.status_code", HTTPStatus.NOT_FOUND)
@@ -1123,6 +1188,8 @@ def make_server(glasshouse, host="127.0.0.1", port=8765):
 def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=True):
     app = Glasshouse(root, organism, spawn=spawn)
     server = make_server(app, host, port)
+    # the organism must live between requests: sleep, dream, decay, update
+    app.start_scheduler()
     url = f"http://{host}:{server.server_port}"
     print(f"Replicanta Glasshouse: {url}")
     loopback = host in ("127.0.0.1", "::1", "localhost")
@@ -1142,5 +1209,6 @@ def run(root, organism, spawn=None, host="127.0.0.1", port=8765, open_browser=Tr
     except KeyboardInterrupt:
         pass
     finally:
+        app.stop_scheduler()
         server.glasshouse.org.flush(force=True)
         server.server_close()

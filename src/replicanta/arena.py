@@ -16,6 +16,7 @@ reflections, whose output contract a rogue candidate would break). Any
 ollama failure at any stage falls back to the local deterministic
 answers, so the organism always has a voice."""
 
+import contextlib
 import logging
 import json
 import os
@@ -204,7 +205,12 @@ class ThoughtArena:
         voice-online short-circuit."""
         model = self._model or os.environ.get("OLLAMA_MODEL", llmclient.DEFAULT_MODEL)
         timeout = self._timeout or llmclient.default_timeout()
-        activity.record_digest(org.store)
+        # record_digest mutates store.activity in place (that module is not
+        # lock-aware), so it runs under the store lock: otherwise a save()
+        # serializing the same dict concurrently can die mid-iteration.
+        lock = getattr(org.store, "_lock", None) or contextlib.nullcontext()
+        with lock:
+            activity.record_digest(org.store)
         snapshot = dict(narration.state_snapshot(org))
         narration.record_recall(snapshot)
         # every debate circles a different concrete thing — this rotation is

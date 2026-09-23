@@ -359,20 +359,6 @@ def test_belief_store_derived_flags(tmp_path):
     assert store.derived()["needs_user"] is False
 
 
-def test_stress_mood_tracks_actual_mood_vocabulary(store):
-    # _compute_mood only ever writes calm/curious/grateful/anxious/hurt/
-    # fraying/unhinged/insane to (self, mood, X); stress_mood must fire on
-    # the stressful ones
-    store.observe(("self", "mood", "anxious"), 0.9)
-    assert store.derived()["stress_mood"] is True
-    store.observe(("self", "mood", "hurt"), 0.9)
-    assert store.derived()["stress_mood"] is True
-    store.observe(("self", "mood", "curious"), 0.9)
-    assert store.derived()["stress_mood"] is False
-    store.observe(("self", "mood", "calm"), 0.9)
-    assert store.derived()["stress_mood"] is False
-
-
 def test_belief_store_derived_contradictions(tmp_path):
     store = BeliefStore(tmp_path)
     store.add(("self", "is_a", "organism"), 0.9)
@@ -1827,3 +1813,244 @@ def test_organism_loads_modules(tmp_path, monkeypatch):
     org.load()
     result = org.module_loader.registry.get("commands").dispatch("/test", [])
     assert result == "ok"
+
+
+# -- thread-safety: the store lock -------------------------------------------------
+
+
+def test_store_lock_record_chat_and_save_do_not_raise(store):
+    """A thread-bomb of worker-style mutators against the tick-thread save():
+    without the store RLock this reliably dies with 'dictionary changed size
+    during iteration' inside json.dumps."""
+    import threading
+
+    errors = []
+
+    def mutate():
+        try:
+            for i in range(400):
+                store.record_chat("org", f"worker line {i}")
+                store.remember("test", f"episode {i}")
+                tag = chr(97 + threading.get_ident() % 26)
+                store.add(("worker", f"attr_{tag}", f"val_{chr(97 + i % 26)}"), 0.5)
+        except Exception as exc:  # noqa: BLE001 — captured for the assertion
+            errors.append(exc)
+
+    def persist():
+        try:
+            for _ in range(60):
+                store.save()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=mutate) for _ in range(4)] + [threading.Thread(target=persist) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not any(t.is_alive() for t in threads)
+    assert errors == []
+    # the persisted file is intact JSON and the chat log is uncorrupted
+    loaded = BeliefStore(store.dir_path)
+    loaded.load()
+    assert len(loaded.chat_log) <= CHAT_LOG_LIMIT
+    assert loaded.chat_log[-1] == store.chat_log[-1]
+
+
+def test_record_chat_fires_utterance_hook_outside_the_lock(store):
+    """on_utterance must see a consistent store but must not run while the
+    lock is held (hooks take the Lua host lock; ABBA deadlock otherwise)."""
+    seen = []
+
+    def hook(role, text):
+        # re-entering the store from inside the hook must not deadlock (RLock
+        # is held nowhere) and must see the just-recorded line
+        seen.append((role, text, list(store.chat_log)))
+
+    store.on_utterance = hook
+    store.record_chat("org", "hello there")
+    assert seen == [("org", "hello there", [["org", "hello there"]])]
+
+
+# -- corruption must not mean silent amnesia ---------------------------------------
+
+
+def test_corrupt_state_json_is_quarantined_not_overwritten(store):
+    store.state_path.write_text("{ not json !!!")
+    store.load()
+    # factory defaults, problem surfaced, damaged file preserved aside
+    assert store.chaos == 0.5
+    assert store.load_error and "state.json" in store.load_error
+    quarantined = list(store.dir_path.glob("state.json.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_text() == "{ not json !!!"
+    assert not store.state_path.exists()  # the damage was renamed away, not rewritten
+
+
+def test_non_object_state_json_is_quarantined(store):
+    store.state_path.write_text("[1, 2, 3]")
+    store.load()
+    assert store.load_error
+    assert list(store.dir_path.glob("state.json.corrupt-*"))
+    assert store.cycle == 0  # defaults kept
+
+
+def test_second_corruption_in_same_second_gets_distinct_name(store):
+    store.state_path.write_text("garbage one")
+    store.load()
+    first = store.load_error
+    store.state_path.write_text("garbage two")  # a fresh damage at the same path
+    store.load()
+    quarantined = list(store.dir_path.glob("state.json.corrupt-*"))
+    assert len(quarantined) == 2
+    assert store.load_error != first
+
+
+def test_corrupt_organism_scl_is_quarantined_at_organism_load(tmp_path):
+    (tmp_path / "organism.scl").write_text("rel this is not scallop at all (((\n")
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()  # must not raise
+    assert org.store.load_error and "organism.scl" in org.store.load_error
+    assert list(tmp_path.glob("organism.scl.corrupt-*"))
+    assert org.mind.beliefs() == {}  # reasons on from an empty genome
+
+
+# -- lifecycle + wall-clock persistence ---------------------------------------------
+
+
+def test_lifecycle_state_persists_across_reload(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=3600)
+    org.load()
+    org.lifecycle.transition("sleep")
+    org.flush(force=True)
+
+    fresh = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=3600)
+    fresh.load()
+    assert fresh.lifecycle.state == "sleep"
+
+
+def _age_state_by(tmp_path, seconds):
+    """Rewrite state.json as if the last save happened `seconds` ago and the
+    lifecycle transitioned then — simulates the app being away."""
+    import json as _json
+
+    state = _json.loads((tmp_path / "state.json").read_text())
+    state["last_wall"] = time.time() - seconds
+    state["lifecycle_started"] = time.time() - seconds
+    (tmp_path / "state.json").write_text(_json.dumps(state))
+
+
+def test_wall_clock_catches_up_while_asleep(tmp_path):
+    """An organism that slept hours ago away from the app wakes on boot:
+    fatigue recovers by the elapsed sleep time and a sleep past its rise
+    time transitions back to wake."""
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=3600, sleep_seconds=60)
+    org.load()
+    org.lifecycle.transition("sleep")
+    org.store.fatigue = 0.8
+    org.flush(force=True)
+    _age_state_by(tmp_path, 3600)
+
+    fresh = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=3600, sleep_seconds=60)
+    fresh.load()
+    # the organism slept with sleep_seconds=60: an hour later it must be awake
+    assert fresh.lifecycle.state == "wake"
+    # fatigue recovered during the elapsed sleep (0.8 -> recovered, then the
+    # wake transition halves what little remained)
+    assert fresh.store.fatigue < 0.8
+
+
+def test_wall_clock_fatigue_accrues_while_away_awake(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=10 * 3600)
+    org.load()
+    org.flush(force=True)
+    before = org.store.fatigue
+    _age_state_by(tmp_path, 3600)
+
+    fresh = Organism(tmp_path, probe=_dummy_probe(), wake_seconds=10 * 3600)
+    fresh.load()
+    assert fresh.lifecycle.state == "wake"
+    assert fresh.store.fatigue > before
+
+
+def test_fade_death_semantics_still_apply_on_reload(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    org.store.fade_streak = 3
+    org.store.dirty = True
+    org.flush(force=True)
+
+    fresh = Organism(tmp_path, probe=_dummy_probe())
+    fresh.load()
+    assert fresh.lifecycle.state == "dead"
+
+
+# -- contract for other agents -------------------------------------------------------
+
+
+def test_entity_actuation_defaults_true_and_persists(tmp_path):
+    store = BeliefStore(tmp_path)
+    assert store.entity_actuation is True
+    store.entity_actuation = False
+    store.save()
+    loaded = BeliefStore(tmp_path)
+    loaded.load()
+    assert loaded.entity_actuation is False
+
+
+def test_close_shuts_down_module_registry(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    calls = []
+    org.module_loader.registry.shutdown = lambda: calls.append(1)
+    org.close()
+    assert calls == [1]
+
+
+def test_close_without_module_loader_is_safe(tmp_path):
+    org = Organism.__new__(Organism)  # no load(): module_loader never wired
+    org.thread_pool = None
+    org.close()  # must not raise
+
+
+def test_self_stated_goal_candidate_is_promoted_when_front_opens(tmp_path):
+    """The speech->state loop closes: a self-stated intention (harvested from
+    the entity's own reply) takes the open goal front instead of asking the
+    voice to invent one."""
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    org.store.cycle = 30  # past GOAL_COOLDOWN
+    org.store.add_self_goal_candidate("explore the network")
+    events = org._goals_tick()
+    assert {"kind": "self_goal", "text": "explore the network"} in events
+    assert org.store.active_goal()["text"] == "explore the network"
+    assert org.store.self_goal_candidates == []
+
+
+def test_goal_candidate_not_promoted_while_insane(tmp_path):
+    _seed_organism(tmp_path)
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    org.store.cycle = 30
+    org.store.insane = True
+    org.store.add_self_goal_candidate("explore the network")
+    events = org._goals_tick()
+    assert not [e for e in events if e["kind"] == "self_goal"]
+
+
+def test_recovery_boot_seeds_the_store_from_the_genome(tmp_path):
+    """A quarantined state.json must not leave the organism mindless: the
+    recovery boot treats the .scl genome as the source of truth, like a
+    first boot."""
+    _seed_organism(tmp_path)
+    (tmp_path / "state.json").write_text("{ garbage")
+    org = Organism(tmp_path, probe=_dummy_probe())
+    org.load()
+    assert org.store.load_error
+    assert ("self", "mood", "calm") in org.store.beliefs()

@@ -161,6 +161,40 @@ _INTENT_PATTERNS = [
     re.compile(r"\blearn about (.+?)[.!,]?$", re.IGNORECASE),
 ]
 
+# -- self-statements (the entity's own replies) --------------------------------
+# The speech->state loop: what the entity says about itself becomes mind
+# state. Regex/tier only — this runs inline on every reply, so it must stay
+# cheap and make no LLM call. Everything it produces stays BELOW the user
+# auto-commit threshold (LEARN_CONF): a passing self-statement becomes a
+# low-confidence self-model insight, an intention becomes a goal candidate,
+# a denial of a held belief raises a said-vs-held flag.
+
+SELF_STATE_CONF = 0.6  # below LEARN_CONF: never auto-commits like user facts
+
+_SELF_STATEMENT_RE = re.compile(
+    r"\bi (?:think|believe|feel|decided|decide|know|learned|noticed|realized|realised) "
+    r"(?:that )?(.+?)[.!,;]?$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+_SELF_IDENTITY_RE = re.compile(r"\bmy name is ([a-zA-Z]+)", re.IGNORECASE)
+
+# "I don't trust X anymore" — the entity denying something it may still hold.
+_SELF_DENIAL_RES = [
+    (
+        re.compile(
+            r"\bi (?:do not|don't|dont|no longer|cant|can't) "
+            r"(?:trust|believe(?: in)?|like|love|enjoy|want) " + _VALUE + r"[.!,]?$",
+            re.IGNORECASE | re.MULTILINE,
+        ),
+        "trust_broken",
+    ),
+    (
+        re.compile(r"\bi (?:am|feel) not " + _VALUE + r"[.!,]?$", re.IGNORECASE | re.MULTILINE),
+        "feeling_denied",
+    ),
+]
+
 _COMMAND_PATTERNS = [
     re.compile(r"\b(?:can you|could you) (.+?)[.!?]?$", re.IGNORECASE),
     re.compile(r"\bplease (.+?)[.!?]?$", re.IGNORECASE),
@@ -269,13 +303,16 @@ def _extract_facts(text, speech_act):
             facts.append(fact)
         if len(facts) >= MAX_PER_MESSAGE:
             break
-    # tier B executable skills: registry patterns approved by the user
+    # tier B executable skills: registry patterns approved by the user.
+    # These regexes are model-authored, so the search text is bounded —
+    # a pathological pattern can only burn a fixed amount of work.
+    bounded = text[:1000]
     for entry in extensions.active_entries("pattern"):
         pattern = entry.get("regex")
         template = entry.get("template")
         if not isinstance(pattern, str) or not isinstance(template, str):
             continue
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, bounded, re.IGNORECASE)
         if match is None:
             continue
         raw = match.group(1) if match.groups() else match.group(0)
@@ -444,3 +481,103 @@ def describe(belief):
             return f"you told me {val.replace('_', ' ')}"
         return f"my {attr} is {val}"
     return f"{obj}:{attr}={val}"
+
+
+# -- self-statement assimilation (speech -> state loop) -------------------------
+
+
+def analyze_self_reply(text):
+    """Cheap (regex/tier only) extraction over the entity's OWN utterance.
+
+    Returns {"statements": [str], "identity": str|None, "goals": [str],
+    "denials": [{"kind": str, "surface": str, "value": str|None}]} — all
+    attributed to the organism itself, all at SELF_STATE_CONF (below the user
+    auto-commit threshold). Used by voice.respond so a reply updates the mind
+    that produced it.
+    """
+    result = {"statements": [], "identity": None, "goals": [], "denials": []}
+    text = str(text).strip()
+    if not text:
+        return result
+
+    statements = []
+    for match in _SELF_STATEMENT_RE.finditer(text):
+        clause = " ".join(match.group(1).split())
+        if 2 < len(clause) <= 120 and clause.lower() not in {s.lower() for s in statements}:
+            statements.append(clause)
+    result["statements"] = statements[:2]  # keep it cheap and small
+
+    identity = _SELF_IDENTITY_RE.search(text)
+    if identity:
+        result["identity"] = _sanitize(identity.group(1))
+
+    # intentions reuse the same intent tiers as user text
+    goal = _extract_goal(text)
+    if goal:
+        result["goals"].append(goal[:80])
+
+    for pattern, kind in _SELF_DENIAL_RES:
+        match = pattern.search(text)
+        if match is None:
+            continue
+        surface = " ".join(match.group(0).split())
+        value = _sanitize(match.group(1)) if match.lastindex else None
+        result["denials"].append({"kind": kind, "surface": surface[:80], "value": value})
+        break
+    return result
+
+
+def _held_counterpart(store, denial):
+    """The held belief a denial clashes with, or None. Matches the denied
+    value (whole or word-by-word) against self/user beliefs so a reply like
+    "I don't trust sam anymore" flags the held ("self", "trusts_sam", "true")
+    -shaped belief."""
+    value = denial.get("value")
+    if not value:
+        return None
+    words = [w for w in str(value).split("_") if len(w) >= 3]
+    for (obj, attr, val), conf in store.beliefs().items():
+        if obj not in ("self", "user") or conf < 0.5:
+            continue
+        if val == value or attr == value:
+            return describe((obj, attr, val))
+        if any(attr == w or attr.endswith(f"_{w}") or val == w for w in words):
+            return describe((obj, attr, val))
+    return None
+
+
+def assimilate_own_reply(org, reply):
+    """Close the speech->state loop: after voice.respond obtains a reply,
+    fold what the entity said about ITSELF back into its mind. Cheap and
+    synchronous (regex/tier only, no extra LLM call):
+
+    - self-statements ("I think/I decided/I feel…", "my name is…") become
+      low-confidence self-model insights via the existing
+      Organism.record_self_model mechanism (0.7 < LEARN_CONF, so they never
+      auto-commit the way user facts do);
+    - intentions ("I want to explore Y…") become goal candidates
+      (BeliefStore.add_self_goal_candidate) that _goals_tick can promote;
+    - a reply denying a held belief raises a said-vs-held flag
+      (BeliefStore.note_said_vs_held) the prompt can mention.
+
+    Never raises: a malformed reply must never break the respond path.
+    """
+    store = getattr(org, "store", None)
+    if store is None or not reply:
+        return
+    try:
+        extracted = analyze_self_reply(reply)
+        record = getattr(org, "record_self_model", None)
+        if record is not None:
+            for clause in extracted["statements"]:
+                record(f"i {clause}" if not clause.lower().startswith(("i ", "my ")) else clause)
+            if extracted["identity"]:
+                record(f"my name is {extracted['identity']}")
+        for goal in extracted["goals"][:1]:
+            store.add_self_goal_candidate(goal)
+        for denial in extracted["denials"]:
+            held = _held_counterpart(store, denial)
+            if held is not None:
+                store.note_said_vs_held(denial["surface"], held)
+    except Exception as exc:  # noqa: BLE001 — extraction must never break the reply path
+        logger.warning("self-reply assimilation failed: %s", exc)
