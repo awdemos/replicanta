@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import random
+import signal
 import tempfile
 import threading
 import time
@@ -855,7 +856,7 @@ class OrganismApp(App):
         Binding("ctrl+b", "toggle_sidebar", show=False),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "confirm_quit", "quit"),
-        Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
+        Binding("ctrl+c", "quit", "quit"),
         Binding("ctrl+shift+c", "copy_chat", "copy chat log"),
         Binding("ctrl+m", "toggle_mouse", "toggle mouse capture"),
     ]
@@ -984,7 +985,6 @@ class OrganismApp(App):
         self._doom = DoomController(self)
         self._voice = VoiceController(self)
         self._brain_running = False  # cached fly-brain state for the activity line
-        self._quit_hint_time = 0.0
         self._mind_text = ""
         self._memory_text = ""
         self._visual_text = ""
@@ -1439,15 +1439,6 @@ class OrganismApp(App):
             os._exit(0)
 
         threading.Thread(target=killer, daemon=True).start()
-
-    def action_quit_or_hint(self):
-        """Quit on double-tap; show a hint on first ctrl+c press."""
-        now = time.monotonic()
-        if now - self._quit_hint_time < 2.0:
-            self.action_quit()
-            return
-        self._quit_hint_time = now
-        self.notify("press ctrl+c again to quit", timeout=1.0)
 
     def refresh_top_bar(self):
         """Render the custom top bar: wordmark and organism identity on the
@@ -3191,7 +3182,25 @@ def main():
             open_browser=not args.no_browser,
         )
         return
-    OrganismApp(org, root, spawn).run()
+    app = OrganismApp(org, root, spawn)
+
+    def _handle_sigint(_signum, _frame):
+        # Textual's message pump can swallow a KeyboardInterrupt raised
+        # mid-loop, so quit directly instead of relying on propagation:
+        # the same clean path as the ctrl+c binding (save, close, reap
+        # module children), with the hard-exit fallback guaranteeing the
+        # process dies. Runs on the main thread between bytecodes.
+        with contextlib.suppress(Exception):
+            app.action_quit()
+
+    signal.signal(signal.SIGINT, _handle_sigint)
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        # Startup or cooked-mode fallback, in case the handler was not
+        # installed yet or the default disposition applied instead.
+        with contextlib.suppress(Exception):
+            app.action_quit()
 
 
 if __name__ == "__main__":

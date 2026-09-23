@@ -136,6 +136,15 @@ def test_ctrl_q_binding_exists_and_saves_before_quit(headless_app, monkeypatch):
     assert quit_called["called"], "action_quit did not call exit"
 
 
+def test_ctrl_c_quits_on_first_press(headless_app):
+    """Terminal convention: a single ctrl+c exits — no double-tap hint
+    machinery (regression: the first press used to only show a toast)."""
+    app = headless_app
+    actions = [b.action for b in app._bindings.key_to_bindings.get("ctrl+c", [])]
+    assert actions == ["quit"], actions
+    assert not hasattr(OrganismApp, "action_quit_or_hint")
+
+
 def test_main_rejects_invalid_org_name(monkeypatch, tmp_path):
     """--org names must pass nursery.NAME_RE before organism_dir is built —
     otherwise '--org ../otherdir' opens a directory outside the nursery."""
