@@ -947,6 +947,7 @@ class DoomController:
             return
         self._bind_org()
         self._app._responding = True
+        self._app._respond_started = time.monotonic()  # watchdog measures this hold too
         try:
             self._app.run_worker(self._take_turn_worker, thread=True)
         except Exception as exc:  # noqa: BLE001 — app shutting down etc.

@@ -944,6 +944,11 @@ class OrganismApp(App):
         self._responding = False
         # user line held while the entity is mid-thought (forced intervention)
         self._queued_prompt = None
+        # generation bookkeeping for the stuck-respond watchdog: a gen
+        # counter lets a late finally from a wedged worker refuse to
+        # release a healthy newer generation
+        self._respond_gen = 0
+        self._respond_started = 0.0
         self._completion_matches = None
         self._completion_index = 0
         self._chat_history = []
@@ -2064,6 +2069,7 @@ class OrganismApp(App):
 
     # -- ticks -----------------------------------------------------------
     def _on_tick(self):
+        self._respond_watchdog()
         for event in self.org.tick(1.0):
             self._render_event(event)
         if self._busy():
@@ -2752,9 +2758,38 @@ class OrganismApp(App):
             if first_in_line:
                 self._append_log("org is thinking — your message is next", STYLE_DIM)
             return
+        self._respond_gen += 1
+        self._respond_started = time.monotonic()
         self._responding = True
         self.refresh_status()
         self._respond(text, quick=quick, temperature=temperature)
+
+    def _release_respond(self, gen):
+        """Reply-worker finally: hand the conversation back to the user.
+        A stale worker (one the watchdog already replaced) must not
+        release a healthy newer generation — its gen no longer matches."""
+        if self._respond_gen != gen:
+            return
+        self._responding = False
+        self._drain_queued_prompt()
+
+    RESPOND_WATCHDOG_SECONDS = 600.0  # OLLAMA_TIMEOUT (240s) plus debate headroom
+
+    def _respond_watchdog(self):
+        """Release a STUCK busy flag. A generation that has held it far
+        past any legitimate lifetime (wedged worker, dead backend) must
+        not silence the entity until restart — free the flag, say so, and
+        answer anything queued during the wedge."""
+        if not self._responding:
+            return
+        if time.monotonic() - self._respond_started < self.RESPOND_WATCHDOG_SECONDS:
+            return
+        self._append_log(
+            "org seemed stuck — releasing it (a generation never returned)",
+            STYLE_WARN,
+        )
+        self._responding = False
+        self._drain_queued_prompt()
 
     def _drain_queued_prompt(self):
         """Answer a user line that queued while the entity was busy. Runs
@@ -2770,9 +2805,10 @@ class OrganismApp(App):
     @work(thread=True)
     def _respond(self, text, *, quick=False, temperature=None):
         org = self.org  # capture: a swap mid-debate drops the delivery
+        gen = self._respond_gen  # a watchdog-restarted generation outranks us
         reply = None
-        self.call_from_thread(self.set_activity, "org is thinking")
         try:
+            self.call_from_thread(self.set_activity, "org is thinking")
             self.call_from_thread(self._pending_show, "org is thinking")
             reply = voice.respond(
                 org,
@@ -2784,14 +2820,9 @@ class OrganismApp(App):
         except Exception as exc:  # noqa: BLE001 — workers must never die silently
             self.call_from_thread(self._worker_error, "reply", exc)
         finally:
-            self.call_from_thread(self.clear_activity)
-            self._responding = False
-        # A user line queued while this reply generated goes next — marshal
-        # onto the UI thread like the delivery below (direct call in tests).
-        try:
-            self.call_from_thread(self._drain_queued_prompt)
-        except RuntimeError:
-            self._drain_queued_prompt()
+            with contextlib.suppress(RuntimeError):  # app already gone in tests/shutdown
+                self.call_from_thread(self.clear_activity)
+            self._release_respond(gen)
         if reply is not None and org is self.org:
             # If the entity is in the middle of a doom game, show its thinking
             # in the chat log, execute any doom.command line, and refresh the

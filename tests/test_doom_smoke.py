@@ -291,6 +291,11 @@ def test_overlay_chat_input_roundtrip(doom_app):
             await _start_doom(app, pilot)
             svc = app.org.module_loader.registry.get("doom")
             await wait_until(lambda: svc.frame_count() > 0, message="stub frames to flow")
+            # Arm the manual cooldown first: auto-play would otherwise keep
+            # taking turns, and its thought stream ages the "you › w" echo
+            # out of the trimmed 8-line window before the final assertion.
+            await pilot.press("s")
+            await pilot.pause()
             overlay_input = app.screen.query_one("#doom-chat", Input)
             # the game keys own the keyboard until Tab: no auto-focus
             assert app.focused is not overlay_input

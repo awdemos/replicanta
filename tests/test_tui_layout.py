@@ -1246,3 +1246,67 @@ def test_doom_turn_done_drains_queued_prompt(nursery_app):
             assert app._responding is True
 
     asyncio.run(check())
+
+
+def test_respond_watchdog_releases_stuck_flag(nursery_app, monkeypatch):
+    """A generation that never returns (wedged worker, dead backend) must
+    not silence the entity until restart: the 1s-tick watchdog frees the
+    busy flag past 600s and answers anything queued during the wedge."""
+    import time as time_mod
+
+    app = nursery_app
+    calls = []
+    app._respond = lambda text, *, quick=False, temperature=None: calls.append(text)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._responding = True
+            app._respond_started = time_mod.monotonic() - 700  # wedged long ago
+            app._maybe_respond("anyone home?")  # queued during the wedge
+            app._respond_watchdog()
+            await pilot.pause()
+            assert app._responding is True  # the queued answer now holds it
+            assert calls == ["anyone home?"]
+            app._responding = False
+
+    asyncio.run(check())
+
+
+def test_respond_watchdog_ignores_fresh_generation(nursery_app):
+    """A healthy in-flight generation is far below the watchdog threshold
+    and must never be interrupted."""
+    import time as time_mod
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test():
+            app._responding = True
+            app._respond_started = time_mod.monotonic()
+            app._respond_watchdog()
+            assert app._responding is True  # untouched
+            app._responding = False
+
+    asyncio.run(check())
+
+
+def test_stale_worker_cannot_release_newer_generation(nursery_app):
+    """The gen guard: a late finally from a wedged worker (already replaced
+    by the watchdog and a new generation) must not release the new one."""
+    app = nursery_app
+    calls = []
+    app._respond = lambda text, *, quick=False, temperature=None: calls.append(text)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._respond_gen = 7
+            app._responding = True  # the new generation's flag
+            app._release_respond(6)  # the stale worker's finally
+            await pilot.pause()
+            assert app._responding is True  # refused: stale worker
+            assert calls == []
+            app._release_respond(7)  # the current worker's finally
+            await pilot.pause()
+            assert app._responding is False
+
+    asyncio.run(check())
