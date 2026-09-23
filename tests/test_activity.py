@@ -174,3 +174,38 @@ def test_summary_reports_all_three_groups(tmp_path):
     assert "neural:" in text and "5 llm calls" in text
     assert "coupling:" in text and "2 facts learned" in text
     assert "2.00/cycle" in text  # 8 derivations / 4 cycles
+
+
+# -- /stats report -------------------------------------------------------------
+
+
+def test_stats_report_reads_like_a_condition(tmp_path):
+    """The /stats report must say who the entity is and how it is, in
+    words — not a dump of raw counters."""
+    from replicanta.skills import Skill
+
+    org = _org(tmp_path)
+    org.store.add(("self", "name", "fern"), 0.9)
+    org.store.add(("self", "mood", "anxious"), 0.8)
+    org.store.remember("test", "something happened")
+    org.skills.save(Skill(name="async call", when="x", how="y"))
+    org.store.add_goal("learn five new things about the user")
+    lines = activity.stats_report(org)
+    text = "\n".join(lines)
+    assert "fern — awake · mood: anxious" in text
+    assert "0 rules ·" in text and "1 skills (async call)" in text
+    assert "goal: learn five new things about the user" in text
+    assert "stress 0.0" in text and "(calm)" in text
+
+
+def test_stats_report_stress_words_track_the_meter():
+    assert activity.stress_word(0.1) == "calm"
+    assert activity.stress_word(0.5) == "strained"
+    assert activity.stress_word(0.7) == "stressed"
+    assert activity.stress_word(0.95) == "overwhelmed"
+
+
+def test_stats_report_duration_formatting():
+    assert activity._fmt_duration(45) == "45s"
+    assert activity._fmt_duration(300) == "5m"
+    assert activity._fmt_duration(3900) == "1h 5m"

@@ -418,7 +418,8 @@ def test_palette_enter_runs_no_arg_command(headless_app):
             await pilot.pause()
             assert not isinstance(pilot.app.screen, CommandPalette), "Enter did not close the palette"
             lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
-            assert any("stats: beliefs=" in line for line in lines), lines
+            assert any("— awake · mood:" in line for line in lines), lines
+            assert any(line.startswith("mind:") for line in lines), lines
             assert app.chat_input.value == "", "palette run left the command in the input"
             assert app.chat_input.has_focus
 

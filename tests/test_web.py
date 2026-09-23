@@ -346,7 +346,8 @@ def test_command_runs_stats_and_help(live):
     status, _headers, result = request(live, "/api/command", {"command": "/stats"})
     assert status == 200
     assert result["state"]["organism"]["name"] == "default"
-    assert any(msg.startswith("stats:") for msg in result["messages"])
+    assert any("— awake · mood:" in msg for msg in result["messages"])
+    assert any(msg.startswith("mind:") for msg in result["messages"])
 
     status, _headers, result = request(live, "/api/command", {"command": "/help"})
     assert status == 200

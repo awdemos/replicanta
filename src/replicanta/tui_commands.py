@@ -219,20 +219,7 @@ def _cmd_revive(app, parts):
 
 
 def _cmd_stats(app, parts):
-    m = app.org.metrics()
-    s = app.org.store
-    app._append_log(
-        f"stats: beliefs={m.belief_count} rules={m.rule_count} depth={m.total_depth} score={m.score():.1f}",
-        STYLE_DIM,
-    )
-    app._append_log(
-        f"mental: arousal={s.arousal:.2f} "
-        f"coherence={s.coherence:.2f} "
-        f"incoherence={s.incoherence:.2f} "
-        f"insane={s.insane}",
-        STYLE_DIM,
-    )
-    for line in activity.summary_lines(app.org.store):
+    for line in activity.stats_report(app.org):
         app._append_log(line, STYLE_DIM)
 
 

@@ -532,18 +532,7 @@ class Glasshouse:
                 else:
                     messages.append(f"/revive: it is not faded (state {self.org.lifecycle.state}).")
             elif name == "/stats":
-                m = self.org.metrics()
-                s = self.org.store
-                messages.append(
-                    f"stats: beliefs={m.belief_count} rules={m.rule_count} depth={m.total_depth} score={m.score():.1f}"
-                )
-                messages.append(
-                    f"mental: arousal={s.arousal:.2f} "
-                    f"coherence={s.coherence:.2f} "
-                    f"incoherence={s.incoherence:.2f} "
-                    f"insane={s.insane}"
-                )
-                messages.extend(activity.summary_lines(s))
+                messages.extend(activity.stats_report(self.org))
             elif name == "/save":
                 self.org.flush(force=True)
                 messages.append("saved")

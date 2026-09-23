@@ -17,6 +17,7 @@ are exact events, not estimates. What is NOT measured: 'consciousness' —
 these are activity counters, deliberately not a sentience score."""
 
 import re
+import time
 
 SYMBOLIC_KEYS = (
     "rules_tried",
@@ -138,6 +139,84 @@ def summary_lines(store):
         f"coupling: {a.get('facts_learned', 0)} facts learned from the "
         f"user ({rate('facts_learned')}) · grounded utterances "
         f"{grounded_share}"
+    )
+    return lines
+
+
+def _fmt_duration(seconds):
+    """1h 5m / 5m / 45s — human spans for the stats report."""
+    seconds = int(seconds)
+    if seconds >= 3600:
+        return f"{seconds // 3600}h {(seconds % 3600) // 60}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+_STRESS_WORDS = ((0.3, "calm"), (0.6, "strained"), (0.85, "stressed"), (1.01, "overwhelmed"))
+
+
+def stress_word(stress):
+    """Words for the meter, so /stats reads like a condition, not a raw
+    number. Bands mirror the felt-experience thresholds in narration."""
+    for ceiling, word in _STRESS_WORDS:
+        if stress < ceiling:
+            return word
+    return "overwhelmed"
+
+
+def stats_report(org):
+    """Plain-language entity stats for /stats: who this is, how it is
+    right now, and what it has been doing — the readable companion to
+    the raw counters in summary_lines(). One line per section, safe to
+    append to a chat log."""
+    store = org.store
+    m = org.metrics()
+    a = store.activity
+    name = store.belief_value("self", "name", None) or org.dir_path.name
+    state = org.lifecycle.state
+    state_word = {"wake": "awake", "sleep": "asleep", "dead": "faded"}.get(state, state)
+    mood = store.belief_value("self", "mood", "calm")
+
+    headline = f"{name} — {state_word} · mood: {mood} · cycle {store.cycle}"
+    started = getattr(org.lifecycle, "state_started", None)
+    if started:
+        headline += f" · {state_word} for {_fmt_duration(max(0, time.time() - started))}"
+    lines = [headline]
+
+    skill_store = getattr(org, "skills", None)
+    skills = skill_store.list() if skill_store is not None else []
+    skill_names = ", ".join(s.name for s in skills[:3]) + ("…" if len(skills) > 3 else "")
+    lines.append(
+        f"mind: {m.belief_count} beliefs · {m.rule_count} rules · "
+        f"{len(store.memory)} memories · {len(skills)} skills" + (f" ({skill_names})" if skill_names else "")
+    )
+
+    goal = store.active_goal()
+    if goal is not None:
+        age = store.cycle - goal.get("created_cycle", store.cycle)
+        lines.append(f"goal: {goal['text']} (held {age} cycles)")
+
+    utterances = a.get("utterances", 0)
+    grounded = (
+        f"{round(100 * a.get('grounded_utterances', 0) / utterances)}% grounded" if utterances else "nothing said yet"
+    )
+    mental = f"mental: stress {store.stress:.2f} ({stress_word(store.stress)}) · {grounded}"
+    if store.insane:
+        mental += " · INSANE — recovery in progress"
+    lines.append(mental)
+
+    fallbacks = a.get("fallbacks", 0)
+    fb = f" · {fallbacks} fallbacks" if fallbacks else ""
+    lines.append(
+        f"voice: {a.get('llm_calls', 0)} generations · "
+        f"{a.get('prompt_tokens', 0)} tokens in → {a.get('gen_tokens', 0)} out{fb}"
+    )
+
+    learned = a.get("facts_learned", 0)
+    dreams = a.get("dreams_promoted", 0)
+    lines.append(
+        f"growth: {learned} facts learned from you · {a.get('beliefs_new', 0)} beliefs formed · {dreams} dreams kept"
     )
     return lines
 
