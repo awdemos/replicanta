@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import escape
-from rich.table import Table
 from rich.text import Text
 from textual import work
 from textual.actions import SkipAction
@@ -873,7 +872,12 @@ class OrganismApp(App):
     ]
 
     CSS = """
-    #topbar { height: 1; padding: 0 1; background: $surface; color: $text; }
+    #topbar { height: 1; background: $surface; color: $text; }
+    # cell widths must stay in sync with TOPBAR_LEFT_WIDTH /
+    # TOPBAR_RIGHT_WIDTH below
+    #topbar-left { width: 50; padding: 0 1; }
+    #topbar-center { width: 1fr; border-left: solid $primary; padding: 0 1; }
+    #topbar-right { width: 32; border-left: solid $primary; padding: 0 1; }
     #main { height: 1fr; }
     #sidebar { width: 24; background: $surface; color: $text;
                border-right: solid $primary; }
@@ -1011,8 +1015,13 @@ class OrganismApp(App):
 
     def compose(self) -> ComposeResult:
         """Build the top bar, sidebar, transcript, and chat input — the
-        only chrome is the single top-bar row."""
-        yield Static("", id="topbar")
+        only chrome is the single top-bar row. The bar's three zones are
+        separate cells divided by CSS borders: the section boundaries are
+        drawn lines, so no content can ever move them."""
+        with Horizontal(id="topbar"):
+            yield Static("", id="topbar-left")
+            yield Static("", id="topbar-center")
+            yield Static("", id="topbar-right")
         with Horizontal(id="main"):
             with Vertical(id="sidebar"):
                 yield Static("nursery", id="sidebar-header")
@@ -1480,7 +1489,7 @@ class OrganismApp(App):
         badges = self._module_badges()
         left = Text.assemble(
             ("◆ REPLICANTA", "bold cyan"),
-            ("  │  ", "dim"),
+            ("   ", ""),
             (name, "bold"),
             (badges, ""),
             ("  ·  ", "dim"),
@@ -1507,11 +1516,6 @@ class OrganismApp(App):
             right.append("spk", style=spk_style)
         right.append("   ")
         right.append(clock, style="bold")
-        bar = Table.grid(expand=True)
-        bar.add_column(justify="left", no_wrap=True, width=TOPBAR_LEFT_WIDTH)
-        bar.add_column(justify="center", no_wrap=True, ratio=1)
-        bar.add_column(justify="right", no_wrap=True, width=TOPBAR_RIGHT_WIDTH)
-        bar.add_row(left, center, right)
         mic = f" mic {self._recording_elapsed()}" if recording else ""
         # The compact mirror string keeps the FULL name: it drives change
         # detection and test assertions (semantic identity), while the
@@ -1525,9 +1529,14 @@ class OrganismApp(App):
         if text == self._rendered_topbar_text:
             return
         self._rendered_topbar_text = text
-        topbar = self._safe_query("#topbar", Static)
-        if topbar is not None:
-            topbar.update(bar)
+        for cell_id, content in (
+            ("#topbar-left", left),
+            ("#topbar-center", center),
+            ("#topbar-right", right),
+        ):
+            cell = self._safe_query(cell_id, Static)
+            if cell is not None:
+                cell.update(content)
 
     def _topbar_name(self):
         """Display name for the top bar, capped to TOPBAR_NAME_BUDGET

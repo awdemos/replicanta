@@ -340,8 +340,9 @@ def render_bar_chart_svg(records, value_key, label_key, title="chart", caption="
 # -----------------------------------------------------------------------------
 
 
-# Label column cap: keeps the "│" separator at a fixed column (and the bar
-# on the same line) no matter how long a label — often an entity name — is.
+# Fixed label column: the "│" separator stays at the SAME column on every
+# render no matter what the labels are — a boundary drawn in text must not
+# drift with the data.
 _LABEL_CAP = 24
 
 
@@ -365,7 +366,7 @@ def render_text_bars(records, value_key, label_key, width=40, max_rows=18, capti
     labels = [_clip_label(r.get(label_key, "?")) for r in records]
     values = [float(r.get(value_key, 0) or 0) for r in records]
     max_v = max(values) if values else 1
-    max_label = max(len(label) for label in labels)
+    max_label = _LABEL_CAP  # fixed column — never derived from the data
     lines = []
     colors = ["cyan", "green", "yellow", "red", "magenta", "blue", "bright_cyan", "bright_green"]
 

@@ -8,18 +8,46 @@ from textual.widgets import ListView, Static
 from conftest import renderable_text, wait_until
 
 
+def _topbar_text(app, width=160):
+    """All three top-bar cells joined — the bar's zones are separate
+    widgets divided by CSS borders (boundaries drawn as lines, not text)."""
+    parts = [
+        renderable_text(app.query_one(f"#topbar-{zone}", Static), width=width) for zone in ("left", "center", "right")
+    ]
+    return " ".join(parts)
+
+
 def test_top_bar_shows_organism_name(nursery_app):
     app = nursery_app
 
     async def check():
         async with app.run_test():
             app.refresh_top_bar()
-            text = renderable_text(app.query_one("#topbar", Static), width=120)
+            text = _topbar_text(app, width=120)
             assert "REPLICANTA" in text  # wordmark is upper-case in the new branding
             name = Path(app.org.dir_path).name
             assert name in text
             assert "a/c/i" in text  # mental-state readout in the center zone
             assert "UTC" in text  # clock in the right zone
+
+    asyncio.run(check())
+
+
+def test_top_bar_boundaries_are_drawn_not_typed(nursery_app):
+    """The section boundaries between top-bar zones must be CSS borders
+    (solid lines the content can never move), not pipe characters that
+    ride inside the text."""
+    app = nursery_app
+
+    async def check():
+        async with app.run_test():
+            app.refresh_top_bar()
+            for zone in ("center", "right"):
+                cell = app.query_one(f"#topbar-{zone}", Static)
+                assert cell.styles.border_left[0] == "solid", zone
+            for zone in ("left", "center", "right"):
+                text = renderable_text(app.query_one(f"#topbar-{zone}", Static), width=60)
+                assert "│" not in text and "|" not in text, f"pipe separator in {zone}: {text!r}"
 
     asyncio.run(check())
 
@@ -34,7 +62,7 @@ def test_top_bar_shows_module_badges(nursery_app, monkeypatch):
     async def check():
         async with app.run_test():
             app.refresh_top_bar()
-            text = renderable_text(app.query_one("#topbar", Static), width=120)
+            text = _topbar_text(app, width=120)
             assert "🪰" in text and "💀" in text
 
     asyncio.run(check())
@@ -283,7 +311,7 @@ def test_topbar_is_the_only_chrome_row(nursery_app):
 
     async def check():
         async with app.run_test(size=(160, 48)):
-            assert app.query_one("#topbar", Static)
+            assert app.query_one("#topbar-left", Static)
             assert len(app.query(TabbedContent)) == 0
             for removed in ("#tab-bar", "#quick-actions", "#command-hints", "#bottombar"):
                 assert len(app.query(removed)) == 0, f"{removed} still in the DOM"
@@ -305,7 +333,7 @@ def test_status_line_shows_identity_and_state(nursery_app):
     async def check():
         async with app.run_test(size=(160, 48)):
             app.refresh_top_bar()
-            text = renderable_text(app.query_one("#topbar", Static), width=160)
+            text = _topbar_text(app, width=160)
             name = Path(app.org.dir_path).name
             assert name in text
             assert "awake" in text
@@ -320,27 +348,29 @@ def test_status_line_shows_identity_and_state(nursery_app):
 
 def test_top_bar_name_capped_at_fixed_budget(nursery_app, monkeypatch):
     """Regression ("blue bars move"): the learned name is free text with
-    no cap, and a long name shoved the center/right grid cells — sometimes
+    no cap, and a long name shoved the center/right cells — sometimes
     wrapping the bar onto a second line. The displayed name is truncated
-    to a fixed budget and the outer columns are pinned, so the center
-    readout stays put and the bar stays one row tall."""
+    to a fixed budget and the outer cells are width-pinned behind CSS
+    borders, so the center readout stays put and the bar stays one row."""
     from replicanta.tui import TOPBAR_NAME_BUDGET
 
     app = nursery_app
 
     async def check():
         async with app.run_test(size=(120, 48)):
-            offsets = []
+            center_x = []
             for name in ("bob", "x" * 60):
                 monkeypatch.setattr(app, "_org_name", lambda name=name: name)
                 app.refresh_top_bar()
-                text = renderable_text(app.query_one("#topbar", Static), width=120).rstrip("\n")
-                assert "\n" not in text, f"top bar wrapped with name {name!r}"
+                left_text = renderable_text(app.query_one("#topbar-left", Static), width=60).rstrip("\n")
+                assert "\n" not in left_text, f"top bar wrapped with name {name!r}"
+                text = _topbar_text(app, width=120)
                 assert "a/c/i" in text and "UTC" in text
-                offsets.append(text.index("a/c/i"))
+                center_x.append(app.query_one("#topbar-center", Static).region.x)
             assert "x" * 60 not in text
             assert "x" * (TOPBAR_NAME_BUDGET - 1) + "…" in text
-            assert offsets[0] == offsets[1], f"center column moved: {offsets}"
+            # the boundary is a drawn border: the center cell cannot move
+            assert center_x[0] == center_x[1], f"center column moved: {center_x}"
 
     asyncio.run(check())
 
