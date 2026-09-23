@@ -22,7 +22,6 @@ from textual import work
 from textual.actions import SkipAction
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
-from textual.command import Hit, Matcher, Provider
 from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import ModalScreen, Screen
@@ -46,6 +45,7 @@ from textual.widgets.option_list import Option
 
 from replicanta import (
     camera,
+    capbridges,
     extensions,
     fileutil,
     groupchat,
@@ -77,45 +77,34 @@ from replicanta.tui_views import (
 
 logger = logging.getLogger(__name__)
 
+# Top-bar length budgets: the display name is a free-text belief with no cap,
+# and an unbounded name shoved the center/right grid cells (the "blue bars
+# move" bug). The name is truncated at render and the outer columns are
+# pinned to fixed widths so the center column never drifts.
+TOPBAR_NAME_BUDGET = 18  # visible chars of the organism name (last is "…")
+TOPBAR_LEFT_WIDTH = 50
+TOPBAR_RIGHT_WIDTH = 32
 
-class SlashCommands(Provider):
-    """Feeds the command palette (ctrl+p) with the slash commands; chosen
-    entries fill the chat line and run it."""
+# Sidebar rows: the panel is 24 wide with 0 1 ListItem padding, so a label
+# never gets more than 22 cells; anything longer would wrap the row onto a
+# second line and misalign the list.
+SIDEBAR_LABEL_BUDGET = 22
 
-    def _run(self, usage):
-        """No-arg commands run immediately; commands with placeholder args
-        (/chaos 0..1, /swap name…) only fill the chat line — submitting
-        the placeholder literally would error or do nonsense."""
-        self.app.chat_input.value = usage
-        self.app.chat_input.focus()
-        if " " not in usage:
-            # Input.action_submit() is async in Textual 8 — a bare call
-            # discards the coroutine and nothing ever submits. Posting
-            # Submitted is what action_submit does, and it drives the
-            # app's real on_input_submitted path.
-            chat = self.app.chat_input
-            chat.post_message(Input.Submitted(chat, chat.value))
+# Below this terminal width the shell goes transcript-first (sidebar hidden).
+NARROW_WIDTH = 80
 
-    def _hit(self, name, usage, description, score=1.0, display=None):
-        return Hit(
-            score=score,
-            match_display=display or f"{name}  {description}",
-            command=lambda u=usage: self._run(u),
-            help=description,
-        )
 
-    async def discover(self):
-        """Yield every slash command as an unfiltered command-palette hit."""
-        for name, usage, description, _category in tui_commands.COMMANDS:
-            yield self._hit(name, usage, description)
+def _narrow_mode(width: int) -> bool:
+    """Transcript-first layout for narrow terminals (sidebar hidden)."""
+    return width < NARROW_WIDTH
 
-    async def search(self, query):
-        """Yield slash commands whose name/description match the palette query."""
-        matcher = Matcher(query)
-        for name, usage, description, _category in tui_commands.COMMANDS:
-            match = matcher.match(f"{name} {description}")
-            if match is not None:
-                yield self._hit(name, usage, description, score=match.score, display=match.highlight)
+
+def _fit_text_budget(text, budget):
+    """Hard one-line budget: truncate with an ellipsis so long content can
+    never wrap a single-row widget."""
+    if len(text) <= budget:
+        return text
+    return text[: budget - 1] + "…"
 
 
 class MutationBanner(Horizontal):
@@ -188,15 +177,18 @@ class CommandPalette(Screen):
     @staticmethod
     def _highlight(text, query):
         """Render ``text`` with the first case-insensitive ``query`` match
-        reversed+bold so the eye lands on why a row matched."""
+        reversed+bold so the eye lands on why a row matched. The text is
+        markup-escaped first: usages like /visualize's ``[beliefs|…]``
+        contain literal brackets that would swallow the injected tags."""
+        escaped = escape(text)
         if not query:
-            return text
-        low = text.lower()
+            return escaped
+        low = escaped.lower()
         q = query.lower()
         i = low.find(q)
         if i < 0:
-            return text
-        return f"{text[:i]}[bold reverse u]{text[i : i + len(q)]}[/]{text[i + len(q) :]}"
+            return escaped
+        return f"{escaped[:i]}[bold reverse u]{escaped[i : i + len(q)]}[/]{escaped[i + len(q) :]}"
 
     def _refresh_palette(self, query):
         results = self.query_one("#palette-results", ListView)
@@ -236,6 +228,44 @@ class CommandPalette(Screen):
                 item.data = name
                 results.append(item)
         meta.update(f"[dim]{count} command{'s' if count != 1 else ''} · ↑↓ select · enter run · esc close[/dim]")
+
+    def on_input_submitted(self, event):
+        """Enter in the filter box runs the highlighted (or first) command —
+        the palette input used to have no submit path at all, making Enter
+        a dead key."""
+        if event.input.id != "palette-input":
+            return
+        command = self._selected_command()
+        if command:
+            self.dismiss(command)
+
+    def on_key(self, event):
+        """↑↓ from the filter box move the result list's highlight (the
+        input doesn't consume them), skipping category headers so Enter
+        always has a runnable command."""
+        if event.key not in ("up", "down"):
+            return
+        results = self.query_one("#palette-results", ListView)
+        for _ in range(len(results) + 1):
+            if event.key == "up":
+                results.action_cursor_up()
+            else:
+                results.action_cursor_down()
+            item = results.highlighted_child
+            if item is None or getattr(item, "data", None):
+                break
+        event.prevent_default()
+        event.stop()
+
+    def _selected_command(self):
+        """The highlighted row's command, else the first filter match.
+        Category headers carry no command and never qualify."""
+        item = self.query_one("#palette-results", ListView).highlighted_child
+        command = getattr(item, "data", None) if item is not None else None
+        if command:
+            return command
+        items = tui_commands.filter_commands(self.query_one("#palette-input", Input).value)
+        return items[0][0] if items else None
 
     def on_list_view_selected(self, event):
         item = event.item
@@ -504,9 +534,10 @@ class DoomScreen(Screen):
     the overlay; the game keeps running (wasd/qe/arrows/space play,
     /doom stop ends it).
 
-    The movement keys are bound HERE, not on the app: app-level w/s would
-    swallow everyday typing on the main screen, while screen-level bindings
-    only exist while this overlay is on top. The chat Input starts
+    The game keys are bound HERE, not on the app: app-level w/s or arrows
+    would swallow everyday typing on the main screen, while screen-level
+    bindings only exist while this overlay is on top (on the main screen
+    the arrows go back to chat history). The chat Input starts
     UNFOCUSED so the game keys play; Tab focuses it for typing, and Enter
     returns focus to the game."""
 
@@ -518,6 +549,11 @@ class DoomScreen(Screen):
         Binding("d", "press_key('d')", "turn right", show=False),
         Binding("q", "press_key('q')", "strafe left", show=False),
         Binding("e", "press_key('e')", "strafe right", show=False),
+        Binding("up", "press_key('w')", "forward", show=False),
+        Binding("down", "press_key('s')", "back", show=False),
+        Binding("left", "press_key('a')", "turn left", show=False),
+        Binding("right", "press_key('d')", "turn right", show=False),
+        Binding("space", "press_key('shoot')", "shoot", show=False),
     ]
 
     # Never auto-focus the chat input when the overlay opens: the game keys
@@ -569,7 +605,7 @@ class DoomScreen(Screen):
         self.app._doom.refresh(force=True)
 
     def action_press_key(self, key: str) -> None:
-        """Overlay movement keys (w/a/s/d/q/e bindings above)."""
+        """Overlay game keys (wasd/qe/arrows/space bindings above)."""
         self.app._doom.key_command(key)
 
     def focus_game(self):
@@ -802,7 +838,6 @@ class OrganismApp(App):
 
     TITLE = "Replicanta"
 
-    COMMANDS: ClassVar[set] = App.COMMANDS | {SlashCommands}
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("ctrl+p", "command_palette", "command palette"),
         Binding("f1", "help", "help"),
@@ -813,12 +848,6 @@ class OrganismApp(App):
         Binding("f6", "look", "look through the camera"),
         Binding("f9", "modules", "modules"),
         Binding("ctrl+b", "toggle_sidebar", show=False),
-        Binding("up", "doom_up", "doom forward", show=False),
-        Binding("down", "doom_down", "doom back", show=False),
-        Binding("left", "doom_left", "doom turn left", show=False),
-        Binding("right", "doom_right", "doom turn right", show=False),
-        Binding("space", "doom_shoot", "doom shoot", show=False),
-        Binding("escape", "doom_stop", "doom stop", show=False),
         Binding("ctrl+q", "quit", "quit"),
         Binding("f10", "confirm_quit", "quit"),
         Binding("ctrl+c", "quit_or_hint", "quit (double-tap)"),
@@ -983,12 +1012,7 @@ class OrganismApp(App):
             with contextlib.suppress(Exception):
                 driver._enable_mouse_support()
         self._show_org()
-        if self.screen.size.width < 80:
-            # narrow terminals start transcript-first; ctrl+b reveals the
-            # nursery sidebar
-            sidebar = self._safe_query("#sidebar", Vertical)
-            if sidebar is not None:
-                sidebar.styles.display = "none"
+        self._apply_narrow_mode(self.screen.size.width)
         self.set_interval(1.0, self._on_tick)
         self.set_interval(NARRATE_INTERVAL, self._maybe_narrate)
         self.set_interval(VOICE_PROBE_INTERVAL, self._probe_voice)
@@ -996,6 +1020,18 @@ class OrganismApp(App):
         self._maybe_narrate()
         # start with the cursor in the chat line, not the scrollable log
         self.chat_input.focus()
+
+    def on_resize(self, event):
+        """Re-evaluate the narrow-terminal layout when the terminal is
+        resized — narrowing hides the sidebar, widening brings it back,
+        all without a restart."""
+        self._apply_narrow_mode(event.size.width)
+
+    def _apply_narrow_mode(self, width):
+        """Show/hide the sidebar from the terminal width (see _narrow_mode)."""
+        sidebar = self._safe_query("#sidebar", Vertical)
+        if sidebar is not None:
+            sidebar.styles.display = "none" if _narrow_mode(width) else "block"
 
     def _show_org(self):
         """(Re)render everything that reflects the current organism: chat
@@ -1044,6 +1080,11 @@ class OrganismApp(App):
         self.org = org
         if old_org is not None:
             old_org.close()
+        # the controllers were driving the OLD organism's games/dungeons —
+        # stop them deterministically so no turn lands in the new organism
+        # (their org-identity binding checks are only the backstop)
+        self._mud.reset_for_swap()
+        self._doom.reset_for_swap()
         # stale workers reset these in their finally blocks anyway; clear
         # them so the new organism is never blocked by the old one's debate
         self._narrating = self._responding = self._self_talking = False
@@ -1066,26 +1107,6 @@ class OrganismApp(App):
         if sidebar is None:
             return
         sidebar.styles.display = "none" if sidebar.styles.display != "none" else "block"
-
-    def action_doom_up(self):
-        self._doom.key_command("w")
-
-    def action_doom_down(self):
-        self._doom.key_command("s")
-
-    def action_doom_left(self):
-        # left arrow TURNS left — the port's own binding (strafe is q/e)
-        self._doom.key_command("a")
-
-    def action_doom_right(self):
-        # right arrow TURNS right — the port's own binding (strafe is q/e)
-        self._doom.key_command("d")
-
-    def action_doom_shoot(self):
-        self._doom.key_command("shoot")
-
-    def action_doom_stop(self):
-        self._doom.key_command("stop")
 
     def on_button_pressed(self, event):
         """Route mutation banner button presses."""
@@ -1116,14 +1137,31 @@ class OrganismApp(App):
         self.push_screen(HelpScreen())
 
     def action_command_palette(self):
-        """Open the searchable slash-command palette and fill the chat line."""
+        """Open the searchable slash-command palette; a picked command runs
+        immediately when it takes no arguments, otherwise it fills the chat
+        line (submitting a placeholder like '/chaos 0..1' would error)."""
 
-        def _fill(command):
-            if command:
-                self.chat_input.value = f"{command} "
-                self.chat_input.focus()
+        def _run_or_fill(command):
+            if not command:
+                return
+            usage = next(
+                (usage for name, usage, _desc, _cat in tui_commands.COMMANDS if name == command),
+                command,
+            )
+            chat = self.chat_input
+            if " " not in usage:
+                chat.value = usage
+                chat.focus()
+                # Input.action_submit() is async in Textual 8 — a bare call
+                # discards the coroutine and nothing ever submits. Posting
+                # Submitted is what action_submit does, and it drives the
+                # app's real on_input_submitted path.
+                chat.post_message(Input.Submitted(chat, chat.value))
+            else:
+                chat.value = f"{command} "
+                chat.focus()
 
-        self.push_screen(CommandPalette(), callback=_fill)
+        self.push_screen(CommandPalette(), callback=_run_or_fill)
 
     def action_modules(self):
         loader = getattr(self.org, "module_loader", None)
@@ -1148,8 +1186,22 @@ class OrganismApp(App):
         self.action_save_now()
         if self.org is not None:
             self.org.close()
+        self._shutdown_module_children()
         self._arm_hard_exit()
         self.exit()
+
+    def _shutdown_module_children(self):
+        """Deterministically stop module-spawned children (the doom-ascii
+        process, the arm bridge's threads, managed capability processes)
+        before the hard exit — os._exit(0) skips atexit handlers, so
+        anything still running would outlive the UI. Best-effort: a
+        module side that failed to stop must never block the quit."""
+        loader = getattr(self.org, "module_loader", None) if self.org is not None else None
+        if loader is not None:
+            with contextlib.suppress(Exception):
+                loader.registry.shutdown()
+        with contextlib.suppress(Exception):
+            capbridges.shutdown_all()
 
     def action_confirm_quit(self):
         """F10 asks before quitting, unlike ctrl+q which is the fast path."""
@@ -1289,7 +1341,10 @@ class OrganismApp(App):
     def refresh_top_bar(self):
         """Render the custom top bar: wordmark and organism identity on the
         left, mood and mental state in the center, voice/mic/clock indicators
-        on the right — one terminal line, aiperf-style."""
+        on the right — one terminal line, aiperf-style. The name is capped
+        (TOPBAR_NAME_BUDGET) and the outer columns are pinned to fixed
+        widths so a long learned name can never shove the center/right
+        cells (the "blue bars move" bug)."""
         lc = self.org.lifecycle
         word = {"wake": "awake", "sleep": "asleep", "dead": "faded"}.get(lc.state, lc.state)
         state_style = {"wake": "green", "sleep": "cyan", "dead": "red"}.get(lc.state, "")
@@ -1300,11 +1355,13 @@ class OrganismApp(App):
         recording = self.listener.recording
         spoken = speech.enabled
         clock = self.org.probe.clock_utc()
+        name = self._topbar_name()
+        badges = self._module_badges()
         left = Text.assemble(
             ("◆ REPLICANTA", "bold cyan"),
             ("  │  ", "dim"),
-            (self._org_name(), "bold"),
-            (self._module_badges(), ""),
+            (name, "bold"),
+            (badges, ""),
             ("  ·  ", "dim"),
             (word, state_style),
             ("  ·  ", "dim"),
@@ -1330,15 +1387,18 @@ class OrganismApp(App):
         right.append("   ")
         right.append(clock, style="bold")
         bar = Table.grid(expand=True)
-        bar.add_column(justify="left")
-        bar.add_column(justify="center")
-        bar.add_column(justify="right")
+        bar.add_column(justify="left", no_wrap=True, width=TOPBAR_LEFT_WIDTH)
+        bar.add_column(justify="center", no_wrap=True, ratio=1)
+        bar.add_column(justify="right", no_wrap=True, width=TOPBAR_RIGHT_WIDTH)
         bar.add_row(left, center, right)
         mic = f" mic {self._recording_elapsed()}" if recording else ""
+        # The compact mirror string keeps the FULL name: it drives change
+        # detection and test assertions (semantic identity), while the
+        # render above owns the visual budget.
         text = (
-            f"◆ REPLICANTA │ {self._org_name()}{self._module_badges()} · {word} · {mood} · "
+            f"◆ REPLICANTA │ {self._org_name()}{badges} · {word} · {mood} · "
             f"a/c/i {s.arousal:.2f}/{s.coherence:.2f}/{s.incoherence:.2f} · "
-            f"voice {voice}{mic}{' spk' if spoken else ''} · {clock}"
+            f"voice {voice_state}{mic}{' spk' if spoken else ''} · {clock}"
         )
         self._topbar_text = text
         if text == self._rendered_topbar_text:
@@ -1347,6 +1407,12 @@ class OrganismApp(App):
         topbar = self._safe_query("#topbar", Static)
         if topbar is not None:
             topbar.update(bar)
+
+    def _topbar_name(self):
+        """Display name for the top bar, capped to TOPBAR_NAME_BUDGET
+        visible chars — the learned name is free text and would otherwise
+        shove the center/right columns."""
+        return _fit_text_budget(self._org_name(), TOPBAR_NAME_BUDGET)
 
     def _module_badges(self):
         """Glyph suffix marking the loaded capability modules (e.g. ' 🪰'),
@@ -1387,12 +1453,18 @@ class OrganismApp(App):
             if name in grouped:
                 continue
             marker = "● " if name == current else "  "
-            lv.append(ListItem(Label(f"{marker}{name}{self._badges_for_organism(name)}"), name=name))
+            label = _fit_text_budget(f"{marker}{name}{self._badges_for_organism(name)}", SIDEBAR_LABEL_BUDGET)
+            lv.append(ListItem(Label(label), name=name))
         for gname in sorted(groups):
-            lv.append(ListItem(Label(f"▾ {gname}"), name=f"group:{gname}"))
+            header = _fit_text_budget(f"▾ {gname}", SIDEBAR_LABEL_BUDGET)
+            lv.append(ListItem(Label(header), name=f"group:{gname}"))
             for member in groups[gname]:
                 marker = "● " if member == current else "  "
-                lv.append(ListItem(Label(f"   {marker}{member}{self._badges_for_organism(member)}"), name=member))
+                label = _fit_text_budget(
+                    f"   {marker}{member}{self._badges_for_organism(member)}",
+                    SIDEBAR_LABEL_BUDGET - 3,  # nested rows carry a 3-space indent
+                )
+                lv.append(ListItem(Label(label), name=member))
 
     def on_list_view_selected(self, event):
         """Sidebar selection (left click or Enter) swaps to the organism
@@ -1871,11 +1943,18 @@ class OrganismApp(App):
                 event.prevent_default()
                 event.stop()
                 return
+            if len(self.screen_stack) > 1:
+                # A modal/overlay owns the keyboard (palette, rename,
+                # confirm, modules, group menus): Tab is its business —
+                # never pull focus onto the hidden main-screen chat input.
+                return
             if self.chat_input is None:
                 return
-            if not self.chat_input.has_focus:
+            if self.app.focused is not self.chat_input:
                 # Tab lands in the chat line: never let Textual's default
-                # focus cycling strand typing on an invisible widget.
+                # focus cycling strand typing on an invisible widget. (The
+                # has_focus reactive goes stale across stacked screens, so
+                # compare against the app's real focus.)
                 self.chat_input.focus()
             else:
                 value = self.chat_input.value
@@ -1899,12 +1978,13 @@ class OrganismApp(App):
             event.prevent_default()
             event.stop()
         elif event.key in ("up", "down"):
-            if self.chat_input is None or not self.chat_input.has_focus:
-                return
-            if isinstance(self.screen, DoomScreen):
-                # on the DOOM overlay the arrows drive the player (doom_up/
-                # doom_down bindings); prevent_default here would swallow
-                # them, so leave the key to binding dispatch
+            if self.chat_input is None or self.app.focused is not self.chat_input:
+                # On the DoomScreen the overlay's own bindings drive the
+                # player; on modals the modal owns the keys. Returning
+                # without prevent_default matters: it would suppress the
+                # binding dispatch in App._on_key (the has_focus reactive
+                # goes stale across stacked screens, so compare the app's
+                # real focus, never the reactive).
                 return
             delta = -1 if event.key == "up" else 1
             value = self._browse_history(delta)

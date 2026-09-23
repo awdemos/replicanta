@@ -21,6 +21,12 @@ COMMANDS = [
     ("/think", "/think", "narrate thoughts now", "State"),
     ("/self-talk", "/self-talk", "let the organism speak to itself", "State"),
     (
+        "/actuation",
+        "/actuation",
+        "toggle entities acting on their own utterances",
+        "State",
+    ),
+    (
         "/persona",
         "/persona [name|off|list]",
         "activate, clear, or list personas",
@@ -402,6 +408,21 @@ def _cmd_self_talk(app, parts):
         app._append_log("self-talk off", STYLE_DIM)
 
 
+def _cmd_actuation(app, parts):
+    """Flip the persisted entity-actuation flag. getattr-defaults to True so
+    the toggle keeps working even if the organism schema predates the flag;
+    plain assignment persists it once the schema knows the field."""
+    enabled = not getattr(app.org, "entity_actuation", True)
+    app.org.entity_actuation = enabled
+    if enabled:
+        app._append_log(
+            "entity actuation ON — entities may move/game from their own utterances",
+            STYLE_DIM,
+        )
+    else:
+        app._append_log("entity actuation OFF — entities only act on direct commands", STYLE_DIM)
+
+
 def _cmd_approve(app, parts):
     entry = extensions.approve(app.org.dir_path / "artifacts" / "extensions.json")
     if entry:
@@ -483,6 +504,7 @@ COMMAND_HANDLERS = {
     "/stats": _cmd_stats,
     "/think": _cmd_think,
     "/self-talk": _cmd_self_talk,
+    "/actuation": _cmd_actuation,
     "/persona": _cmd_persona,
     "/auto-apply": _cmd_auto_apply,
     "/visualize": _cmd_visualize,

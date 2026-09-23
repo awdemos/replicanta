@@ -318,6 +318,100 @@ def test_status_line_shows_identity_and_state(nursery_app):
     asyncio.run(check())
 
 
+def test_top_bar_name_capped_at_fixed_budget(nursery_app, monkeypatch):
+    """Regression ("blue bars move"): the learned name is free text with
+    no cap, and a long name shoved the center/right grid cells — sometimes
+    wrapping the bar onto a second line. The displayed name is truncated
+    to a fixed budget and the outer columns are pinned, so the center
+    readout stays put and the bar stays one row tall."""
+    from replicanta.tui import TOPBAR_NAME_BUDGET
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test(size=(120, 48)):
+            offsets = []
+            for name in ("bob", "x" * 60):
+                monkeypatch.setattr(app, "_org_name", lambda name=name: name)
+                app.refresh_top_bar()
+                text = renderable_text(app.query_one("#topbar", Static), width=120).rstrip("\n")
+                assert "\n" not in text, f"top bar wrapped with name {name!r}"
+                assert "a/c/i" in text and "UTC" in text
+                offsets.append(text.index("a/c/i"))
+            assert "x" * 60 not in text
+            assert "x" * (TOPBAR_NAME_BUDGET - 1) + "…" in text
+            assert offsets[0] == offsets[1], f"center column moved: {offsets}"
+
+    asyncio.run(check())
+
+
+def test_top_bar_mirror_uses_stable_voice_string(nursery_app):
+    """Regression: the change-detection string interpolated the voice
+    MODULE (f"voice {voice}"), embedding a memory address-ish repr in the
+    mirror text. It must carry the voice state string."""
+    from replicanta import voice
+
+    app = nursery_app
+
+    async def check():
+        async with app.run_test():
+            app.refresh_top_bar()
+            assert f"voice {voice.status()}" in app._topbar_text
+            assert "<module" not in app._topbar_text
+
+    asyncio.run(check())
+
+
+def test_sidebar_labels_capped_to_one_line(nursery_app):
+    """Long names must be truncated to the sidebar budget — an overflowing
+    label would wrap its row onto a second line and misalign the list."""
+    from replicanta.tui import SIDEBAR_LABEL_BUDGET
+
+    app = nursery_app
+    long_name = "pneumonoultramicroscopicsilicovolcanoconiosis"  # 45 chars
+    (app.root / "organisms" / long_name).mkdir(parents=True)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            lv = app.query_one("#sidebar-list", ListView)
+            labels = [renderable_text(item.children[0]).rstrip("\n") for item in lv.children]
+            for label in labels:
+                assert len(label) <= SIDEBAR_LABEL_BUDGET, repr(label)
+            long_row = next(label for label in labels if label.lstrip().startswith("p"))
+            assert long_row.endswith("…")
+            assert long_name not in long_row
+
+    asyncio.run(check())
+
+
+def test_sidebar_group_member_labels_capped_with_indent(nursery_app, monkeypatch):
+    """Nested (group member) rows carry a 3-space indent, so their budget
+    is smaller; the cap still applies (badges included)."""
+    from replicanta import nursery as nursery_mod
+
+    from replicanta.tui import SIDEBAR_LABEL_BUDGET
+
+    app = nursery_app
+    _make_fern(app)
+    nursery_mod.create_group(app.root, "thinkers")
+    nursery_mod.assign(app.root, "fern", "thinkers")
+    # 6 badges × 2 chars = 12; "   ● fern" is 9 → 21 > 19, so the cap bites
+    monkeypatch.setattr(app, "_badges_for_organism", lambda name: " 🪰 🦾 👁 💀 🧠 🦿")
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._refresh_sidebar()
+            await pilot.pause()
+            lv = app.query_one("#sidebar-list", ListView)
+            member = next(renderable_text(item.children[0]).rstrip("\n") for item in lv.children if item.name == "fern")
+            assert len(member) <= SIDEBAR_LABEL_BUDGET - 3, repr(member)
+            assert member.endswith("…")
+
+    asyncio.run(check())
+
+
 def test_ctrl_b_toggles_sidebar(nursery_app):
     app = nursery_app
 
@@ -347,6 +441,34 @@ def test_narrow_terminal_hides_sidebar_on_mount(nursery_app):
             await pilot.press("ctrl+b")
             await pilot.pause()
             assert sidebar.styles.display == "block"
+
+    asyncio.run(check())
+
+
+def test_narrow_mode_helper_units():
+    """The narrow-mode predicate is the single source for mount + resize."""
+    from replicanta.tui import NARROW_WIDTH, _narrow_mode
+
+    assert _narrow_mode(NARROW_WIDTH - 1) is True
+    assert _narrow_mode(NARROW_WIDTH) is False
+    assert _narrow_mode(NARROW_WIDTH + 40) is False
+
+
+def test_resizing_terminal_reflows_sidebar(nursery_app):
+    """Narrow mode is re-evaluated on resize: shrinking hides the sidebar,
+    growing brings it back — no restart needed."""
+    app = nursery_app
+
+    async def check():
+        async with app.run_test(size=(120, 40)) as pilot:
+            sidebar = app.query_one("#sidebar")
+            assert sidebar.styles.display != "none"
+            await pilot.resize_terminal(60, 24)
+            await pilot.pause()
+            assert sidebar.styles.display == "none"
+            await pilot.resize_terminal(120, 40)
+            await pilot.pause()
+            assert sidebar.styles.display != "none"
 
     asyncio.run(check())
 
@@ -447,6 +569,49 @@ def test_cells_section_click_on_empty_cell_does_nothing(nursery_app):
             assert not isinstance(app.screen, CellDetailScreen)
 
     asyncio.run(check())
+
+
+def test_actuation_command_toggles_with_default_on(nursery_app):
+    """/actuation flips the persisted entity_actuation flag (default ON).
+    The attribute may not exist on organisms that predate the schema, so
+    the first toggle treats a missing flag as ON and lands it OFF."""
+    app = nursery_app
+    assert getattr(app.org, "entity_actuation", True) is True
+
+    async def check():
+        async with app.run_test():
+            app.dispatch_command("/actuation")
+            assert app.org.entity_actuation is False
+            app.dispatch_command("/actuation")
+            assert app.org.entity_actuation is True
+
+    asyncio.run(check())
+
+
+def test_actuation_command_logs_clear_status(nursery_app):
+    app = nursery_app
+
+    async def check():
+        async with app.run_test():
+            app.dispatch_command("/actuation")
+            app.dispatch_command("/actuation")
+            from textual.widgets import RichLog
+
+            lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
+            assert any("entity actuation OFF" in line for line in lines), lines
+            assert any("entity actuation ON — entities may move/game" in line for line in lines), lines
+
+    asyncio.run(check())
+
+
+def test_actuation_registered_for_palette_and_api():
+    """The COMMANDS table feeds the palette and /api/commands, so the
+    toggle must be listed with a dispatch handler."""
+    from replicanta import tui_commands
+
+    entry = next((c for c in tui_commands.COMMANDS if c[0] == "/actuation"), None)
+    assert entry is not None, "/actuation missing from COMMANDS"
+    assert tui_commands.COMMAND_HANDLERS["/actuation"] is not None
 
 
 # -- group chat (F-key-free wiring) ------------------------------------------

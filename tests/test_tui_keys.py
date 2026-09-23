@@ -14,7 +14,6 @@ from replicanta.tui import (
     MutationBanner,
     OrganismApp,
     RenameScreen,
-    SlashCommands,
     Toast,
 )
 
@@ -244,14 +243,13 @@ def test_f10_binding_quits_not_doom(headless_app):
 
 
 def test_doom_arrows_drive_doom_only_on_the_overlay(headless_app, monkeypatch):
-    """Arrows must reach the doom bindings only while the DoomScreen overlay
-    is up; everywhere else they browse chat history (on_key used to
-    prevent_default them away, and the old gate queried the removed tabs)."""
+    """Arrows must reach the game only while the DoomScreen overlay is up
+    (now via DoomScreen's own bindings); everywhere else they browse chat
+    history — the app no longer special-cases them at all."""
 
     app = headless_app
     doom_calls = []
-    monkeypatch.setattr(app, "action_doom_up", lambda: doom_calls.append("up"))
-    monkeypatch.setattr(app, "action_doom_down", lambda: doom_calls.append("down"))
+    monkeypatch.setattr(app._doom, "key_command", lambda cmd: doom_calls.append(cmd))
 
     async def check():
         async with app.run_test() as pilot:
@@ -270,20 +268,37 @@ def test_doom_arrows_drive_doom_only_on_the_overlay(headless_app, monkeypatch):
             await pilot.pause()
             await pilot.press("up")
             await pilot.pause()
-            assert doom_calls == ["up"], doom_calls
+            assert doom_calls == ["w"], doom_calls
             assert app.chat_input.value == "", "chat history was browsed on the overlay"
             await pilot.press("down")
             await pilot.pause()
-            assert doom_calls == ["up", "down"], doom_calls
+            assert doom_calls == ["w", "s"], doom_calls
+            await pilot.press("space")
+            await pilot.pause()
+            assert doom_calls == ["w", "s", "shoot"], doom_calls
             # leaving the overlay restores history browsing
             app.pop_screen()
             await pilot.pause()
             await pilot.press("up")
             await pilot.pause()
             assert app.chat_input.value == "an old line"
-            assert doom_calls == ["up", "down"], doom_calls
+            assert doom_calls == ["w", "s", "shoot"], doom_calls
 
     asyncio.run(check())
+
+
+def test_doom_game_keys_live_on_the_overlay_not_the_app(headless_app):
+    """Regression: arrows/space used to be app-level bindings that only
+    worked because the controller re-checked the screen. They are
+    DoomScreen bindings now; the app binds none of them."""
+
+    app = headless_app
+    keys = app._bindings.key_to_bindings
+    for gone in ("up", "down", "left", "right", "space", "escape"):
+        assert gone not in keys, f"app still binds {gone} (doom key leak)"
+    doom_actions = [b.action for b in DoomScreen.BINDINGS]
+    for move in ("press_key('w')", "press_key('s')", "press_key('a')", "press_key('d')", "press_key('shoot')"):
+        assert move in doom_actions, f"DoomScreen lost {move}"
 
 
 # -- regression: modal inputs must not leak into chat --------------------------
@@ -343,38 +358,127 @@ def test_modal_input_changed_ignores_chat_state(headless_app, monkeypatch):
     asyncio.run(check())
 
 
-# -- regression: command palette -----------------------------------------------
-
-
-def test_palette_no_arg_command_runs(headless_app):
-    """Picking a no-arg command must actually run it. Input.action_submit()
-    is async in Textual 8, so calling it synchronously discarded the
-    coroutine; SlashCommands posts Input.Submitted instead."""
+def test_tab_on_modal_does_not_focus_hidden_chat(headless_app):
+    """Regression: Tab with a modal on top used to pull focus onto the
+    main screen's (invisible) chat input whenever that input was not
+    focused — e.g. the user clicked the transcript, then right-clicked an
+    organism to open the rename prompt. Tab on a modal is the modal's
+    business: focus must stay inside the modal."""
 
     app = headless_app
 
     async def check():
         async with app.run_test() as pilot:
-            SlashCommands(pilot.app.screen)._run("/stats")
+            app.chat_input.focus()
             await pilot.pause()
-            lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
-            assert any("stats: beliefs=" in line for line in lines), lines
-            assert app.chat_input.value == "", "palette pick left the command in the input"
+            app.set_focus(None)  # the user clicked the transcript first
+            await pilot.pause()
+            assert not app.chat_input.has_focus
+            app.push_screen(RenameScreen("default"))
+            await pilot.pause()
+            assert isinstance(app.screen, RenameScreen)
+            prompt = app.screen.query_one("#rename-input", Input)
+            assert app.focused is prompt
+            await pilot.press("tab")
+            await pilot.pause()
+            assert app.focused is prompt, "Tab leaked focus to the hidden chat input"
+            assert app.chat_input.value == "", "Tab ran chat completion on the hidden input"
+            assert app._completion_matches is None
 
     asyncio.run(check())
 
 
-def test_palette_arg_command_only_fills_input(headless_app):
-    """Commands with placeholder args still only fill the chat line —
-    submitting the placeholder literally would do nonsense."""
+# -- regression: command palette -----------------------------------------------
+
+
+def test_palette_enter_runs_no_arg_command(headless_app):
+    """Enter in the palette filter box must run the first matching no-arg
+    command (the palette input used to have no submit handler anywhere,
+    making Enter a dead key)."""
 
     app = headless_app
 
     async def check():
         async with app.run_test() as pilot:
-            SlashCommands(pilot.app.screen)._run("/chaos 0..1")
+            await pilot.press("ctrl+p")
             await pilot.pause()
-            assert app.chat_input.value == "/chaos 0..1"
+            assert isinstance(pilot.app.screen, CommandPalette)
+            await pilot.press("slash", "s", "t", "a")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(pilot.app.screen, CommandPalette), "Enter did not close the palette"
+            lines = [str(line.text) for line in app.query_one("#dreams", RichLog).lines]
+            assert any("stats: beliefs=" in line for line in lines), lines
+            assert app.chat_input.value == "", "palette run left the command in the input"
+            assert app.chat_input.has_focus
+
+    asyncio.run(check())
+
+
+def test_palette_enter_only_fills_input_for_arg_command(headless_app):
+    """Enter on a command with placeholder args fills the chat line instead
+    of running it — submitting '/chaos 0..1' literally would do nonsense."""
+
+    app = headless_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            await pilot.press("slash", "c", "h", "a", "o")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(pilot.app.screen, CommandPalette)
+            assert app.chat_input.value == "/chaos "
+            assert app.chat_input.has_focus
+
+    asyncio.run(check())
+
+
+def test_palette_enter_with_no_matches_stays_open(headless_app):
+    """Enter with an empty filter result must not dispatch anything or
+    close the palette on a bogus pick."""
+
+    app = headless_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            await pilot.press(*"xyzxyz")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(pilot.app.screen, CommandPalette), "palette closed on no-match Enter"
+            assert app.chat_input.value == ""
+
+    asyncio.run(check())
+
+
+def test_palette_arrows_select_row_for_enter(headless_app):
+    """↓ from the filter box highlights the next command row (skipping
+    category headers); Enter runs THAT command, not the first filter
+    match."""
+
+    app = headless_app
+
+    async def check():
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            # "cam" matches exactly two commands, in COMMANDS order:
+            # /look ("grab a camera frame…") then /camera.
+            await pilot.press("c", "a", "m")
+            await pilot.pause()
+            await pilot.press("down")  # /look
+            await pilot.pause()
+            await pilot.press("down")  # /camera
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.chat_input.value == "/camera ", app.chat_input.value
             assert app.chat_input.has_focus
 
     asyncio.run(check())
