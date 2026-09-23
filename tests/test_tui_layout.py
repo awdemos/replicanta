@@ -1284,7 +1284,7 @@ def test_respond_watchdog_releases_stuck_flag(nursery_app, monkeypatch):
     async def check():
         async with app.run_test() as pilot:
             app._responding = True
-            app._respond_started = time_mod.monotonic() - 700  # wedged long ago
+            app._respond_started = time_mod.monotonic() - 1900  # wedged long ago
             app._maybe_respond("anyone home?")  # queued during the wedge
             app._respond_watchdog()
             await pilot.pause()

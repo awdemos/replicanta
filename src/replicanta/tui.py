@@ -2920,7 +2920,10 @@ class OrganismApp(App):
         self._responding = False
         self._drain_queued_prompt()
 
-    RESPOND_WATCHDOG_SECONDS = 600.0  # OLLAMA_TIMEOUT (240s) plus debate headroom
+    RESPOND_WATCHDOG_SECONDS = 1800.0  # a debate is up to 5 sequential calls
+    # (OLLAMA_TIMEOUT 240s each), so a healthy generation can run far past
+    # ten minutes on a slow local model — only a truly never-returning
+    # worker should trip this.
 
     def _respond_watchdog(self):
         """Release a STUCK busy flag. A generation that has held it far

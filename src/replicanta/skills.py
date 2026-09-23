@@ -141,11 +141,16 @@ class SkillStore:
         re-proposes the same skill under slightly different names or
         wordings each reflection cycle ("async call" / "async execution");
         catching the variant here keeps the store — and the prompt's
-        top-N skill slots — from clogging with near-copies. Matches on
-        the slug, a similar name, or a near-verbatim `when` trigger."""
+        top-N skill slots — from clogging with near-copies.
+
+        A fold needs real evidence of sameness: a strong name match, or a
+        verbatim `when` trigger PLUS a similar `how`. The old trigger-only
+        check misfolded distinct techniques that share a broad trigger —
+        every doom skill says "when playing doom"."""
         target = slug(name)
         name_words = _words(name)
-        when_words = _words(when)
+        how_words = _words(how)
+        when_norm = " ".join(str(when or "").lower().split())
         for skill in self.list():
             if slug(skill.name) == target:
                 return skill
@@ -154,11 +159,12 @@ class SkillStore:
                 shared = name_words & existing_name
                 if len(shared) >= 2 and len(shared) / len(name_words | existing_name) >= 0.5:
                     return skill
-            existing_when = _words(skill.when)
-            if when_words and existing_when:
-                union = when_words | existing_when
-                if len(when_words & existing_when) / len(union) >= 0.9:
-                    return skill
+            if when_norm and when_norm == " ".join(skill.when.lower().split()):
+                existing_how = _words(skill.how)
+                if how_words and existing_how:
+                    union = how_words | existing_how
+                    if len(how_words & existing_how) / len(union) >= 0.3:
+                        return skill
         return None
 
     def list(self):

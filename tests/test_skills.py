@@ -215,7 +215,7 @@ def test_find_duplicate_matches_slug_similar_name_and_verbatim_when(tmp_path):
         skills.Skill(
             name="async call",
             when="runs are slow and asynchronous",
-            how="use Lua calls to initiate runs asynchronously",
+            how="use Lua calls to initiate runs asynchronously with brain.run",
         )
     )
     org.skills.save(skills.Skill(name="anchor in frame", when="unsure", how="ground myself"))
@@ -223,13 +223,38 @@ def test_find_duplicate_matches_slug_similar_name_and_verbatim_when(tmp_path):
     assert org.skills.find_duplicate("async call", "anything", "anything").name == "async call"
     # paraphrased name sharing >=2 words ("anchor in frame" / "anchor the frame")
     assert org.skills.find_duplicate("anchor the frame", "unrelated", "unrelated").name == "anchor in frame"
-    # same trigger, different name entirely (the observed proliferation)
+    # verbatim trigger + a similar how (the observed async-call/async-execution case)
     assert (
-        org.skills.find_duplicate("connectome run processing", "runs are slow and asynchronous", "x").name
+        org.skills.find_duplicate(
+            "connectome run processing",
+            "runs are slow and asynchronous",
+            "use Lua calls to initiate runs asynchronously with brain.run",
+        ).name
         == "async call"
     )
     # genuinely distinct skill: no fold
     assert org.skills.find_duplicate("comfort", "anxious", "breathe") is None
+
+
+def test_find_duplicate_keeps_distinct_game_techniques_apart(tmp_path):
+    """Regression: every doom skill shares the broad trigger 'when playing
+    doom', and the old trigger-only check folded them together — shooting
+    and strafing merged into one mangled skill. Distinct hows must not
+    fold even with an identical trigger."""
+    org = _organism(tmp_path)
+    org.skills.save(
+        skills.Skill(
+            name="shoot demons in doom",
+            when="when playing doom",
+            how="line up the demon and doom.command shoot",
+        )
+    )
+    dup = org.skills.find_duplicate(
+        "strafe doom",
+        "when playing doom",
+        "sidestep with doom.command q to dodge fire",
+    )
+    assert dup is None  # same trigger, genuinely different technique
 
 
 def test_merge_how_keeps_subset_and_appends_new_content():
@@ -260,7 +285,7 @@ def test_reflect_folds_renamed_duplicate_into_original(tmp_path, monkeypatch):
         lambda *a, **k: (
             "skill: async execution\n"
             "when: runs are slow and asynchronous\n"
-            "how: use Lua commands to simulate sync operations"
+            "how: use Lua calls to initiate runs asynchronously, then poll the flybrain memory for the result"
         ),
     )
     result = voice.reflect(org)
