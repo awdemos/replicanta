@@ -8,7 +8,7 @@ narration imports neither."""
 from replicanta import extensions, learning, llmclient, narration, telemetry
 from replicanta.arena import ThoughtArena
 from replicanta.narration import dedup_emerge, state_snapshot
-from replicanta.skills import Skill
+from replicanta.skills import Skill, merge_how
 
 
 @telemetry.span("voice.emerge")
@@ -145,6 +145,16 @@ def reflect(org, model=None, timeout=None, rng=None):
         return {"action": "none"}
     if result["action"] == "patched" and store.get(result["name"]) is None:
         result["action"] = "created"
+    if result["action"] == "created":
+        # the entity often re-proposes a skill it already has under a
+        # slightly different name or wording ("async call" / "async
+        # execution"); fold the variant into the original instead of
+        # letting near-copies clog the store and the prompt's skill slots
+        duplicate = store.find_duplicate(result["name"], result.get("when", ""), result.get("how", ""))
+        if duplicate is not None:
+            result["action"] = "patched"
+            result["name"] = duplicate.name
+            result["how"] = merge_how(duplicate.how, result["how"])
     cycle = org.store.cycle
     store.save(
         Skill(

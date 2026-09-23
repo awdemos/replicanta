@@ -209,6 +209,83 @@ def test_reflect_patches_existing_skill(tmp_path, monkeypatch):
     assert org.skills.get("comfort").how == "breathe slowly"
 
 
+def test_find_duplicate_matches_slug_similar_name_and_verbatim_when(tmp_path):
+    org = _organism(tmp_path)
+    org.skills.save(
+        skills.Skill(
+            name="async call",
+            when="runs are slow and asynchronous",
+            how="use Lua calls to initiate runs asynchronously",
+        )
+    )
+    org.skills.save(skills.Skill(name="anchor in frame", when="unsure", how="ground myself"))
+    # same slug
+    assert org.skills.find_duplicate("async call", "anything", "anything").name == "async call"
+    # paraphrased name sharing >=2 words ("anchor in frame" / "anchor the frame")
+    assert org.skills.find_duplicate("anchor the frame", "unrelated", "unrelated").name == "anchor in frame"
+    # same trigger, different name entirely (the observed proliferation)
+    assert (
+        org.skills.find_duplicate("connectome run processing", "runs are slow and asynchronous", "x").name
+        == "async call"
+    )
+    # genuinely distinct skill: no fold
+    assert org.skills.find_duplicate("comfort", "anxious", "breathe") is None
+
+
+def test_merge_how_keeps_subset_and_appends_new_content():
+    assert skills.merge_how("breathe slowly", "breathe") == "breathe slowly"
+    merged = skills.merge_how(
+        "use Lua calls to initiate runs asynchronously",
+        "run brain.run first to warm the connectome",
+    )
+    assert merged.startswith("use Lua calls")
+    assert "Also: run brain.run first" in merged
+
+
+def test_reflect_folds_renamed_duplicate_into_original(tmp_path, monkeypatch):
+    """Regression: the entity re-proposes the same skill under a new name
+    each cycle (async call -> async execution -> connectome run
+    processing), clogging the store with near-copies. A created skill
+    matching an existing one must patch the original, not fork it."""
+    org = _organism(tmp_path)
+    org.skills.save(
+        skills.Skill(
+            name="async call",
+            when="runs are slow and asynchronous",
+            how="use Lua calls to initiate runs asynchronously",
+        )
+    )
+    patch_generate(
+        monkeypatch,
+        lambda *a, **k: (
+            "skill: async execution\n"
+            "when: runs are slow and asynchronous\n"
+            "how: use Lua commands to simulate sync operations"
+        ),
+    )
+    result = voice.reflect(org)
+    assert result["action"] == "patched"
+    assert result["name"] == "async call"
+    assert org.skills.get("async execution") is None
+    folded = org.skills.get("async call")
+    assert "Lua calls" in folded.how  # original guidance kept
+    assert "Also:" in folded.how  # the variant's new wording folded in
+    assert len(org.skills.list()) == 1  # no fork
+
+
+def test_reflect_still_creates_genuinely_new_skill(tmp_path, monkeypatch):
+    org = _organism(tmp_path)
+    org.skills.save(skills.Skill(name="comfort", when="anxious", how="breathe", created_cycle=1, updated_cycle=1))
+    patch_generate(
+        monkeypatch,
+        lambda *a, **k: "skill: rain talk\nwhen: the user mentions rain\nhow: connect it to something I know",
+    )
+    result = voice.reflect(org)
+    assert result["action"] == "created"
+    assert org.skills.get("rain talk") is not None
+    assert len(org.skills.list()) == 2
+
+
 def test_reflect_nothing_writes_no_file(tmp_path, monkeypatch):
     org = _organism(tmp_path)
     patch_generate(monkeypatch, lambda *a, **k: "nothing")

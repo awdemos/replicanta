@@ -48,6 +48,23 @@ def _words(text):
     return set(re.findall(r"[a-z]+", text.lower())) - _STOP
 
 
+def merge_how(existing, new, cap=400):
+    """Fold a re-proposed skill's guidance into the original. Content the
+    original already covers keeps it unchanged; genuinely new guidance is
+    appended (never silently dropped), so a duplicate proposal enriches
+    the one skill file instead of forking it."""
+    existing = (existing or "").strip()
+    new = (new or "").strip()
+    if not existing or not new:
+        return existing or new
+    new_words, existing_words = _words(new), _words(existing)
+    novel = new_words - existing_words
+    if not new_words or len(novel) <= max(1, len(new_words) // 3):
+        return existing  # the new how adds at most a word or two
+    merged = f"{existing.rstrip('.')}. Also: {new}"
+    return merged if len(merged) <= cap else existing
+
+
 class SkillStore:
     """A directory of skill files; the index is derived by scanning."""
 
@@ -118,6 +135,31 @@ class SkillStore:
         if not path.exists():
             return None
         return self._parse(path.read_text())
+
+    def find_duplicate(self, name, when="", how=""):
+        """An existing skill that already covers this proposal. The entity
+        re-proposes the same skill under slightly different names or
+        wordings each reflection cycle ("async call" / "async execution");
+        catching the variant here keeps the store — and the prompt's
+        top-N skill slots — from clogging with near-copies. Matches on
+        the slug, a similar name, or a near-verbatim `when` trigger."""
+        target = slug(name)
+        name_words = _words(name)
+        when_words = _words(when)
+        for skill in self.list():
+            if slug(skill.name) == target:
+                return skill
+            existing_name = _words(skill.name)
+            if name_words and existing_name:
+                shared = name_words & existing_name
+                if len(shared) >= 2 and len(shared) / len(name_words | existing_name) >= 0.5:
+                    return skill
+            existing_when = _words(skill.when)
+            if when_words and existing_when:
+                union = when_words | existing_when
+                if len(when_words & existing_when) / len(union) >= 0.9:
+                    return skill
+        return None
 
     def list(self):
         if not self.dir_path.is_dir():
