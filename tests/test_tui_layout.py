@@ -1181,3 +1181,68 @@ def test_doom_frame_keeps_fixed_width_and_scrolls(nursery_app):
             assert type(app.screen).__name__ == "Screen"
 
     asyncio.run(check())
+
+
+def test_user_chat_while_busy_is_queued_then_answered(nursery_app):
+    """Forced intervention: a user line that arrives while the entity is
+    mid-thought (chat reply or doom auto-play turn) must not vanish — it is
+    held and answered the moment the current thought lands."""
+    app = nursery_app
+    calls = []
+    app._respond = lambda text, *, quick=False, temperature=None: calls.append(text)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._responding = True  # entity mid-thought
+            app._maybe_respond("hello?")
+            await pilot.pause()
+            assert calls == []  # not answered yet, but not dropped either
+            assert app._queued_prompt is not None
+            app._responding = False  # the in-flight thought lands
+            app._drain_queued_prompt()
+            await pilot.pause()
+            assert calls == ["hello?"]
+
+    asyncio.run(check())
+
+
+def test_queued_prompt_keeps_latest_only(nursery_app):
+    """While busy, only the most recent user line is held — answering a
+    stale backlog would read worse than answering the latest intent."""
+    app = nursery_app
+    calls = []
+    app._respond = lambda text, *, quick=False, temperature=None: calls.append(text)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._responding = True
+            app._maybe_respond("first")
+            app._maybe_respond("second")
+            await pilot.pause()
+            app._responding = False
+            app._drain_queued_prompt()
+            await pilot.pause()
+            assert calls == ["second"]
+
+    asyncio.run(check())
+
+
+def test_doom_turn_done_drains_queued_prompt(nursery_app):
+    """The end of a doom auto-play turn answers a user line queued during
+    the generation — a running game must never swallow chat."""
+    app = nursery_app
+    calls = []
+    app._respond = lambda text, *, quick=False, temperature=None: calls.append(text)
+
+    async def check():
+        async with app.run_test() as pilot:
+            app._responding = True  # the turn held the flag
+            app._maybe_respond("are you there?")
+            app._doom._turn_done()
+            await pilot.pause()
+            # the queued line is answered; the flag is held again by that
+            # answer's own generation
+            assert calls == ["are you there?"]
+            assert app._responding is True
+
+    asyncio.run(check())

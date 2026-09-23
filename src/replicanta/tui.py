@@ -942,6 +942,8 @@ class OrganismApp(App):
         self.chat_input = None
         self._narrating = False
         self._responding = False
+        # user line held while the entity is mid-thought (forced intervention)
+        self._queued_prompt = None
         self._completion_matches = None
         self._completion_index = 0
         self._chat_history = []
@@ -1088,6 +1090,8 @@ class OrganismApp(App):
         # stale workers reset these in their finally blocks anyway; clear
         # them so the new organism is never blocked by the old one's debate
         self._narrating = self._responding = self._self_talking = False
+        # the queued line belonged to the old conversation — drop it
+        self._queued_prompt = None
         self.query_one("#dreams", RichLog).clear()
         self._pending_hide()
         self._show_org()
@@ -2738,10 +2742,30 @@ class OrganismApp(App):
         self._maybe_respond(text)
 
     def _maybe_respond(self, text, *, quick=False, temperature=None):
-        if not self._responding:
-            self._responding = True
-            self.refresh_status()
-            self._respond(text, quick=quick, temperature=temperature)
+        if self._responding:
+            # Forced intervention: the entity is mid-thought (a chat reply
+            # or a doom auto-play turn) — never drop user input. Hold the
+            # latest line and answer it the moment the current thought
+            # lands, ahead of background musings and auto-play.
+            first_in_line = self._queued_prompt is None
+            self._queued_prompt = (text, quick, temperature)
+            if first_in_line:
+                self._append_log("org is thinking — your message is next", STYLE_DIM)
+            return
+        self._responding = True
+        self.refresh_status()
+        self._respond(text, quick=quick, temperature=temperature)
+
+    def _drain_queued_prompt(self):
+        """Answer a user line that queued while the entity was busy. Runs
+        on the UI thread at the end of every reply/turn worker; a swap
+        clears the queue, so nothing stale can cross organisms."""
+        queued = self._queued_prompt
+        self._queued_prompt = None
+        if queued is None:
+            return
+        text, quick, temperature = queued
+        self._maybe_respond(text, quick=quick, temperature=temperature)
 
     @work(thread=True)
     def _respond(self, text, *, quick=False, temperature=None):
@@ -2762,6 +2786,12 @@ class OrganismApp(App):
         finally:
             self.call_from_thread(self.clear_activity)
             self._responding = False
+        # A user line queued while this reply generated goes next — marshal
+        # onto the UI thread like the delivery below (direct call in tests).
+        try:
+            self.call_from_thread(self._drain_queued_prompt)
+        except RuntimeError:
+            self._drain_queued_prompt()
         if reply is not None and org is self.org:
             # If the entity is in the middle of a doom game, show its thinking
             # in the chat log, execute any doom.command line, and refresh the

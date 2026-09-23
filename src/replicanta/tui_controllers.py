@@ -1014,8 +1014,11 @@ class DoomController:
             self._call_ui(self._turn_done)
 
     def _turn_done(self):
-        """UI-thread finally: release the in-flight flag."""
+        """UI-thread finally: release the in-flight flag, then answer any
+        user line that queued up while the turn generated (chat input is
+        never dropped just because a game is running)."""
         self._app._responding = False
+        self._app._drain_queued_prompt()
 
     def _call_ui(self, fn, *args, **kwargs):
         """Marshal onto the UI thread; fall back to a direct call when the

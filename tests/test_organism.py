@@ -1495,6 +1495,18 @@ def test_tui_swap_works_while_busy(monkeypatch, tmp_path):
     assert app._responding is False  # flags reset for the new org
 
 
+def test_tui_swap_clears_queued_prompt(monkeypatch, tmp_path):
+    """A user line queued for the old organism must not be answered by the
+    new one after a swap."""
+    app, _root, _logged = _nursery_app(monkeypatch, tmp_path)
+    app._responding = True
+    app._maybe_respond("old conversation line")
+    assert app._queued_prompt is not None
+    app.dispatch_command("/new fern")
+    assert app.org.dir_path.name == "fern"
+    assert app._queued_prompt is None
+
+
 def test_tui_voice_toggles_speech(monkeypatch, tmp_path):
     """`/voice` flips the spoken voice; enabling it announces itself with a
     spoken greeting (patched out here)."""
