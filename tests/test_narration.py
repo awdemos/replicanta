@@ -866,6 +866,17 @@ def test_task_focused_reflect_keeps_the_format_contract(tmp_path):
     assert "Answer in EXACTLY one of these four" in prompt
 
 
+def test_reflect_prompt_shows_existing_skills_and_checks_first(tmp_path):
+    """Entities can only patch skills they can see. The default (task-
+    focused) prompt must list the skills they already have and tell them
+    to check that list before minting a new one."""
+    snap, _ = _persona_snapshot(tmp_path, task="reflect")
+    snap["skill_names"] = ["async call", "comfort"]
+    prompt = build_prompt(snap, task="reflect")
+    assert "skills you have: async call, comfort" in prompt
+    assert "check" in prompt and "'patch'" in prompt
+
+
 def test_task_focused_form_goal_keeps_the_format_contract(tmp_path):
     snap, _ = _persona_snapshot(tmp_path, task="form_goal")
     prompt = build_prompt(snap, task="form_goal")

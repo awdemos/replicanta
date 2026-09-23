@@ -519,9 +519,11 @@ def _lines_reflect():
         "",
         "nothing",
         "",
-        "Use 'skill' for a new technique, 'patch' to improve one you",
-        "have, 'patch-extension' when you keep hitting a capability",
-        "gap, 'nothing' when there is nothing worth keeping.",
+        "Use 'skill' ONLY for a technique you do not already have — first",
+        "check 'skills you have' above; when one is close, answer with",
+        "'patch' to improve that one instead. Use 'patch-extension' when",
+        "you keep hitting a capability gap, 'nothing' when there is nothing",
+        "worth keeping.",
     ]
 
 
@@ -684,6 +686,11 @@ def _compact_mind_lines(snapshot):
     lines.extend(_self_statement_lines(snapshot))
     if snapshot.get("goal"):
         lines.append(f"what you are trying to do: {snapshot['goal']}")
+    if snapshot.get("skill_names"):
+        # the full names, compactly — reflection must check these before
+        # minting a new skill (find_duplicate folds collisions, but the
+        # model choosing 'patch' is the better outcome)
+        lines.append("skills you have: " + ", ".join(snapshot["skill_names"]))
     return lines
 
 
