@@ -13,10 +13,18 @@ world without a bespoke Python service per integration:
 - ``ctx.http``: capped http(s) GET/POST.
 - ``ctx.fs``: filesystem access scoped to the organism directory.
 - ``ctx.json``: parse/encode plain data.
+- ``ctx.after`` / ``ctx.every``: timer threads that invoke a Lua function
+  with pcall containment (handlers run OFF the UI thread), and ``ctx.kv``:
+  file-backed per-module JSON storage scoped under the organism directory.
 
 Hook scripts (``build_hook_ctx``) deliberately receive none of these —
 bridges are a module privilege. Everything here is fail-soft: errors
 come back as ``nil, "message"`` so Lua can pcall or route them to ctx.log.
+
+Child processes carry an ``owner`` tag (the module loader's registry) so
+``shutdown_all(owner=...)`` only kills children spawned by that registry's
+modules — one organism's module reload must not reap another's games.
+``shutdown_all()`` with no owner kills everything (app exit / atexit).
 """
 
 from __future__ import annotations
@@ -71,13 +79,14 @@ def _opt(opts, key, default=None):
 class _Child:
     """One spawned process: reader thread -> on_data, watcher -> on_exit."""
 
-    def __init__(self, argv, pty, on_data, on_exit, on_gone, emit):
+    def __init__(self, argv, pty, on_data, on_exit, on_gone, emit, owner=None):
         self.argv = argv
         self.pty = pty
         self._on_data = on_data
         self._on_exit = on_exit
         self._on_gone = on_gone
         self._emit = emit
+        self.owner = owner  # registry tag: scopes shutdown_all(owner=...)
         self._proc: subprocess.Popen | None = None
         self._master: int | None = None
         self._buf = bytearray()
@@ -115,24 +124,27 @@ class _Child:
         return self._proc is not None and not self._stopped.is_set() and self._proc.poll() is None
 
     def kill(self) -> None:
+        """Ask the child to die and return IMMEDIATELY. Callers run on the UI
+        thread, so this must never block: SIGTERM goes out now and the
+        watcher thread reaps the child, escalating to SIGKILL when it
+        survives the grace window. Reaping may lag this call by up to a few
+        grace periods — callers that need the child gone must poll
+        running()/wait() themselves."""
         self._stopped.set()
         proc = self._proc
         if proc is not None and proc.poll() is None:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(proc.pid, signal.SIGTERM)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=KILL_GRACE)
-            if proc.poll() is None:
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    proc.wait(timeout=KILL_GRACE)
-        if self._master is not None:
-            with contextlib.suppress(OSError):
-                os.close(self._master)
-            self._master = None
+        self._close_master()
         with _ACTIVE_LOCK:
             _ACTIVE.discard(self)
+
+    def _close_master(self) -> None:
+        """Close the pty master exactly once (kill() and the watcher race)."""
+        master, self._master = self._master, None
+        if master is not None:
+            with contextlib.suppress(OSError):
+                os.close(master)
 
     def _release_active(self) -> None:
         """Exit bookkeeping: leave the atexit-reap set once the child has
@@ -202,7 +214,20 @@ class _Child:
         proc = self._proc
         if proc is None:
             return
-        code = proc.wait()
+        # Bounded waits, not one unbounded proc.wait(): a child that ignores
+        # SIGTERM (kill() already signaled) must be escalated to SIGKILL by
+        # THIS thread, since kill() no longer waits. Long-running children
+        # that were not asked to stop just keep timing out and re-waiting.
+        escalated = False
+        while True:
+            try:
+                code = proc.wait(timeout=KILL_GRACE)
+                break
+            except subprocess.TimeoutExpired:
+                if self._stopped.is_set() and not escalated:
+                    escalated = True
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
+                        os.killpg(proc.pid, signal.SIGKILL)
         # Take over from the reader thread so on_exit callbacks observe the
         # COMPLETE stream: stop the reader, join it, then drain to EOF.
         self._stopped.set()
@@ -216,6 +241,7 @@ class _Child:
                     if not chunk:
                         break
                     self._feed(chunk)
+        self._close_master()
         if self._on_exit is not None:
             try:
                 self._on_exit(code)
@@ -229,8 +255,9 @@ class _Child:
 class ProcessBridge:
     """ctx.process: bounded child-process management for one module."""
 
-    def __init__(self, emit=None):
+    def __init__(self, emit=None, owner=None):
         self._emit = emit or (lambda msg: None)
+        self._owner = owner  # registry tag: scopes capbridges.shutdown_all
         self._lock = threading.Lock()
         self._procs: dict[int, _Child] = {}
         self._next = 0
@@ -261,7 +288,7 @@ class ProcessBridge:
         pty = bool(_opt(opts, "pty"))
         on_data = _opt(opts, "on_data")
         on_exit = _opt(opts, "on_exit")
-        child = _Child(args, pty, on_data, on_exit, self._drop, self._emit)
+        child = _Child(args, pty, on_data, on_exit, self._drop, self._emit, owner=self._owner)
         # Register before the threads start: a fast-dying child's on_exit
         # callback must already see the process through output()/kill().
         with self._lock:
@@ -469,24 +496,185 @@ def _plain(value):
     return value
 
 
-class Bridges:
-    """The four bridges bound to one module context."""
+class TimerHandle:
+    """Cancel handle for a ctx timer. ``cancel()`` (dot or colon call) stops
+    future firings; an already-queued firing may still run once."""
 
-    def __init__(self, organism_dir=None, emit=None):
-        self.process = ProcessBridge(emit=emit)
+    def __init__(self):
+        self._cancelled = False
+        self._timer: threading.Timer | None = None
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self, *_ignored) -> None:
+        """Stop future firings. Extra args are ignored so Lua can call this
+        with either handle.cancel() or handle:cancel()."""
+        self._cancelled = True
+        timer, self._timer = self._timer, None
+        if timer is not None:
+            timer.cancel()
+
+
+class TimerBridge:
+    """ctx.after / ctx.every: timer threads for Lua modules.
+
+    Handlers run OFF the UI thread on daemon timer threads; the ``invoke``
+    callable (built by the module loader) enters the module's own Lua
+    runtime with pcall containment, so a raising handler becomes one
+    emitted error line instead of killing the timer thread or the app.
+    """
+
+    def __init__(self, invoke, emit=None):
+        self._invoke = invoke
+        self._emit = emit or (lambda msg: None)
+
+    def after(self, ms, fn) -> TimerHandle:
+        """Invoke fn once after ms milliseconds."""
+        handle = TimerHandle()
+        delay = max(0.0, float(ms)) / 1000.0
+
+        def run():
+            if handle.cancelled:
+                return
+            self._invoke(fn)
+
+        timer = threading.Timer(delay, run)
+        timer.daemon = True
+        handle._timer = timer
+        timer.start()
+        return handle
+
+    def every(self, ms, fn) -> TimerHandle:
+        """Invoke fn every ms milliseconds until the handle is cancelled."""
+        handle = TimerHandle()
+        interval = max(0.0, float(ms)) / 1000.0
+
+        def run():
+            if handle.cancelled:
+                return
+            self._invoke(fn)
+            if handle.cancelled:
+                return
+            timer = threading.Timer(interval, run)
+            timer.daemon = True
+            handle._timer = timer
+            timer.start()
+
+        timer = threading.Timer(interval, run)
+        timer.daemon = True
+        handle._timer = timer
+        timer.start()
+        return handle
+
+
+class KvBridge:
+    """ctx.kv: file-backed per-module JSON key-value storage.
+
+    Scoped to ``<organism_dir>/kv/<module>.json``: survives module reloads
+    (the file, not the module state, is the source of truth), is
+    name-spaced by module name, and never exposes a path to Lua — only the
+    get/set/delete/keys verbs. Without an organism directory it degrades to
+    an in-memory store. Values must be plain JSON data (lupa tables convert
+    recursively); dict results come back wrapped so Lua reads keys
+    naturally (see lua_sandbox.DictProxy).
+    """
+
+    def __init__(self, path, emit=None):
+        self._path = Path(path) if path else None
+        self._emit = emit or (lambda msg: None)
+        self._lock = threading.Lock()
+        self._data: dict | None = None
+
+    def _load(self) -> None:
+        if self._data is not None:
+            return
+        data = None
+        if self._path is not None and self._path.is_file():
+            try:
+                data = json.loads(self._path.read_text())
+            except (OSError, ValueError) as exc:
+                self._emit(f"kv: unreadable store, starting empty ({exc})")
+        self._data = data if isinstance(data, dict) else {}
+
+    def _save(self) -> None:
+        if self._path is None:
+            return
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            from replicanta.fileutil import atomic_write_text
+
+            atomic_write_text(self._path, json.dumps(self._data, ensure_ascii=False))
+        except OSError as exc:
+            raise ValueError(f"kv: cannot persist: {exc}") from exc
+
+    def get(self, key, default=None):
+        with self._lock:
+            self._load()
+            return _wrap_kv(self._data.get(str(key), default))
+
+    def set(self, key, value) -> bool:
+        from replicanta.lua_sandbox import to_py
+
+        with self._lock:
+            self._load()
+            self._data[str(key)] = to_py(value)
+            self._save()
+        return True
+
+    def delete(self, key) -> bool:
+        with self._lock:
+            self._load()
+            existed = str(key) in self._data
+            self._data.pop(str(key), None)
+            if existed:
+                self._save()
+        return existed
+
+    def keys(self):
+        with self._lock:
+            self._load()
+            return sorted(self._data)
+
+
+def _wrap_kv(value):
+    """Wrap dict values for Lua-friendly key access (lists stay lists —
+    lupa converts them to tables on the call boundary)."""
+    from replicanta.lua_sandbox import DictProxy
+
+    if isinstance(value, dict):
+        return DictProxy(value)
+    return value
+
+
+class Bridges:
+    """The bridges bound to one module context."""
+
+    def __init__(self, organism_dir=None, emit=None, owner=None):
+        self.process = ProcessBridge(emit=emit, owner=owner)
         self.http = HttpBridge()
         self.fs = FsBridge(organism_dir)
         self.json = JsonBridge()
 
 
-def build(organism_dir=None, emit=None) -> Bridges:
-    return Bridges(organism_dir=organism_dir, emit=emit)
+def build(organism_dir=None, emit=None, owner=None) -> Bridges:
+    return Bridges(organism_dir=organism_dir, emit=emit, owner=owner)
 
 
-def shutdown_all() -> None:
-    """Kill every child still tracked (module reload / app exit)."""
+def shutdown_all(owner=None) -> None:
+    """Kill tracked children and return immediately.
+
+    Idempotent and safe to call twice. With ``owner`` (a registry tag),
+    only children spawned by that registry's modules are killed — a
+    per-organism module reload must not reap other organisms' games. With
+    no owner, everything dies (module reload of last resort / app exit).
+    """
     with _ACTIVE_LOCK:
-        children = list(_ACTIVE)
+        if owner is None:
+            children = list(_ACTIVE)
+        else:
+            children = [child for child in _ACTIVE if child.owner is owner]
     for child in children:
         with contextlib.suppress(Exception):
             child.kill()

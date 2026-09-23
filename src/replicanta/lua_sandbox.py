@@ -83,11 +83,15 @@ def build_runtime():
     - blocks access to Python via the ``python`` global;
     - blocks underscore-prefixed attribute access on any Python object handed
       into the sandbox (no ``__class__``/``__globals__`` introspection);
-    - prevents scripts from creating new globals during sandboxed execution.
+    - prevents scripts from creating new globals during sandboxed execution;
+    - unpacks tuples returned from Python callables into multiple Lua values
+      (``local res, err = ctx.call(...)``); dicts stay wrapped in
+      DictProxy, lists remain opaque userdata.
     """
     lua = LuaRuntime(
         register_eval=False,
         register_builtins=False,
+        unpack_returned_tuples=True,
         attribute_handlers=(_attribute_getter, _attribute_setter),
     )
 
@@ -194,6 +198,8 @@ class DictProxy:
     Lupa does not expose dict keys as table pairs, and the sandbox's
     attribute getter hides dict keys from dot access; wrapping results in
     this proxy lets Lua modules read ``svc.info().neurons`` naturally.
+    ``get`` mirrors dict.get so Lua can also use the ``inputs.get(key)``
+    idiom defensively.
     """
 
     def __init__(self, data):
@@ -222,6 +228,12 @@ class DictProxy:
 
     def items(self):
         return [(k, DictProxy(v) if isinstance(v, dict) else v) for k, v in self._data.items()]
+
+    def get(self, name, default=None):
+        val = self._data.get(name, default)
+        if isinstance(val, dict):
+            return DictProxy(val)
+        return val
 
     def __len__(self):
         return len(self._data)

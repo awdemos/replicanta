@@ -307,11 +307,17 @@ def test_module_events_declared(tmp_path, monkeypatch):
 
 
 def test_module_utterance_start_and_command(tmp_path, monkeypatch):
+    """Process creation must never come from prose: an utterance containing
+    doom.start(N) is ignored (games start via /doom or the controller's own
+    path only). Once a game runs, the entity may still play it from prose
+    via the whitelisted doom.command moves."""
     loader = _load_module(tmp_path, monkeypatch, ["base", "doom-ascii"])
     hooks = loader.registry.get("hooks")
+    commands = loader.registry.get("commands")
     doom = loader.registry.get("doom")
     hooks.emit("utterance", "doom.start(2)")
-    assert doom.running() is True
+    assert doom.running() is False  # no process spawned from model text
+    commands.dispatch("/doom", ["start", "2"])
     assert _wait_for(lambda: "skill 2" in doom.status())
     hooks.emit("utterance", 'The command is: doom.command("shoot").')
     assert _wait_for(lambda: "HIT!" in doom.frame())

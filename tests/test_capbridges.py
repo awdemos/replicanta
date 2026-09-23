@@ -37,11 +37,18 @@ def test_spawn_pipe_mode_streams_output_and_kill_reaps():
     assert pid is not None
     assert _wait_for(lambda: "DOOM-ASCII STUB" in "".join(got))
     child_pid = bridge._procs[pid].pid
-    bridge.kill(pid)
-    with pytest.raises(ProcessLookupError):
-        os.kill(child_pid, 0)
+    bridge.kill(pid)  # non-blocking: SIGTERM now, the watcher reaps
+    assert _wait_for(lambda: not _pid_alive(child_pid), timeout=5.0)
     with pytest.raises(RuntimeError, match="no such process"):
         bridge.running(pid)
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def test_spawn_pty_mode_writes_reach_the_child():
@@ -117,7 +124,8 @@ def test_shutdown_all_kills_tracked_children():
     pid = bridge.spawn([STUB, "--interval", "0.05"], {})
     child = bridge._procs[pid]
     capbridges.shutdown_all()
-    assert not child.running()
+    assert _wait_for(lambda: not child.running(), timeout=5.0)
+    capbridges.shutdown_all()  # idempotent: a second sweep is a no-op
 
 
 # -- http bridge ------------------------------------------------------------------

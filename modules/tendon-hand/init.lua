@@ -48,6 +48,8 @@ function init(ctx)
   local ok_ev, events = pcall(function() return ctx.events end)
   -- pcall returns the error object on failure
   if not ok_ev then events = nil end
+  local ok_call, svc_call = pcall(function() return ctx.call end)
+  if not ok_call then svc_call = nil end
 
   ctx.log("tendon-hand: module init starting")
   if arm == nil then
@@ -203,6 +205,21 @@ function init(ctx)
   -- ------------------------------------------------------------ public API
   local hand = {}
 
+  -- A quoted name may carry a trailing duration ("fist 3"); split it off
+  -- when no explicit duration argument was given. Lives here (not in the
+  -- utterance parser) so every calling path — parser, ctx.call, other
+  -- modules — tolerates the form.
+  local function split_name_dur(name, dur)
+    if dur == nil or dur == "" then
+      local inner = string.match(name, "(%d+%.?%d*)%s*$")
+      if inner ~= nil then
+        dur = inner
+        name = string.gsub(name, "%s*%d+%.?%d*%s*$", "")
+      end
+    end
+    return name, dur
+  end
+
   -- Dispatch a move by name or natural phrase. The vocabulary lookup above
   -- keeps unknown names off the wire entirely; known goals post once to
   -- /goal, posture-only names once to /posture, and a goal miss that is a
@@ -211,6 +228,8 @@ function init(ctx)
   -- bridge accepted the move.
   function hand.move(name, dur)
     if name == nil then return false end
+    local explicit = tonumber(dur)
+    name, dur = split_name_dur(tostring(name), explicit)
     dur = tonumber(dur) or 4.0
     local phrase = normalize(name)
     if phrase == "" then return false end
@@ -249,6 +268,8 @@ function init(ctx)
   end
 
   function hand.posture(name, dur)
+    local explicit = tonumber(dur)
+    name, dur = split_name_dur(tostring(name or ""), explicit)
     dur = tonumber(dur) or 4.0
     local phrase = normalize(name)
     local ok, err = pcall(function() return arm:posture(phrase, dur) end)
@@ -296,51 +317,86 @@ function init(ctx)
   end
 
   -- ------------------------------------------------ entity calling path
-  -- Parse one line of organism output for a hand call. Returns true when
-  -- something was dispatched. Function-call form wins over the legacy
-  -- colon form.
-  -- A quoted name may still carry a trailing duration ("fist 3"); split it
-  -- off when no explicit duration argument was given.
-  local function split_name_dur(name, dur)
-    if dur == nil or dur == "" then
-      local inner = string.match(name, "(%d+%.?%d*)%s*$")
-      if inner ~= nil then
-        dur = inner
-        name = string.gsub(name, "%s*%d+%.?%d*%s*$", "")
-      end
+  -- Entity actuation gate: the utterance hook is entity-initiated, so hand
+  -- moves it executes consult the organism's entity_actuation flag.
+  -- User-initiated paths (/hand, buttons) never pass here and are not
+  -- gated. Hosts without the facade default to enabled.
+  local function actuation_enabled()
+    local org = services.get("organism")
+    if org == nil then
+      return true
     end
-    return name, dur
+    local ok, flag = pcall(function()
+      return org:entity_actuation()
+    end)
+    if not ok or flag == nil then
+      return true
+    end
+    return flag and true or false
   end
 
+  -- Parse one line of organism output for a hand call. Returns true when
+  -- something was dispatched. Function-call form wins over the legacy
+  -- colon form. ctx.call (when the host provides it) is the shared
+  -- tolerant parser for hand.move("wave", 3) / hand.posture("open", 2)
+  -- and their no-paren sugar; the "hand: wave 3" directive is not a
+  -- svc.method shape and stays a local pattern.
   local function parse_call(line)
     local low = string.lower(line)
-    -- hand.move("wave", 3) / hand.move('wave') — quoted name, optional dur
-    local name, dur = string.match(low, "^%s*hand%.move%s*%(%s*[\"'](.-)[\"']%s*,?%s*(%d*%.?%d*)%s*%)")
-    if name == nil then
-      -- Lua-call sugar without parens: hand.move "wave"
-      name = string.match(low, "^%s*hand%.move%s*[\"'](.-)[\"']")
-    end
-    if name ~= nil then
-      name, dur = split_name_dur(name, dur)
-      hand.move(name, tonumber(dur))
-      return true
-    end
-    -- hand.posture("open", 2)
-    local pname, pdur = string.match(low, "^%s*hand%.posture%s*%(%s*[\"'](.-)[\"']%s*,?%s*(%d*%.?%d*)%s*%)")
-    if pname ~= nil then
-      pname, pdur = split_name_dur(pname, pdur)
-      hand.posture(pname, tonumber(pdur))
-      return true
-    end
     -- legacy directive: "hand: wave 3"; trailing words are the organism's
     -- prose; first number on the line, if any, is the duration
     local phrase = string.match(low, "^%s*%[?%s*hand%s*:%s*([^%d]*)")
     if phrase ~= nil then
       phrase = normalize(phrase)
       if phrase ~= "" then
+        if not actuation_enabled() then
+          ctx.log("actuation disabled — skipping hand directive")
+          return true
+        end
         hand.move(phrase, tonumber(string.match(line, "(%d+%.?%d*)")))
         return true
       end
+    end
+    if svc_call ~= nil then
+      local parts = {svc_call.parse(low)}
+      local method = parts[2]
+      if parts[1] == "hand" and (method == "move" or method == "posture") then
+        if not actuation_enabled() then
+          ctx.log("actuation disabled — skipping hand." .. method)
+          return true
+        end
+        local _res, err = svc_call(low)
+        if err ~= nil then
+          ctx.log("hand: " .. tostring(err))
+        end
+        return true
+      end
+      return false
+    end
+    -- Legacy fallback for ctx shapes without ctx.call (older hosts):
+    -- function-call and Lua-sugar forms only (split_name_dur now lives in
+    -- hand.move/hand.posture, so a trailing duration inside the quotes is
+    -- handled there).
+    local name, dur = string.match(low, "^%s*hand%.move%s*%(%s*[\"'](.-)[\"']%s*,?%s*(%d*%.?%d*)%s*%)")
+    if name == nil then
+      name = string.match(low, "^%s*hand%.move%s*[\"'](.-)[\"']")
+    end
+    if name ~= nil then
+      if not actuation_enabled() then
+        ctx.log("actuation disabled — skipping hand.move")
+        return true
+      end
+      hand.move(name, tonumber(dur))
+      return true
+    end
+    local pname, pdur = string.match(low, "^%s*hand%.posture%s*%(%s*[\"'](.-)[\"']%s*,?%s*(%d*%.?%d*)%s*%)")
+    if pname ~= nil then
+      if not actuation_enabled() then
+        ctx.log("actuation disabled — skipping hand.posture")
+        return true
+      end
+      hand.posture(pname, tonumber(pdur))
+      return true
     end
     return false
   end

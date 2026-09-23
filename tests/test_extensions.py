@@ -380,3 +380,25 @@ def test_risk_gate_silent_when_arbiter_unconfigured(tmp_path, monkeypatch):
     applied = extensions.propose(path, _good_pattern(), auto_apply=True)
     assert applied is not None
     assert extensions.active_entries("pattern")[0]["example"] == "i adore hiking"
+
+
+def test_validate_rejects_repeated_alternation():
+    # (a|a)*b passes a naive "no nested quantifiers" check but backtracks
+    # exponentially — alternation inside a repeated group is the shape.
+    entry = _good_pattern() | {"regex": "(a|a)*b", "example": "aaab"}
+    ok, reason = extensions.validate(entry)
+    assert not ok and ("backtrack" in reason or "quantifier" in reason or "alternation" in reason)
+
+
+def test_validate_rejects_repeated_alternation_variants():
+    for pattern in ("(x|y)+z", "(x|y){2,4}z", "((x|y))*z", "(?:x|y)*z"):
+        ok, _reason = extensions.validate(_good_pattern() | {"regex": pattern, "example": "xyz"})
+        assert not ok, f"{pattern} should be rejected"
+    # non-repeated alternation stays legal
+    ok, _reason = extensions.validate(
+        _good_pattern() | {"regex": "i (adore|love) ([a-z '-]+)", "example": "i adore hiking"}
+    )
+    assert ok
+    # alternation inside a character class is literal, not alternation
+    ok, _reason = extensions.validate(_good_pattern() | {"regex": "i adore ([a-z| '-]+)", "example": "i adore hiking"})
+    assert ok

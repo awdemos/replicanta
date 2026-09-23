@@ -20,9 +20,13 @@
 --   doom.frame_count()   -- frames rendered so far
 --   doom.running()       -- true if a game is in progress
 --
--- How the organism calls it: the LLM cannot execute Lua, so it writes a
--- call as text on its own line — doom.command("w") — and the utterance
--- hook below parses and executes it.
+-- How the organism plays: the LLM cannot execute Lua, so it writes moves as
+-- text on its own line — doom.command("w") — and the utterance hook below
+-- executes them for a RUNNING game. Starting a game is never parseable from
+-- model text (process creation from free prose is the blast-radius hole):
+-- games begin via /doom, the arrow keys, or the controller's explicit
+-- auto-restart path. Entity-issued play is additionally gated by the
+-- organism's entity_actuation flag and yields to manual play.
 --
 -- Events: doom_start, doom_stop, doom_tick, declared on the open bus.
 
@@ -33,6 +37,8 @@ function init(ctx)
   local hooks = services.get("hooks")
   local ok_ev, events = pcall(function() return ctx.events end)
   if not ok_ev then events = nil end
+  local ok_call, svc_call = pcall(function() return ctx.call end)
+  if not ok_call then svc_call = nil end
 
   ctx.log("doom-ascii: module init starting")
 
@@ -401,38 +407,64 @@ function init(ctx)
   end
 
   -- ---------------------------------------------------- entity calling path
+  -- Entity actuation gate: the utterance hook is entity-initiated, so
+  -- process/physical actions it executes consult the organism's
+  -- entity_actuation flag. User-initiated paths (/doom, arrow keys, web
+  -- buttons) never pass here and are not gated. Hosts without the organism
+  -- facade (or test doubles) default to enabled, the historical behavior.
+  local function actuation_enabled()
+    local org = services.get("organism")
+    if org == nil then
+      return true
+    end
+    local ok, flag = pcall(function()
+      return org:entity_actuation()
+    end)
+    if not ok or flag == nil then
+      return true
+    end
+    return flag and true or false
+  end
+
   if hooks ~= nil then
     hooks:on("utterance", function(text)
-      -- Every organism utterance passes here, and any doom.command line in
-      -- one used to execute immediately — even while the human was playing.
-      -- Entity-issued play respects the human yield; the utterance hook is
-      -- entity-initiated, unlike /doom and the arrow keys.
+      -- Every organism utterance passes here. Only doom.command lines for
+      -- a RUNNING game execute — doom.start was deliberately removed from
+      -- this path: process creation must not be reachable from free model
+      -- text. Moves respect the human yield (the utterance hook is
+      -- entity-initiated play, unlike /doom and the arrow keys).
       local yielded = ctx.clock() < game.yield_until
+      local actuated = actuation_enabled()
       for ln in string.gmatch(tostring(text), "[^\n]+") do
-        -- Parse doom.start(2), doom.start("2"), or a bare doom.start()
-        if not yielded then
-          local skill_arg = string.match(ln, "^%s*doom%.start%s*%(%s*[\"']?(%d+)[\"']?%s*%)%s*$")
-          if skill_arg ~= nil then
-            api.start(skill_arg)
-            break
-          end
-          if string.match(ln, "^%s*doom%.start%s*%(%s*%)%s*$") ~= nil then
-            api.start(1)
-            break
-          end
-        end
         -- search anywhere in the line: the model buries the call in prose
         -- ('The command is: doom.command("shoot")') or punctuates after it
-        local cmd_arg = string.match(ln, "doom%.command%s*%(%s*[\"'](.-)[\"']%s*%)")
-        if cmd_arg == nil then
-          -- tolerate quote-less model output: doom.command(shoot)
-          cmd_arg = string.match(ln, "doom%.command%s*%(%s*([%w%-_]+)%s*%)")
-        end
-        if cmd_arg ~= nil then
-          pcall(function()
-            api.entity_command(cmd_arg)
-          end)
-          break
+        local snippet = string.match(ln, "doom%.command%s*%([^)]*%)")
+        if snippet ~= nil then
+          local cmd_arg = string.match(snippet, "^%s*doom%.command%s*%(%s*[\"'](.-)[\"']%s*%)")
+          if cmd_arg == nil then
+            -- tolerate quote-less model output: doom.command(shoot)
+            cmd_arg = string.match(snippet, "^%s*doom%.command%s*%(%s*([%w%-_]+)%s*%)")
+          end
+          cmd_arg = string.lower(cmd_arg or "")
+          -- "start" would spawn a process from prose: it is not a move
+          if cmd_arg ~= "" and cmd_arg ~= "start" then
+            if not actuated then
+              ctx.log("actuation disabled — skipping doom.command")
+            elseif yielded then
+              -- the human holds the keyboard; the move would no-op anyway
+            elseif svc_call ~= nil then
+              -- one shared tolerant parser/router (ctx.call): executes the
+              -- whitelisted move against the running game
+              pcall(function()
+                svc_call(snippet)
+              end)
+            else
+              pcall(function()
+                api.entity_command(cmd_arg)
+              end)
+            end
+            break
+          end
         end
       end
     end)

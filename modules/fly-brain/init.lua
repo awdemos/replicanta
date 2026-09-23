@@ -40,6 +40,8 @@ function init(ctx)
   local ok_ev, events = pcall(function() return ctx.events end)
   -- pcall returns the error object on failure
   if not ok_ev then events = nil end
+  local ok_call, svc_call = pcall(function() return ctx.call end)
+  if not ok_call then svc_call = nil end
 
   ctx.log("fly-brain: module init starting")
 
@@ -352,65 +354,105 @@ function init(ctx)
   services:register("brain", brain)
 
   -- ------------------------------------------------ entity calling path
+  -- Entity actuation gate: runs/adapt/bank spawn processes (or block for
+  -- minutes), and the utterance hook is entity-initiated — consult the
+  -- organism's entity_actuation flag before executing. User paths (/brain)
+  -- are not gated. Hosts without the facade default to enabled.
+  local function actuation_enabled()
+    local org = services.get("organism")
+    if org == nil then
+      return true
+    end
+    local ok, flag = pcall(function()
+      return org:entity_actuation()
+    end)
+    if not ok or flag == nil then
+      return true
+    end
+    return flag and true or false
+  end
+
   -- Parse one line of organism output for a brain call. Returns true when
   -- something was dispatched. One call per reply, like the hand.
+  -- ctx.call (when the host provides it) is the shared tolerant parser:
+  -- it handles brain.run("digits") / brain.optimize("digits") and their
+  -- no-paren sugar, routing them to the registered brain service; the bare
+  -- brain.adapt / brain.bank forms stay local patterns (not a svc.method
+  -- call shape).
   local function parse_call(line)
     local low = string.lower(line)
-    -- brain.optimize("digits") — alias for brain.run("digits")
-    local args = string.match(low, "^%s*brain%.optimize%s*%((.-)%)")
-    if args ~= nil then
-      local task = string.match(args, "[\"'](.-)[\"']")
+    local is_bank = false
+    local bare = string.match(low, "^%s*brain%.adapt%s*%(%s*%)%s*$") ~= nil
+      or string.match(low, "^%s*brain%.adapt%s*$") ~= nil
+    if not bare then
+      is_bank = string.match(low, "^%s*brain%.bank%s*%(%s*%)%s*$") ~= nil
+        or string.match(low, "^%s*brain%.bank%s*$") ~= nil
+      bare = is_bank
+    end
+    if bare then
+      if not actuation_enabled() then
+        ctx.log("actuation disabled — skipping " .. (is_bank and "brain.bank" or "brain.adapt"))
+        return true
+      end
+      if is_bank then
+        local ok, text = pcall(brain.bank)
+        ctx.log(ok and text or tostring(text))
+      else
+        local ok, err = pcall(brain.adapt)
+        if not ok then
+          ctx.log("fly brain: " .. tostring(err))
+        end
+      end
+      return true
+    end
+    if svc_call ~= nil then
+      local parts = {svc_call.parse(low)}
+      local method = parts[2]
+      if parts[1] == "brain" and method ~= nil then
+        if method ~= "run" and method ~= "optimize" and method ~= "adapt" and method ~= "bank" then
+          return false
+        end
+        if not actuation_enabled() then
+          ctx.log("actuation disabled — skipping brain." .. method)
+          return true
+        end
+        -- Reconstruct without a wait flag: the utterance path must stay
+        -- async (a blocking run would stall the event-dispatch thread);
+        -- the legacy parser dropped it by construction.
+        local res, err
+        if method == "adapt" then
+          res, err = svc_call("brain.adapt()")
+        elseif method == "bank" then
+          res, err = svc_call("brain.bank()")
+        else
+          res, err = svc_call('brain.run("' .. tostring(parts[3] or "digits") .. '")')
+        end
+        if err ~= nil then
+          ctx.log("fly brain: " .. tostring(err))
+        elseif method == "bank" and res ~= nil then
+          ctx.log(res)
+        end
+        return true
+      end
+      return false
+    end
+    -- Legacy fallback for ctx shapes without ctx.call (older hosts): the
+    -- quoted paren and sugar forms only.
+    local task = string.match(low, "^%s*brain%.optimize%s*%(%s*[\"'](.-)[\"']%s*%)")
+      or string.match(low, "^%s*brain%.optimize%s*[\"'](.-)[\"']")
+      or string.match(low, "^%s*brain%.run%s*%(%s*[\"'](.-)[\"']%s*%)")
+      or string.match(low, "^%s*brain%.run%s*[\"'](.-)[\"']")
+    if task ~= nil then
+      if not actuation_enabled() then
+        ctx.log("actuation disabled — skipping brain.run")
+        return true
+      end
       local ok, err = pcall(function()
-        brain.run(task or "digits")
+        brain.run(task)
       end)
       if not ok then
         ctx.log("fly brain: " .. tostring(err))
       end
-      return true
-    end
-    -- Lua-call sugar without parens: brain.optimize "digits"
-    local task2 = string.match(low, "^%s*brain%.optimize%s*[\"'](.-)[\"']")
-    if task2 ~= nil then
-      local ok, err = pcall(function()
-        brain.run(task2)
-      end)
-      if not ok then
-        ctx.log("fly brain: " .. tostring(err))
-      end
-      return true
-    end
-    -- brain.run("digits")
-    local run_args = string.match(low, "^%s*brain%.run%s*%((.-)%)")
-    if run_args ~= nil then
-      local task = string.match(run_args, "[\"'](.-)[\"']")
-      local ok, err = pcall(function()
-        brain.run(task or "digits")
-      end)
-      if not ok then
-        ctx.log("fly brain: " .. tostring(err))
-      end
-      return true
-    end
-    local run_task2 = string.match(low, "^%s*brain%.run%s*[\"'](.-)[\"']")
-    if run_task2 ~= nil then
-      local ok, err = pcall(function()
-        brain.run(run_task2)
-      end)
-      if not ok then
-        ctx.log("fly brain: " .. tostring(err))
-      end
-      return true
-    end
-    if string.match(low, "^%s*brain%.adapt%s*%(%s*%)") or string.match(low, "^%s*brain%.adapt%s*$") then
-      local ok, err = pcall(brain.adapt)
-      if not ok then
-        ctx.log("fly brain: " .. tostring(err))
-      end
-      return true
-    end
-    if string.match(low, "^%s*brain%.bank%s*%(%s*%)") or string.match(low, "^%s*brain%.bank%s*$") then
-      local ok, text = pcall(brain.bank)
-      ctx.log(ok and text or tostring(text))
       return true
     end
     return false

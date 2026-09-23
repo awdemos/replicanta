@@ -171,27 +171,15 @@ def test_manual_keypress_pauses_entity_autoplay(doom_app):
                 lambda: app.org.module_loader.registry.get("doom").frame_count() > 0,
                 message="stub frames to flow",
             )
-            armed = []
-            real_set_timer = app.set_timer
-
-            def spy(delay, callback=None, **kw):
-                if callback == app._doom.take_turn:
-                    armed.append(callback)
-                return real_set_timer(delay, callback, **kw)
-
-            app.set_timer = spy
-            try:
-                app._doom.key_command("w")
-                assert app._doom._manual_until > time.monotonic()
-                app._doom.schedule_turn()
-                assert armed == []  # cooldown: the entity may not move
-                # once the cooldown lapses, auto-play may schedule again
-                app._doom._manual_until = 0.0
-                app._responding = False
-                app._doom.schedule_turn()
-                assert len(armed) == 1
-            finally:
-                app.set_timer = real_set_timer
+            app._doom.key_command("w")
+            assert app._doom._manual_until > time.monotonic()
+            app._doom.schedule_turn()
+            assert app._doom.pending_turns() == []  # cooldown: the entity may not move
+            # once the cooldown lapses, auto-play may schedule again
+            app._doom._manual_until = 0.0
+            app._responding = False
+            app._doom.schedule_turn()
+            assert len(app._doom.pending_turns()) == 1
 
     asyncio.run(check())
 
@@ -386,7 +374,7 @@ def test_doom_stop_halts_auto_play(doom_app, monkeypatch):
 
             svc = app.org.module_loader.registry.get("doom")
             assert svc.running() is False
-            assert app._doom._turn_timers() == []  # the loop is not re-armed
+            assert app._doom.pending_turns() == []  # the loop is not re-armed
             await asyncio.sleep(1.5)
             assert svc.running() is False  # no new game booted
 
@@ -412,8 +400,209 @@ def test_cancel_auto_stops_pending_turns(doom_app, monkeypatch):
             app._doom._manual_until = 0.0
             app._responding = False
             app._doom.schedule_turn()
-            assert len(app._doom._turn_timers()) >= 1  # a turn is queued
+            assert len(app._doom.pending_turns()) >= 1  # a turn is queued
             app._doom.cancel_auto()
-            assert app._doom._turn_timers() == []  # and now it is not
+            assert app._doom.pending_turns() == []  # and now it is not
 
     asyncio.run(check())
+
+
+# -- org-identity binding: controllers must not outlive their organism --------
+
+
+class _FakeTimer:
+    def __init__(self):
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
+
+
+class _SwapRegistry:
+    def __init__(self, services):
+        self._services = services
+
+    def get(self, name):
+        return self._services.get(name)
+
+
+class _SwapLoader:
+    def __init__(self, registry):
+        self.registry = registry
+
+
+class _FakeDoomSvc:
+    """Module-shaped doom double: start/stop flip running() like the real
+    Lua service does through commands.dispatch."""
+
+    def __init__(self):
+        self._running = False
+
+    def running(self):
+        return self._running
+
+    def start(self):
+        self._running = True
+
+    def stop(self):
+        self._running = False
+
+    def status(self):
+        return "doom-ascii: skill 1 · frame 1 · running — /doom stop ends it"
+
+    def set_viewport(self, _cols):
+        pass
+
+    def yield_to_human(self, _secs):
+        pass
+
+    def frame_ansi(self):
+        return ""
+
+    def frame(self):
+        return ""
+
+
+class _FakeCommands:
+    def __init__(self, svc):
+        self._svc = svc
+
+    def dispatch(self, _name, args):
+        if args and args[0] == "start":
+            self._svc.start()
+            return "started"
+        if args and args[0] == "stop":
+            self._svc.stop()
+            return "stopped"
+        return self._svc.status()
+
+
+class _SwapApp:
+    """Duck-typed OrganismApp: just enough surface for the controllers."""
+
+    def __init__(self, org):
+        self.org = org
+        self._responding = False
+        self._self_talking = False
+        self.log = []
+        self.pushed = []
+
+    def set_timer(self, _delay, _cb, **kw):
+        return _FakeTimer()
+
+    def set_interval(self, _interval, _cb, **kw):
+        return _FakeTimer()
+
+    def call_from_thread(self, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
+    def _append_log(self, text, *args, **kwargs):
+        self.log.append(text)
+
+    def refresh_status(self):
+        pass
+
+    def _safe_query(self, *args, **kwargs):
+        return None
+
+    def push_screen(self, screen):
+        self.pushed.append(screen)
+
+    @property
+    def screen(self):
+        return None  # no DoomScreen/MudScreen overlay in the harness
+
+
+def _swap_organism(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "organism.scl").write_text("type bel(x: String, a: String, v: String)\n")
+    org = Organism(tmp_path)
+    org.load()
+    return org
+
+
+def _seat_doom(org):
+    svc = _FakeDoomSvc()
+    org.module_loader = _SwapLoader(_SwapRegistry({"doom": svc, "commands": _FakeCommands(svc)}))
+    return svc
+
+
+def test_doom_controller_drops_session_on_organism_swap(tmp_path, monkeypatch):
+    """Regression: DoomController reached self._app.org dynamically, so
+    after an organism swap the auto-play loop kept running and painted the
+    NEW organism's game. The controller binds the organism that started the
+    session and must no-op (stop repaint, cancel turns) on a swap."""
+    from replicanta.tui_controllers import DoomController
+
+    org1 = _swap_organism(tmp_path / "one")
+    svc1 = _seat_doom(org1)
+    app = _SwapApp(org1)
+    doom = DoomController(app)
+
+    doom.command(["start"])
+    assert svc1.running()
+    assert doom._org is org1
+    assert org1.store.belief_value("doom", "frame") == "running"
+
+    # swap: a new organism whose own game is ALREADY running
+    org2 = _swap_organism(tmp_path / "two")
+    svc2 = _seat_doom(org2)
+    svc2.start()
+    app.org = org2
+
+    doom._repaint_tick()  # heartbeat after the swap
+    assert doom._org is None  # stale binding cleaned up
+    assert doom._repaint_timer is None
+    assert doom.pending_turns() == []
+    assert svc2.running()  # the new organism's game is untouched
+
+    # a queued turn landing after the swap must not dispatch a worker
+    app._responding = False
+    doom.take_turn()
+    assert app._responding is False  # refused: the session belongs to org1
+
+    # nothing the controller did landed in the new organism's store
+    assert org2.store.belief_value("doom", "frame") is None
+    assert not any(m.get("kind") == "doom" for m in org2.store.memory)
+    # ...and the old organism keeps its own observations
+    assert org1.store.belief_value("doom", "frame") == "running"
+
+    # reset_for_swap is the public hook swap flows call
+    org3 = _swap_organism(tmp_path / "three")
+    _seat_doom(org3)
+    app.org = org3
+    doom.reset_for_swap()
+    assert doom._org is None
+    assert doom._manual_until == 0.0
+
+
+def test_mud_controller_drops_session_without_saving_on_swap(tmp_path, monkeypatch):
+    """Regression: MudController kept auto-playing after a swap and saved
+    the OLD game's session into the NEW organism's store. The session must
+    be dropped WITHOUT saving the moment a heartbeat notices the swap."""
+    from replicanta import mud as mud_mod
+    from replicanta.tui_controllers import MudController
+
+    org1 = _swap_organism(tmp_path / "one")
+    app = _SwapApp(org1)
+    controller = MudController(app)
+    controller.start(scenario=mud_mod.default_scenario(), fresh=True)
+    assert controller.game is not None
+    assert controller._org is org1
+    assert org1.store.load_mud_session() is not None  # saved at start
+
+    org2 = _swap_organism(tmp_path / "two")
+    app.org = org2
+    controller.paused = False
+    controller.next_turn()  # the turn heartbeat fires after the swap
+    assert controller.game is None  # session dropped, not applied
+    assert org2.store.load_mud_session() is None  # nothing persisted
+    assert not any(m.get("kind") == "mud" for m in org2.store.memory)
+    # the old organism's saved session is intact
+    assert org1.store.load_mud_session() is not None
+
+    # route_text must not consume or hint for a stale session
+    app.org = org2
+    controller.game = None
+    controller._org = None
+    assert controller.route_text("go north") is False

@@ -497,3 +497,167 @@ def test_policy_survives_partial_inputs():
     # garbage values coerce to 0.0 instead of raising
     assert decide({"stress": "high", "mood": "calm"}) == "wave"
     assert decide({"stress": 0.9}) == "fist"
+
+
+# -- policy parity with the Python tables (task 12) --------------------------------
+
+
+def test_lua_policy_matches_python_tables():
+    """The Lua POLICY table and the Python _decide/MOVES tables are
+    hand-synced duplicates; this test parses init.lua and asserts they
+    still agree so they cannot silently drift."""
+    import re as _re
+
+    from replicanta import tendon_hand
+
+    text = MODULE.read_text()
+    policy_block = _re.search(r"local POLICY = \{(.*?)\n  \}", text, _re.DOTALL)
+    assert policy_block is not None, "POLICY table not found in init.lua"
+    policy_lua = policy_block.group(1)
+
+    # move list per rule, in order
+    moves = _re.findall(r'move = "([a-z_]+)"', policy_lua)
+    expected_moves = [
+        tendon_hand.ArmService._decide("calm", 0.9, 0.0, 0.0, False),  # rule 1: fist
+        tendon_hand.ArmService._decide("calm", 0.6, 0.8, 0.0, False),  # rule 2: grasp
+        tendon_hand.ArmService._decide("curious", 0.1, 0.6, 0.0, False),  # rule 3: reach
+        tendon_hand.ArmService._decide("calm", 0.1, 0.1, 0.0, False),  # rule 4: wave
+        tendon_hand.ArmService._decide("tired", 0.1, 0.1, 0.0, False),  # rule 5: release
+    ]
+    assert moves == expected_moves, f"POLICY moves drifted: {moves} != {expected_moves}"
+
+    # the exact threshold constants appear in the Lua rules
+    for threshold in ("0.78", "0.85", "0.55", "0.75", "0.5", "0.25"):
+        assert threshold in policy_lua, f"threshold {threshold} missing from POLICY"
+    for field in ('"insane"', '"stress"', '"chaos"', '"arousal"', '"mood"'):
+        assert field in policy_lua, f"field {field} missing from POLICY"
+
+    # static move-list fallback matches the Python MOVES table
+    fallback = _re.search(r"else\n\s+MOVES = \{(.*?)\}", text, _re.DOTALL)
+    assert fallback is not None
+    fallback_moves = _re.findall(r'"([a-z_]+)"', fallback.group(1))
+    assert fallback_moves == list(tendon_hand.MOVES)
+
+
+# -- entity actuation gate (task 7) ---------------------------------------------------
+
+
+class _OrgFacadeOff:
+    """Stand-in for the organism facade with actuation disabled."""
+
+    def entity_actuation(self):
+        return False
+
+
+class _OrgFacadeOn:
+    def entity_actuation(self):
+        return True
+
+
+def _rig_with_organism(org_facade):
+    arm, hooks, logs = _Arm(), _Hooks(), []
+    services = _Services(
+        {
+            "arm": arm,
+            "commands": _Commands(),
+            "hooks": hooks,
+            "organism": org_facade,
+        }
+    )
+    ctx = _Ctx(services, logs, _Events())
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+
+    def fire(text):
+        arm.calls.clear()
+        logs.clear()
+        for fn in hooks.handlers.get("utterance", []):
+            fn(text)
+        return list(arm.calls), list(logs)
+
+    fire.arm = arm
+    return fire
+
+
+def test_actuation_disabled_skips_entity_move():
+    fire = _rig_with_organism(_OrgFacadeOff())
+    calls, logs = fire('hand.move("wave", 3)')
+    assert calls == []
+    assert any("actuation disabled" in line for line in logs)
+
+
+def test_actuation_disabled_skips_directive_and_posture():
+    fire = _rig_with_organism(_OrgFacadeOff())
+    calls, logs = fire("hand: wave 3")
+    assert calls == []
+    assert any("actuation disabled" in line for line in logs)
+
+
+def test_actuation_enabled_dispatches_normally():
+    fire = _rig_with_organism(_OrgFacadeOn())
+    calls, _logs = fire('hand.move("wave", 3)')
+    assert calls == [("goal", "wave", 3.0)]
+
+
+def test_actuation_flag_missing_defaults_to_enabled():
+    """Older hosts/test doubles without the organism service keep the
+    historical behavior: entity moves dispatch."""
+    arm, hooks, logs = _Arm(), _Hooks(), []
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    ctx = _Ctx(services, logs, _Events())
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+    for fn in hooks.handlers.get("utterance", []):
+        fn('hand.move("wave", 3)')
+    assert arm.calls == [("goal", "wave", 3.0)]
+
+
+def _rig_with_call(org_facade=None):
+    """The real tendon module with a REAL CallService wired into ctx.call,
+    so the shared-parser dispatch path is exercised (not the legacy
+    fallback)."""
+    from replicanta.modules import CallService
+
+    arm, hooks, logs = _Arm(), _Hooks(), []
+    services = _Services({"arm": arm, "commands": _Commands(), "hooks": hooks})
+    if org_facade is not None:
+        services._d["organism"] = org_facade
+    ctx = _Ctx(services, logs, _Events())
+
+    class _RegView:
+        def __init__(self, d):
+            self._d = d
+
+        def get(self, name):
+            return self._d.get(name)
+
+    ctx.call = CallService(_RegView(services._d))
+    lua = build_runtime()
+    lua.globals()["_ctx"] = ctx
+    lua.execute(MODULE.read_text() + "\ninit(_ctx)")
+
+    def fire(text):
+        arm.calls.clear()
+        logs.clear()
+        for fn in hooks.handlers.get("utterance", []):
+            fn(text)
+        return list(arm.calls), list(logs)
+
+    return fire
+
+
+def test_ctx_call_path_dispatches_move_and_splits_duration():
+    fire = _rig_with_call()
+    calls, _logs = fire('hand.move("fist 3")')
+    assert calls == [("goal", "fist", 3.0)]
+    calls, _logs = fire("hand.move 'wave'")
+    assert calls == [("goal", "wave", 4.0)]
+
+
+def test_ctx_call_path_actuation_gate():
+    fire = _rig_with_call(_OrgFacadeOff())
+    calls, logs = fire('hand.move("wave", 3)')
+    assert calls == []
+    assert any("actuation disabled" in line for line in logs)

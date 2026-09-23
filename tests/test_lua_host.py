@@ -196,3 +196,29 @@ def test_hook_engine_reload_mirrors_host_scripts(tmp_path):
     engine.reload()
     assert engine.scripts == host.scripts
     assert [s.name for s in engine.scripts] == ["a.lua", "b.lua"]
+
+
+def test_fire_emit_depth_guard_stops_recursion(tmp_path):
+    """An utterance handler that emits utterance again must not recurse
+    without bound: past the depth limit the nested emit is dropped with an
+    error line and delivery continues."""
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "looper",
+        "function init(ctx)\n"
+        '  ctx.events:on("utterance", function(text) ctx.events:emit("utterance", text) end)\n'
+        "end\n",
+    )
+    logs = []
+    host = LuaHost(scripts_dir=tmp_path / "scripts", modules_dir=mods, emit=logs.append)
+    host.load_modules(modules_config={"enabled": ["looper"]})
+    host.fire("utterance", text="echo")  # must not raise, must not hang
+    assert any("depth limit" in line for line in logs)
+
+
+def test_fire_blocking_rules_documented():
+    """The fire docstring must document the blocking-delivery contract
+    (handlers run under the host lock on the caller's thread)."""
+    doc = LuaHost.fire.__doc__
+    assert "lock" in doc and "CALLER" in doc.upper()

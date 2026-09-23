@@ -1,7 +1,7 @@
 """Lua module loader and service registry for Replicanta plugins."""
 
-import importlib
 import logging
+import re
 import time
 import tomllib
 from pathlib import Path
@@ -14,19 +14,20 @@ from replicanta.fileutil import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
-# Python services a Lua module may request from its manifest via
-# ``services = ["name"]``, constructed lazily only when a module that needs
-# them loads. Capability-shaped modules should prefer the ctx bridges
-# (process/http/fs/json) and stay pure Lua; this hook remains for
-# integrations that are genuinely thread-heavy Python work.
-_PLUGIN_SERVICE_FACTORIES: dict[str, tuple[str, str]] = {}
-
 
 class ServiceRegistry:
-    """Simple key/value service registry for modules."""
+    """Simple key/value service registry for modules.
 
-    def __init__(self):
+    Each registry owns an ``owner`` token (itself unless overridden); the
+    per-module process bridges are tagged with it so shutdown() reaps only
+    THIS registry's children — one organism's module reload must not kill
+    another organism's games.
+    """
+
+    def __init__(self, owner_token=None):
         self._services = {}
+        self._owner = owner_token if owner_token is not None else self
+        self._shutdown = False
 
     def register(self, name, service):
         self._services[name] = service
@@ -35,19 +36,155 @@ class ServiceRegistry:
         return self._services.get(name)
 
     def shutdown(self):
-        """Stop every service that exposes a stop() (best-effort, idempotent).
+        """Retire every service and reap this registry's child processes.
 
-        ModuleLoader calls this before replacing the registry on reload, so
-        replaced services (the arm bridge's SSE/volition threads) actually
-        retire instead of leaking and competing with their replacements.
+        Idempotent: safe to call twice (Organism.close() and a following
+        module reload may both reach the same registry). For each service
+        an optional ``shutdown()`` method is preferred, then ``stop()`` —
+        so the arm bridge's SSE/volition threads retire instead of leaking
+        and competing with their replacements — and finally the owned
+        process children are killed via capbridges.shutdown_all(owner=...).
         """
+        if self._shutdown:
+            return
+        self._shutdown = True
         for name, service in list(self._services.items()):
-            stop = getattr(service, "stop", None)
-            if callable(stop):
-                try:
-                    stop()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("service %s failed to stop: %s", name, exc)
+            for method in ("shutdown", "stop"):
+                fn = getattr(service, method, None)
+                if callable(fn):
+                    try:
+                        fn()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("service %s failed to %s: %s", name, method, exc)
+                    break
+        capbridges.shutdown_all(owner=self._owner)
+
+
+class CallService:
+    """ctx.call: one tolerant parser/router for ``svc.method("arg", 2)``
+    lines written by the entity in its own output.
+
+    Routes to the loader's CURRENT registry (it is replaced on reload, so
+    the service is resolved per call, not cached). Returns
+    ``result, nil`` on success and ``nil, "message"`` for anything else —
+    unknown shapes, unknown services/methods, and handler errors — so Lua
+    modules can branch or pcall without a bespoke parser each.
+    """
+
+    _CALL_PARENS = re.compile(r"^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\((.*)\)\s*$", re.DOTALL)
+    _CALL_SUGAR = re.compile(r"""^\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*["'](.*)["']\s*$""")
+
+    def __init__(self, registry):
+        self._registry = registry
+
+    def parse(self, line):
+        """(service, method, *args) for one call-shaped line, else None.
+        Tolerates ``svc.method("a", 2)``, ``svc.method(a)`` (bare single
+        args become strings), and the Lua-call sugar ``svc.method "a"``.
+        The flat shape lets Lua pack the returns into a table:
+        ``local parts = {ctx.call.parse(line)}``."""
+        text = str(line or "").strip()
+        match = self._CALL_PARENS.match(text)
+        if match is not None:
+            arg_text = match.group(3)
+        else:
+            match = self._CALL_SUGAR.match(text)
+            if match is None:
+                return None
+            arg_text = repr(match.group(3))
+        service, method = match.group(1), match.group(2)
+        if service.startswith("_") or method.startswith("_"):
+            return None
+        return service, method, *self._split_args(arg_text)
+
+    @staticmethod
+    def _split_args(arg_text):
+        args = []
+        current = []
+        quote = None
+        for ch in str(arg_text):
+            if quote is not None:
+                current.append(ch)
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'":
+                quote = ch
+                current.append(ch)
+            elif ch == ",":
+                args.append("".join(current).strip())
+                current = []
+            else:
+                current.append(ch)
+        tail = "".join(current).strip()
+        if tail or args:
+            args.append(tail)
+        return [CallService._coerce(a) for a in args if a != ""]
+
+    @staticmethod
+    def _coerce(token):
+        if len(token) >= 2 and token[0] in "\"'" and token[-1] == token[0]:
+            return token[1:-1]
+        lowered = token.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        if lowered in ("nil", "null"):
+            return None
+        try:
+            return int(token)
+        except ValueError:
+            pass
+        try:
+            return float(token)
+        except ValueError:
+            pass
+        return token  # bare word (e.g. quote-less doom.command(shoot))
+
+    def __call__(self, line):
+        """Parse and execute one call line. Returns (result, err)."""
+        parsed = self.parse(line)
+        if parsed is None:
+            return None, "not a service call"
+        service_name, method, *args = parsed
+        service = self._registry.get(service_name)
+        if service is None:
+            return None, f"unknown service '{service_name}'"
+        fn = getattr(service, method, None)
+        if fn is None or not callable(fn):
+            return None, f"unknown method '{service_name}.{method}'"
+        try:
+            return fn(*args), None
+        except Exception as exc:  # noqa: BLE001 — handler errors are data here
+            return None, str(exc)
+
+
+class OrganismFacade:
+    """Narrow, Lua-safe view of the organism, registered as the
+    ``organism`` service.
+
+    The registry used to hand sandboxed Lua the live Organism object whose
+    public Path attributes (dir_path and the store's paths) let a module
+    walk the host filesystem — subscript/parent chains bypass the sandbox's
+    attribute filter. This facade exposes ONLY what modules consume, as
+    methods returning plain data (strings/bools, never Paths); everything
+    else is unreachable.
+    """
+
+    def __init__(self, organism):
+        self._organism = organism
+
+    def name(self):
+        """The organism's directory name (a string, never a Path)."""
+        return self._organism.dir_path.name
+
+    def entity_actuation(self):
+        """The persisted entity-actuation toggle (default True). When false,
+        entity-initiated physical/process actions (doom moves, hand moves,
+        brain runs dispatched from utterance hooks) must not execute.
+        Defensive getattr: organisms without the attribute (older saves,
+        test doubles) default to enabled."""
+        return bool(getattr(self._organism, "entity_actuation", True))
 
 
 class HookService:
@@ -244,10 +381,9 @@ class ModuleLoader:
     def load_all(self):
         """Discover, resolve, and initialize all enabled modules."""
         # Retire the previous load's services first (arm SSE/volition threads,
-        # future stoppable bridges); otherwise each reload leaks a competing
-        # driver that keeps moving the hand with a stale Lua policy.
+        # process children): the registry is owner-scoped, so only THIS
+        # loader's children are reaped — other organisms' games survive.
         self.registry.shutdown()
-        capbridges.shutdown_all()
         self.registry = ServiceRegistry()
         self.modules = {}
         self.warnings = []
@@ -275,7 +411,13 @@ class ModuleLoader:
             self._init_module(manifest)
 
     def _register_builtin_services(self):
-        self.registry.register("organism", self.organism)
+        # The facade, never the live Organism: its public Path attributes
+        # would let sandboxed Lua walk the host filesystem (parent/subscript
+        # chains bypass the sandbox attribute filter). None when no organism.
+        self.registry.register(
+            "organism",
+            OrganismFacade(self.organism) if self.organism is not None else None,
+        )
         self.registry.register(
             "store",
             _StoreService(self.organism.store) if self.organism else None,
@@ -312,36 +454,14 @@ class ModuleLoader:
             ),
         )
 
-    def _ensure_plugin_service(self, svc_name, module_name):
-        """Construct a manifest-requested Python service on first use.
-
-        Called for each name in a manifest's ``services = [...]`` before the
-        module's init runs, so init.lua's services.get(name) finds it.
-        """
-        if self.registry.get(svc_name) is not None:
-            return
-        factory = _PLUGIN_SERVICE_FACTORIES.get(svc_name)
-        if factory is None:
-            self.warnings.append(f"{module_name}: unknown python service '{svc_name}'")
-            return
-        module_path, class_name = factory
-        cls = getattr(importlib.import_module(module_path), class_name)
-        self.registry.register(
-            svc_name,
-            cls(
-                organism=self.organism,
-                lua_lock=(self._host.lock if self._host is not None else None),
-            ),
-        )
-
     def _init_module(self, manifest):
         name = manifest.get("name")
         init_path = manifest.get("_init_path")
         if not init_path.is_file():
             self.warnings.append(f"{name}: init.lua missing; skipping")
             return
-        for svc_name in manifest.get("services", []):
-            self._ensure_plugin_service(svc_name, name)
+        # Manifests may carry unknown keys (services = [...] was retired);
+        # parsing stays tolerant and they are simply ignored.
         try:
             lua = self._runtime()
             # Track the runtime that will own this module's Lua callbacks
@@ -377,7 +497,41 @@ class ModuleLoader:
         lua = self._current_lua or self._runtime()
         store = getattr(self.organism, "store", None)
         organism_dir = getattr(store, "dir_path", None)
-        bridges = capbridges.build(organism_dir=organism_dir, emit=self.emit)
+        bridges = capbridges.build(organism_dir=organism_dir, emit=self.emit, owner=self.registry)
+
+        def invoke_lua(fn):
+            # Timer callbacks run on timer threads, off the UI thread: enter
+            # the module's own runtime with pcall containment so a raising
+            # handler becomes one emitted line instead of a dead timer.
+            try:
+                ok, err = lua.eval(
+                    "function(f) local ok, err = pcall(f);"
+                    " if not ok then return false, tostring(err) end return true end"
+                )(fn)
+                if ok is not True:
+                    self.emit(f"{module_name}: timer handler failed: {err}")
+            except Exception as exc:  # noqa: BLE001 — runtime gone etc.
+                self.emit(f"{module_name}: timer handler failed: {exc}")
+
+        timers = capbridges.TimerBridge(invoke_lua, emit=self.emit)
+        kv_path = Path(organism_dir) / "kv" / f"{module_name}.json" if organism_dir else None
+        kv_bridge = capbridges.KvBridge(kv_path, emit=self.emit)
+        # A Lua-table facade so colon calls (ctx.kv:get("k")) receive self
+        # natively; keys() returns a real Lua table (Python lists cross as
+        # opaque userdata, so it is built in the module's runtime).
+        kv = lua.eval(
+            "function(py, keys_table)\n"
+            "  local t = {}\n"
+            "  function t.get(self, key, default)\n"
+            "    if default == nil then return py.get(key) end\n"
+            "    return py.get(key, default)\n"
+            "  end\n"
+            "  function t.set(self, key, value) return py.set(key, value) end\n"
+            "  function t.delete(self, key) return py.delete(key) end\n"
+            "  function t.keys(self) return keys_table() end\n"
+            "  return t\n"
+            "end"
+        )(kv_bridge, lambda: lua.table_from(kv_bridge.keys()))
         return lua.table(
             module_name=module_name,
             log=lambda msg: self.emit(str(msg)),
@@ -387,19 +541,27 @@ class ModuleLoader:
             http=bridges.http,
             fs=bridges.fs,
             json=bridges.json,
+            after=timers.after,
+            every=timers.every,
+            kv=kv,
+            call=CallService(self.registry),
             clock=time.monotonic,
         )
 
 
 class _StoreService:
+    """Narrow store facade: observation/memory verbs only. The live
+    BeliefStore stays private — exposing it handed Lua Path attributes
+    (dir_path) and every store method, far more surface than modules use."""
+
     def __init__(self, store):
-        self.store = store
+        self._store = store
 
     def observe(self, belief, conf):
-        self.store.observe(belief, conf)
+        self._store.observe(belief, conf)
 
     def remember(self, kind, text):
-        self.store.remember(str(kind), str(text))
+        self._store.remember(str(kind), str(text))
 
 
 class VisualService:

@@ -36,10 +36,49 @@ _CONTROL = ("the weather is nice", "what do you think", "hello there")
 
 # Approved patterns run against every chat message on the (single-threaded)
 # server, so a pathological regex is a denial of service. Keep them small and
-# reject nested quantifiers — `(a+)+`-style ambiguity is the classic
-# catastrophic-backtracking shape.
+# reject the two classic catastrophic-backtracking shapes: nested quantifiers
+# (`(a+)+`) and alternation inside a repeated group (`(a|a)*`), including via
+# an enclosing group (`((a|b))*`). Length is capped too.
 _MAX_PATTERN_LEN = 200
 _NESTED_QUANTIFIER = re.compile(r"\([^()]*[+*][^()]*\)\s*[+*{]")
+
+
+def _repeated_alternation(pattern):
+    """True when a group containing ``|`` is repeated — directly
+    (``(x|y)*``, ``(x|y)+``, ``(x|y){...}``) or through any enclosing group
+    (``((x|y))*``). A tiny paren scanner: character classes are skipped and
+    escapes honored, so ``[a|b]+`` does not count."""
+    stack = []  # per open group: saw an alternation (here or nested)
+    i, n = 0, len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == "[":
+            i += 1
+            if i < n and pattern[i] == "]":  # []] edge: empty class
+                i += 1
+                continue
+            while i < n and pattern[i] != "]":
+                i += 2 if pattern[i] == "\\" else 1
+            i += 1
+            continue
+        if ch == "(":
+            stack.append(False)
+        elif ch == ")":
+            if not stack:
+                return False  # unbalanced: the compile check will refuse it
+            saw_alt = stack.pop()
+            nxt = pattern[i + 1] if i + 1 < n else ""
+            if saw_alt and nxt in "*+{":
+                return True
+            if saw_alt and stack:
+                stack[-1] = True  # propagate: parent group contains alternation
+        elif ch == "|" and stack:
+            stack[-1] = True
+        i += 1
+    return False
 
 
 # -- arbiter risk gate ----------------------------------------------------------
@@ -96,8 +135,8 @@ def validate(entry):
         pattern = entry.get("regex", "")
         if not (1 <= len(pattern) <= _MAX_PATTERN_LEN):
             return False, f"regex must be 1-{_MAX_PATTERN_LEN} chars"
-        if _NESTED_QUANTIFIER.search(pattern):
-            return False, "nested quantifiers can backtrack catastrophically"
+        if _NESTED_QUANTIFIER.search(pattern) or _repeated_alternation(pattern):
+            return False, "nested quantifiers or repeated alternation can backtrack catastrophically"
         try:
             rx = re.compile(pattern, re.IGNORECASE)
         except re.error:

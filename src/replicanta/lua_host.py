@@ -60,6 +60,7 @@ class LuaHost:
         self.modules_dir = Path(modules_dir) if modules_dir else None
         self.scripts = []
         self.loader = None
+        self._emit_depth = 0  # recursion guard: handlers emitting events
 
     def set_emit(self, sink):
         """Re-point where host-originated log lines land (a HookEngine
@@ -120,31 +121,50 @@ class LuaHost:
                 hooks_engine.hooks_service = self.hooks
 
     # -- dispatch ------------------------------------------------------------
+    _MAX_EMIT_DEPTH = 8  # utterance handlers that emit events recurse; bound it
+
     def fire(self, event, org=None, text=None):
         """Emit to module subscribers, then classic script on_<event> handlers.
 
         Unlike standalone HookEngine, ANY event name dispatches here, so
         module-declared events also reach matching script on_<event> fns.
-        Never raises: every handler failure becomes one emitted error line."""
+        Never raises: every handler failure becomes one emitted error line.
+
+        Delivery runs UNDER the host lock ON THE CALLER'S THREAD: one
+        blocking handler stalls ALL event delivery (and, via the shared
+        lock, every other Lua dispatch) — keep handlers fast; use worker
+        threads for slow work. A handler that emits another event recurses
+        through fire(); past _MAX_EMIT_DEPTH the nested emit is dropped with
+        an error line instead of growing the stack without bound."""
         with telemetry.get_tracer(__name__).start_as_current_span("hooks.fire") as span:
             span.set_attribute("hook.event", event)
             span.set_attribute("hook.script_count", len(self.scripts))
             with self.lock:
-                self.hooks.emit(event, text)
-                handlers = lua_sandbox.collect_script_handlers(self.lua, self.scripts, event, self.emit)
-                if org is None:
-                    ctx = self.lua.table(event=event, text=text, log=lambda msg: self.emit(str(msg)))
-                else:
-                    try:
-                        ctx = lua_sandbox.build_hook_ctx(self.lua, org, event, text, self.emit)
-                    except Exception as exc:  # noqa: BLE001
-                        self.emit(f"ctx: {exc}")
-                        return
-                for name, hook in handlers:
-                    try:
-                        hook(ctx)
-                    except Exception as exc:  # noqa: BLE001
-                        self.emit(f"{name}: {exc}")
+                if self._emit_depth >= self._MAX_EMIT_DEPTH:
+                    self.emit(f"event '{event}' dropped: emit depth limit reached")
+                    return
+                self._emit_depth += 1
+                try:
+                    self._emit_locked(event, org=org, text=text)
+                finally:
+                    self._emit_depth -= 1
+
+    def _emit_locked(self, event, org=None, text=None):
+        self.hooks.emit(event, text)
+        handlers = lua_sandbox.collect_script_handlers(self.lua, self.scripts, event, self.emit)
+        if org is None:
+            ctx = self.lua.table(event=event, text=text, log=lambda msg: self.emit(str(msg)))
+        else:
+            try:
+                ctx = lua_sandbox.build_hook_ctx(self.lua, org, event, text, self.emit)
+            except Exception as exc:  # noqa: BLE001
+                self.emit(f"ctx: {exc}")
+                return
+        for name, hook in handlers:
+            try:
+                hook(ctx)
+            except Exception as exc:  # noqa: BLE001
+                self.emit(f"{name}: {exc}")
 
     def run(self, name, org):
         """Run one script's main(ctx) on demand (the /lua command)."""

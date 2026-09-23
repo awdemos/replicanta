@@ -132,17 +132,49 @@ class MudController:
         self.thinking = False  # a move-choice worker is in flight
         self.turn_gen = 0  # bumped by user moves/hints: stales in-flight
         self._text = ""  # latest render, mirrored into the overlay
+        self._org = None  # organism the current session belongs to
+        self._dream_org = None  # organism a scenario dream belongs to
+
+    # -- org identity ----------------------------------------------------------
+    def _bound_org(self):
+        """The organism this session belongs to; binds lazily on first use
+        so test-seated games work. An organism swap afterwards is detected
+        by _session_stale and the session is dropped WITHOUT saving."""
+        if self._org is None and self.game is not None:
+            self._org = self._app.org
+        return self._org
+
+    def _session_stale(self):
+        org = self._bound_org()
+        return org is not None and self._app.org is not org
+
+    def _drop_session(self):
+        """End the session WITHOUT persisting: it belongs to a swapped-out
+        organism and its state must not land in the new organism's store."""
+        self.game = None
+        self.paused = False
+        self.hint = None
+        self.thinking = False
+        self._org = None
+
+    def reset_for_swap(self):
+        """Public hook for organism-swap flows (_swap_to-style callers):
+        drop the session (unsaved — the old organism is gone) and unbind,
+        so no controller state leaks into the newly seated organism."""
+        self._drop_session()
 
     # -- overlay ----------------------------------------------------------------
     def _pane(self):
         """The active MudScreen's Static, or None when the overlay is not
-        the current screen (view-only; input stays in the chat bar)."""
+        the current screen (view-only; input stays in the chat bar) or the
+        screen stack is already torn down."""
         from replicanta.tui import MudScreen
 
-        screen = self._app.screen
-        if type(screen) is MudScreen:
-            with contextlib.suppress(NoMatches):
-                return screen.query_one("#mud", Static)
+        with contextlib.suppress(Exception):  # ScreenStackError on teardown
+            screen = self._app.screen
+            if type(screen) is MudScreen:
+                with contextlib.suppress(NoMatches):
+                    return screen.query_one("#mud", Static)
         return None
 
     def _show_overlay(self):
@@ -170,6 +202,10 @@ class MudController:
     def command(self, args):
         """Dispatch /mud subcommands: bare toggles, the rest control or
         inspect the running game."""
+        if self._session_stale():
+            # The seated game belongs to a swapped-out organism; never
+            # inspect or mutate it from here.
+            self._drop_session()
         if not args:
             self.toggle()
             return
@@ -269,6 +305,7 @@ class MudController:
         look = game.look()
         self._app._append_log(look, STYLE_DREAM)
         self._app.org.store.remember("mud", f"started {game.scenario.title}")
+        self._org = self._app.org  # the session belongs to this organism
         self.save_session(game)
         self._app.refresh_status()
         self._show_overlay()
@@ -276,8 +313,16 @@ class MudController:
 
     def stop(self):
         """End the current game, persisting its session for a later resume."""
+        if self._session_stale():
+            # A swap orphaned this session mid-stop: do not write the old
+            # game's state into the new organism's store.
+            self._drop_session()
+            return
         game, self.game = self.game, None
         self.paused = False
+        self._org = None
+        if game is None:
+            return
         self.save_session(game)
         self._app._append_log(
             f"— the dungeon fades (stopped after {game.turns} turns) —",
@@ -315,8 +360,11 @@ class MudController:
     def scenario(self, description):
         """/mud scenario <description>: stop the current game and dream up
         a new scenario with the voice (off the UI thread)."""
+        if self._session_stale():
+            self._drop_session()
         if self.game is not None:
             self.stop()
+        self._dream_org = self._app.org  # the dream belongs to this organism
         self._app._append_log(f"dreaming up a scenario: {description}…", STYLE_DIM)
         self._app._mud_scenario_worker(description)
 
@@ -332,6 +380,13 @@ class MudController:
         self._app.call_from_thread(self.start_scenario, scenario)
 
     def start_scenario(self, scenario):
+        if self._dream_org is not None and self._app.org is not self._dream_org:
+            # The organism that dreamed is gone; starting on the new one
+            # would attribute the old voice's world to the wrong being.
+            self._app._append_log("— the dream fades with its dreamer —", STYLE_DIM, stamp=True)
+            self._dream_org = None
+            return
+        self._dream_org = None
         self.save_scenario(scenario)
         self._app._append_log(f"new scenario: {scenario.title}", STYLE_LEARNED, stamp=True)
         self.start(scenario=scenario, fresh=True)
@@ -342,6 +397,9 @@ class MudController:
         consumed); prose becomes a one-shot hint for the next organism move
         and falls through to normal chat handling (False)."""
         if self.game is None:
+            return False
+        if self._session_stale():
+            self._drop_session()
             return False
         command = mud.parse_player_command(text)
         if command is not None:
@@ -408,6 +466,9 @@ class MudController:
         if game is None:
             self.thinking = False
             return
+        if self._session_stale():
+            self._drop_session()
+            return
         self._app.call_from_thread(self._app.set_activity, "MUD thinking")
         hint, self.hint = self.hint, None
         gen = self.turn_gen
@@ -424,6 +485,11 @@ class MudController:
             self.thinking = False
         if self.game is not game:
             return  # stopped (or restarted) meanwhile
+        if self._session_stale():
+            # A swap landed while this move was being chosen: never apply
+            # or persist the old organism's game into the new organism.
+            self._drop_session()
+            return
         if actor == "organism" and gen is not None and gen != self.turn_gen:
             # a user move (or hint) landed while this move was being
             # chosen — it was picked from a world that no longer
@@ -459,10 +525,16 @@ class MudController:
             self.schedule()
 
     def schedule(self):
+        if self._session_stale():
+            self._drop_session()
+            return
         if not self.paused:
             self._app.set_timer(MUD_TURN_DELAY, self.next_turn)
 
     def next_turn(self):
+        if self._session_stale():
+            self._drop_session()
+            return
         if self.game is not None and not self.paused and not self.thinking:
             self.thinking = True
             self._app._mud_turn()
@@ -499,34 +571,83 @@ class DoomController:
     """Owns doom-ascii play: /doom dispatch, the DOOM overlay rendering, the
     entity's auto-play turn loop, and the arrow/space key commands. The
     app's action_doom_* bindings are thin delegates so Textual dispatch and
-    test monkeypatching stay on the app."""
+    test monkeypatching stay on the app.
+
+    Org identity: the controller binds to the organism that started the
+    current game (``_org``). After an organism swap every timer/turn/
+    repaint path no-ops (and stops repaint + cancels turns) instead of
+    driving the NEW organism's game — the old organism's games are torn
+    down by its own module-registry shutdown."""
 
     def __init__(self, app):
         self._app = app
         self._text = ""
         self._manual_until = 0.0  # monotonic; entity auto-play stays quiet before this
         self._repaint_timer = None
+        self._turn_timers = set()  # Timer handles armed for entity auto-play
+        self._org = None  # organism the current game session belongs to
+
+    # -- org identity ----------------------------------------------------------
+    def _session_stale(self):
+        """True when a game session belongs to a different organism than the
+        one currently seated (an organism swap happened mid-session)."""
+        return self._org is not None and self._app.org is not self._org
+
+    def _bind_org(self):
+        """Lazily attribute this session to the currently seated organism."""
+        if self._org is None:
+            self._org = self._app.org
+
+    def _stale_cleanup(self):
+        """A swap orphaned this session: stop repaint, cancel turns, unbind.
+        The game process itself dies with the old organism's registry."""
+        self.cancel_auto()
+        self.stop_repaint()
+        self._org = None
+
+    def reset_for_swap(self):
+        """Public hook for organism-swap flows (_swap_to-style callers):
+        drop the org binding and silence auto-play so the controller can
+        never touch the newly seated organism."""
+        self._stale_cleanup()
+        self._manual_until = 0.0
+
+    def _svc(self):
+        """The doom service on the CURRENTLY seated organism, or None."""
+        loader = getattr(self._app.org, "module_loader", None)
+        return loader.registry.get("doom") if loader is not None else None
+
+    def _svc_running(self, svc):
+        with contextlib.suppress(Exception):
+            return bool(svc.running())
+        return False
+
+    def pending_turns(self):
+        """Timer handles still armed for the entity's auto-play turn."""
+        return [timer for timer in self._turn_timers if timer is not None]
 
     def _pane(self):
         """The active DoomScreen's art Static, or None when the overlay is
         not the current screen (the game still runs; it just has no
-        surface to render onto)."""
+        surface to render onto) or the screen stack is already torn down."""
         from replicanta.tui import DoomScreen
 
-        screen = self._app.screen
-        if type(screen) is DoomScreen:
-            with contextlib.suppress(NoMatches):
-                return screen.query_one("#doom", Static)
+        with contextlib.suppress(Exception):  # ScreenStackError on teardown
+            screen = self._app.screen
+            if type(screen) is DoomScreen:
+                with contextlib.suppress(NoMatches):
+                    return screen.query_one("#doom", Static)
         return None
 
     def _thoughts(self):
         """The active DoomScreen's thought-stream Static, or None."""
         from replicanta.tui import DoomScreen
 
-        screen = self._app.screen
-        if type(screen) is DoomScreen:
-            with contextlib.suppress(NoMatches):
-                return screen.query_one("#doom-thoughts", Static)
+        with contextlib.suppress(Exception):  # ScreenStackError on teardown
+            screen = self._app.screen
+            if type(screen) is DoomScreen:
+                with contextlib.suppress(NoMatches):
+                    return screen.query_one("#doom-thoughts", Static)
         return None
 
     def start_repaint(self):
@@ -543,15 +664,15 @@ class DoomController:
             timer.stop()
 
     def _repaint_tick(self):
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        running = False
-        if svc is not None:
-            with contextlib.suppress(Exception):
-                running = bool(svc.running())
+        if self._session_stale():
+            self._stale_cleanup()
+            return
+        svc = self._svc()
+        running = self._svc_running(svc) if svc is not None else False
         if not running:
             self.stop_repaint()
             return
+        self._bind_org()
         self.refresh()
 
     def _fit_pane_width(self, pane, renderable):
@@ -572,10 +693,17 @@ class DoomController:
             svc.set_viewport(self._app.screen.size.width)
 
     def key_command(self, cmd):
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
+        svc = self._svc()
         if svc is None:
             return
+        if self._session_stale():
+            # The seated game belongs to a swapped-out organism; user keys
+            # must not drive it. The new organism can start its own game,
+            # which re-binds below.
+            self._stale_cleanup()
+            svc = self._svc()
+            if svc is None:
+                return
         # When the DOOM overlay is up, arrow/space keys drive the game;
         # everywhere else they keep their normal meanings (chat history).
         from replicanta.tui import DoomScreen
@@ -583,11 +711,12 @@ class DoomController:
         if not isinstance(self._app.screen, DoomScreen):
             return
         # If no game is running, start one automatically on the first keypress.
-        if not svc.running():
+        if not self._svc_running(svc):
             if cmd == "stop":
                 return
             self.command(["start"])
-        if not svc.running():
+        svc = self._svc()
+        if svc is None or not self._svc_running(svc):
             return
         # Human took manual control: the entity yields for the cooldown so
         # the game is actually the human's — re-arming auto-play 300ms after
@@ -615,41 +744,37 @@ class DoomController:
         with contextlib.suppress(Exception):
             self._app.screen.show_key(label)
 
-    def _turn_timers(self):
-        """Timers armed for the entity's auto-play turn. App.set_timer wraps
-        callbacks in partial(call_next, cb), so compare the wrapped target,
-        not the partial (and never with `is` on bound methods)."""
-        timers = []
-        for timer in getattr(self._app, "_timers", []):
-            # stop() cancels _task but the timer stays in the set until
-            # Textual reaps it — only count timers that can still fire.
-            if getattr(timer, "_task", None) is None:
-                continue
-            cb = getattr(timer, "_callback", None)
-            args = getattr(cb, "args", None)
-            target = args[0] if args else cb
-            if target == self.take_turn:
-                timers.append(timer)
-        return timers
+    def _arm_turn(self, delay):
+        """Arm an auto-play turn timer, tracking the handle controller-side
+        (no digging through Textual's private timer set). The wrapper
+        discards its own handle when it fires."""
+
+        def fire():
+            self._turn_timers.discard(box[0])
+            self.take_turn()
+
+        box = [None]
+        timer = self._app.set_timer(delay, fire)
+        box[0] = timer
+        self._turn_timers.add(timer)
+        return timer
 
     def cancel_auto(self):
         """Cancel pending auto-play timers so manual control wins."""
-        for timer in self._turn_timers():
+        timers, self._turn_timers = self._turn_timers, set()
+        for timer in timers:
             timer.stop()
 
     def chat_command(self, text):
         """User chat during a game counts as direction; cancel auto-play
         so the entity responds to the user rather than stacking turns.
         Returns True when the line was consumed as a doom command."""
-        loader = getattr(self._app.org, "module_loader", None)
-        doom_svc = loader.registry.get("doom") if loader is not None else None
-        doom_running = False
-        if doom_svc is not None:
-            try:
-                doom_running = bool(doom_svc.running())
-            except Exception:  # noqa: BLE001
-                doom_running = False
+        if self._session_stale():
+            return False
+        doom_svc = self._svc()
+        doom_running = self._svc_running(doom_svc) if doom_svc is not None else False
         if doom_running:
+            self._bind_org()
             # Chatting during a game is human takeover too: the entity
             # yields for the cooldown instead of answering over the player.
             self.cancel_auto()
@@ -665,10 +790,9 @@ class DoomController:
     def mirror_thought(self, reply):
         """Append entity reasoning to the overlay's thought stream when a
         game is running (called from the response worker thread)."""
-        loader = getattr(self._app.org, "module_loader", None)
-        doom_svc = loader.registry.get("doom") if loader is not None else None
+        doom_svc = self._svc()
         try:
-            if doom_svc is not None and doom_svc.running():
+            if doom_svc is not None and doom_svc.running() and not self._session_stale():
                 self._app.call_from_thread(self.set_thought, reply)
         except Exception:
             logger.warning("doom thought mirror failed", exc_info=True)
@@ -694,14 +818,17 @@ class DoomController:
         except Exception as exc:  # noqa: BLE001
             self._app._append_log(f"doom command failed: {exc}", STYLE_WARN)
             return
-        # Stopping must silence the auto-play loop immediately, not on the
-        # next timer tick: cancel any queued turn.
+        # Session lifecycle: a started game binds this controller to the
+        # organism that owns it; stopping (or a swap) unbinds.
         if args and args[0] == "stop":
+            self._org = None
             self.cancel_auto()
+        elif args and args[0] == "start" and self._svc_running(svc):
+            self._org = self._app.org
         # Keep the overlay painting at game speed for exactly as long as a
         # game is actually running.
         with contextlib.suppress(Exception):
-            if svc.running():
+            if self._svc_running(svc):
                 self.start_repaint()
             else:
                 self.stop_repaint()
@@ -711,7 +838,7 @@ class DoomController:
         # when no frame is available. When the overlay is not up yet (it
         # mounts asynchronously), DoomScreen.on_mount repaints via
         # refresh(force=True).
-        renderable = doom_frame_renderable(svc, svc.running()) or str(result or "")
+        renderable = doom_frame_renderable(svc, self._svc_running(svc)) or str(result or "")
         if renderable:
             self._text = renderable
             doom = self._pane()
@@ -727,31 +854,27 @@ class DoomController:
         # Nudge the organism to observe any game frame it produced.
         try:
             status = svc.status()
-            self._app.org.store.add(("doom", "frame", "running" if svc.running() else "idle"), 0.9)
+            self._app.org.store.add(("doom", "frame", "running" if self._svc_running(svc) else "idle"), 0.9)
             self._app.org.store.remember("doom", status[:200])
         except Exception as exc:  # noqa: BLE001
             logger.warning("doom observe failed: %s", exc)
         # After starting, wake the entity so it immediately plays and the user
         # can watch its streaming thought process. Multiple staggered timers
-        # bootstrap auto-play even if the first generation is slow or fails.
-        if args and args[0] == "start" and svc.running():
-            self._app.set_timer(0.2, self.take_turn)
-            self._app.set_timer(0.7, self.take_turn)
-            self._app.set_timer(1.5, self.take_turn)
+        # bootstrap auto-play even if the first generation is slow or fails;
+        # take_turn's in-flight guard keeps them from stacking.
+        if args and args[0] == "start" and self._svc_running(svc):
+            self._arm_turn(0.2)
+            self._arm_turn(0.7)
+            self._arm_turn(1.5)
 
     def refresh(self, force=False):
         """Refresh the DOOM overlay's frame when a game is running. With
         force=True (the overlay just mounted) also paint the one-line status
         when no game is running, so /doom status has something to show."""
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
+        svc = self._svc()
         if svc is None:
             return
-        running = False
-        try:
-            running = bool(svc.running())
-        except Exception:  # noqa: BLE001
-            running = False
+        running = self._svc_running(svc)
         if not running and not force:
             return
         renderable = doom_frame_renderable(svc, running)
@@ -791,28 +914,52 @@ class DoomController:
             pending.update(trimmed)
 
     def schedule_turn(self):
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
-            return
         if self._app._responding or self._app._self_talking:
+            return
+        if self._session_stale():
+            self._stale_cleanup()
+            return
+        svc = self._svc()
+        if svc is None or not self._svc_running(svc):
             return
         if time.monotonic() < self._manual_until:
             return  # the human is driving; the entity waits its turn
+        self._bind_org()
         # short delay so the UI is readable and human input can interleave
-        self._app.set_timer(0.3, self.take_turn)
+        self._arm_turn(0.3)
 
     def take_turn(self):
-        loader = getattr(self._app.org, "module_loader", None)
-        svc = loader.registry.get("doom") if loader is not None else None
-        if svc is None or not svc.running():
+        """Auto-play turn entry, called from timer callbacks on the UI
+        thread. Cheap guards run here; the synchronous voice generation
+        (up to OLLAMA_TIMEOUT) runs in an app-owned worker thread so the
+        TUI never freezes behind it — the stop key stays responsive."""
+        if self._app._responding:
+            return  # a turn (or a chat response) is already in flight
+        if self._session_stale():
+            self._stale_cleanup()
+            return
+        svc = self._svc()
+        if svc is None or not self._svc_running(svc):
             return
         if time.monotonic() < self._manual_until:
             # A human keypress landed while this generation was in flight:
             # the move is stale and would fight the player's input.
             return
-        # Mark this turn as in-flight so later ticks don't stack another one.
+        self._bind_org()
         self._app._responding = True
+        try:
+            self._app.run_worker(self._take_turn_worker, thread=True)
+        except Exception as exc:  # noqa: BLE001 — app shutting down etc.
+            self._app._responding = False
+            logger.warning("doom turn worker failed to start: %s", exc)
+
+    def _take_turn_worker(self):
+        """The generation half of an auto-play turn (worker thread). All UI
+        and Lua mutations are marshalled through call_from_thread; the
+        running-state / cooldown / org-identity checks re-run immediately
+        before dispatching the move so a stop or a swap mid-generation can
+        never let a stale move land."""
+        org = self._app.org  # capture: a swap mid-turn drops the delivery
         try:
             # Ensure the voice backend is probed before spending a generation;
             # the background mount probe may not have finished yet.
@@ -822,44 +969,61 @@ class DoomController:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("doom voice probe failed: %s", exc)
                 if voice.online() is not True:
-                    self.set_thought("inner voice offline — waiting for ollama before playing.")
-                    self.schedule_turn()
+                    self._call_ui(self.set_thought, "inner voice offline — waiting for ollama before playing.")
+                    self._call_ui(self.schedule_turn)
                     return
 
             def on_token(tok):
-                # voice.doom_move may run in the main UI thread (auto-play
-                # timer) or in a background worker (_maybe_respond). When we are
-                # already in the app's thread, call_from_thread is not allowed,
-                # so fall back to a direct update.
+                # voice.doom_move runs in this worker thread; marshal the
+                # token into the UI (fall back to a direct update when the
+                # app thread is already handling us, as in tests).
                 try:
                     self._app.call_from_thread(self.token, tok)
                 except RuntimeError:
                     self.token(tok)
 
-            reply = voice.doom_move(self._app.org, on_token=on_token)
+            reply = voice.doom_move(org, on_token=on_token)
             if reply is None:
-                self.schedule_turn()
+                self._call_ui(self.schedule_turn)
                 return
-            if not svc.running():
-                # /doom stop landed while the generation was in flight: do
-                # not execute the stale move or re-arm the loop
+            # Stale-move backstop: /doom stop, a human keypress, or an
+            # organism swap all landed while the generation was in flight.
+            if self._app.org is not org:
+                return
+            if time.monotonic() < self._manual_until:
+                return
+            svc = self._svc()
+            if svc is None or not self._svc_running(svc):
                 return
             doom_cmd = extract_doom_command(reply)
             if doom_cmd is not None:
-                self._app._append_log(
+                self._call_ui(
+                    self._app._append_log,
                     f'doom.command("{doom_cmd}")',
                     STYLE_SELF,
                     stamp=True,
                 )
-                self.command([doom_cmd])
+                self._call_ui(self.command, [doom_cmd])
                 with contextlib.suppress(Exception):
-                    self._app.org.store.add(("doom", "last_action", doom_cmd), 0.7)
-            self.set_thought(reply)
-            self.schedule_turn()
+                    org.store.add(("doom", "last_action", doom_cmd), 0.7)
+            self._call_ui(self.set_thought, reply)
+            self._call_ui(self.schedule_turn)
         except Exception:
             logger.exception("DOOM turn failed")
         finally:
-            self._app._responding = False
+            self._call_ui(self._turn_done)
+
+    def _turn_done(self):
+        """UI-thread finally: release the in-flight flag."""
+        self._app._responding = False
+
+    def _call_ui(self, fn, *args, **kwargs):
+        """Marshal onto the UI thread; fall back to a direct call when the
+        app is already there (headless tests) or already gone (shutdown)."""
+        try:
+            self._app.call_from_thread(fn, *args, **kwargs)
+        except RuntimeError:
+            fn(*args, **kwargs)
 
     def token(self, tok):
         """Stream a single token into the overlay's thought stream during generation."""
